@@ -37,7 +37,8 @@ let package = Package(
                 .copy("Resources/MobileSAMDecoder.mlmodelc"),
                 .copy("Resources/SAM2_1TinyImageEncoderFLOAT16.mlmodelc"),
                 .copy("Resources/SAM2_1TinyPromptEncoderFLOAT16.mlmodelc"),
-                .copy("Resources/SAM2_1TinyMaskDecoderFLOAT16.mlmodelc")
+                .copy("Resources/SAM2_1TinyMaskDecoderFLOAT16.mlmodelc"),
+                .copy("Resources/NAFNetDeblur.mlmodelc")
             ],
             cSettings: [
                 .define("ACCELERATE_NEW_LAPACK", to: "1"),

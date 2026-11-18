@@ -1,4 +1,4 @@
-# ViewStereo Technical Specification (v0.1.1)
+# ViewStereo Technical Specification (v0.1.2)
 
 ## 1. System Overview
 **ViewStereo** is a native macOS 14.0+ (SwiftUI / AppKit) application designed for automated archival stereoview restoration, geometric rectification, stereo window optimization, and modern spatial media export. It builds upon `StereoStudioCore` and `StereoCore` (`stalign_src`) and leverages Apple Silicon Neural Engine (Core ML), Vision, and Accelerate (LAPACK).
@@ -41,9 +41,11 @@ When `StereoCardMode` is `.cropInner` or `.keepArchBlack`:
   - Analyzes foreground disparity bounds and optionally weights by **Apple Vision Attention Saliency** (`useAttentionSaliency`) to place the stereo window cleanly in front of or at the primary subject, preventing frame-edge window violations.
 - **Real-Time Shift**:
   - Interactive `windowShiftX` (`-300.0 ... +300.0 px`) with live drag preview.
-- **Color & Dust Restoration**:
+- **Color, Dust & Vintage Photo Restoration**:
   - `StereoAutoColorMode`: `.off`, `.left` (Match to Left), `.right` (Match to Right) histogram/exposure harmonization.
-  - `removeUnilateralNoise`: Detects and attenuates single-view dust, scratches, and emulsion defects.
+  - `removeUnilateralNoise`: Detects and attenuates single-view dust, scratches, and emulsion defects with instant non-destructive preview updates.
+  - **Vintage Photo Restoration (`VintageRestorationOptions` / `StereoDetailRestorationOptions`)**: Non-destructive print tone presets (`Original`, `Albumen Sepia (1860s)`, `Warm Silver (1890s)`, `Pure Monochrome`), Auto-Level (B/W Point %), Local Contrast (CLAHE %), and a real-time **Compare Before** toggle.
+  - **Core ML Optical Deblur (`NAFNetDeblur.mlmodelc`)**: Bundled on-device NAFNet-GoPro model for optical deblurring and edge sharpness recovery, paired with `Foliage / Texture Protection (%)` to prevent stereoscopic retinal rivalry.
 
 ### Stage 5: Digital Remount & Letterpress OCR Engine
 - **Era-Authentic Mount Presets (`StereoCardMountPreset`)**:
@@ -55,7 +57,7 @@ When `StereoCardMode` is `.cropInner` or `.keepArchBlack`:
   - Asynchronous OCR extracts top-center catalog numbers, bottom captions, and rotated left/right margin publisher credits, re-typesetting them with `CoreText` letterpress styling.
 
 ### Stage 6: Display & Export
-- **8 Real-Time Display Modes**: `2D`, `SBS`, `LR/RL`, `Dubois`, `Color Anaglyph`, `Gray Anaglyph`, `Polarized`, `Stereoview Card`.
+- **8 Real-Time Display Modes**: `StereoView`, `SBS`, `LR/RL`, `Dubois`, `Color Anaglyph`, `Gray Anaglyph`, `Polarized`, `2D`.
 - **11 Export Layouts**: All 8 display layouts (JPEG/PNG) plus `Separate L/R`, `Spatial Photo (HEIC / MV-HEVC)` via `StereoStudioCore.SpatialPhotoExporter`, and `MPO (3D Camera)`.
 - **Batch Engine**: Asynchronous folder processing with `Auto (L/R Pairs + SBS)`, `SBS Images Only`, and `Consecutive L/R Pairs` modes, plus per-item `.txt` adjustment reports.
 

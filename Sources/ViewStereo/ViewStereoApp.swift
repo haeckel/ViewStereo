@@ -9,7 +9,7 @@ extension AboutBrandInfo {
         badgeLetter: "V",
         subtitleKey: nil,
         engineTagline: "19th Century Stereoview Restoration & Intelligent Stereo Window Studio",
-        fallbackVersion: "0.1.1",
+        fallbackVersion: "0.1.2",
         fallbackBuild: "1",
         websiteURL: URL(string: "https://viewstereo.p-media.jp/"),
         websiteLabel: "viewstereo.p-media.jp",
@@ -24,7 +24,6 @@ final class ViewStereoAppDelegate: NSObject, NSApplicationDelegate {
         NSApp.appearance = NSAppearance(named: .darkAqua)
         NSWindow.allowsAutomaticWindowTabbing = false
         UserDefaults.standard.set(false, forKey: "NSQuitAlwaysKeepsWindows")
-        StudioUpdateManager.shared.configure(brand: .viewStereo)
     }
 }
 
@@ -33,6 +32,10 @@ struct ViewStereoApp: App {
     @NSApplicationDelegateAdaptor(ViewStereoAppDelegate.self) var appDelegate
     @StateObject private var vm = ViewStereoViewModel()
     @Environment(\.openWindow) private var openWindow
+
+    init() {
+        StudioUpdateManager.shared.configure(brand: .viewStereo)
+    }
 
     private var isJapanese: Bool {
         Locale.preferredLanguages.first?.hasPrefix("ja") ?? true

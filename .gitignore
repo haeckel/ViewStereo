@@ -32,6 +32,8 @@ Package.resolved
 !Readme.text
 
 # Scratch, Training Data & Test Outputs
+__pycache__/
+*.pyc
 scratch/
 scratch_*.jpg
 scratch_*.png

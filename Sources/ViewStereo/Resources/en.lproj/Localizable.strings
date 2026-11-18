@@ -209,3 +209,42 @@
 "Check for Updates..." = "Check for Updates...";
 "Update Check Error" = "Update Check Error";
 "ViewStereo is Up to Date" = "ViewStereo is Up to Date";
+
+/* Vintage Photo Restoration */
+"VINTAGE PHOTO RESTORATION" = "VINTAGE PHOTO RESTORATION";
+"1860s Albumen Preset" = "1860s Albumen Preset";
+"Print Tone" = "Print Tone";
+"Original" = "Original";
+"Albumen Sepia (1860s)" = "Albumen Sepia (1860s)";
+"Warm Silver (1890s)" = "Warm Silver (1890s)";
+"Pure Monochrome" = "Pure Monochrome";
+"Auto-Level (B/W Point %)" = "Auto-Level (B/W Point %)";
+"Local Contrast (CLAHE %)" = "Local Contrast (CLAHE %)";
+"Show Original (Before Restore)" = "Show Original (Before Restore)";
+"Compare Before" = "Compare Before";
+"Before (Original)" = "Before (Original)";
+"Optical Deblur (%)" = "Optical Deblur (%)";
+"Foliage / Texture Protection (%)" = "Foliage / Texture Protection (%)";
+"Core ML: NAFNet-GoPro Active" = "Core ML: NAFNet-GoPro Active";
+"Edge-Aware Fallback (Add NAFNetDeblur.mlmodelc for AI Deblur)" = "Edge-Aware Fallback (Add NAFNetDeblur.mlmodelc for AI Deblur)";
+"Restoring preview..." = "Restoring preview...";
+"Applying AI optical deblur (NAFNet)..." = "Applying AI optical deblur (NAFNet)...";
+"Removing unilateral noise & dust..." = "Removing unilateral noise & dust...";
+"Removing unilateral dust & restoring photo..." = "Removing unilateral dust & restoring photo...";
+
+/* Update Manager */
+"update_available_title" = "New Update Available";
+"update_changelog_header" = "What's New:";
+"update_btn_install" = "Download Now";
+"update_btn_later" = "Later";
+"update_btn_skip" = "Skip This Version";
+"update_downloading" = "Downloading...";
+"update_opening_installer" = "Opening installer...";
+"update_cancel" = "Cancel";
+"update_ready_title" = "Installer Opened";
+"update_ready_instruction" = "Drag and drop ViewStereo into the Applications folder in Finder to replace it.\nPlease quit the app to complete the update.";
+"update_btn_quit" = "Quit App to Install";
+"update_btn_close" = "Install Later";
+"update_error_download" = "Download failed";
+"update_check_error_title" = "Update Check Error";
+"update_already_latest" = "ViewStereo is up to date";

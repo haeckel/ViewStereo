@@ -4,6 +4,36 @@ ViewStereo は現在開発中であり、特に開発初期段階のアプリケ
 
 ==================================================
 
+ViewStereo v0.1.2 リリースノート / Release Notes (2026.11.19)
+
+==================================================
+【ViewStereo v0.1.2 新機能・改善点 / New Features & Improvements】
+==================================================
+- 古写真・退色階調復元（Vintage Photo Restoration）機能の搭載:
+  - 1860年代 鶏卵紙（Albumen Sepia）、1890年代 ゼラチンシルバー調（Warm Silver）、純モノクローム、オリジナルの4種類のプリントトーンを選択可能に（1860年代 鶏卵紙ワンクリックプリセット搭載）。
+  - 自動黒締め・白抜き（Auto-Level B/W Point %）と局所コントラスト（CLAHE %）により、退色した歴史的ステレオ写真の階調と立体感を非破壊で復元。
+  - 「復元前と比較（Before）」トグルによるリアルタイム比較表示に対応。
+- Core ML AI 光学デブラー（NAFNet-GoPro）の搭載:
+  - オンデバイス Core ML モデル（NAFNetDeblur.mlmodelc）を内蔵し、歴史的レンズのぼけや経年劣化による輪郭の甘さをAIで鮮鋭に復元。
+  - 高周波・葉/粒子保護（Foliage / Texture Protection %）スライダーにより、左右眼の微細なテクスチャ差異による視野闘争（Retinal Rivalry）を防止。
+- 片側ノイズ・ダスト自動除去の即時非破壊プレビュー & アップデート管理改善:
+  - 片側ノイズ・ダスト除去の切り替え時にプレビューを即時非破壊更新するよう改善。
+  - アプリ内アップデート確認ダイアログ（Update Manager）の初期化タイミングと日英ローカライズを整備。
+
+==================================================
+[v0.1.2 New Features & Highlights]
+==================================================
+- Vintage Photo Restoration & Tone Recovery:
+  - Added non-destructive print tone presets including 1860s Albumen Sepia, 1890s Warm Silver, Pure Monochrome, and Original, with a one-click 1860s Albumen Preset.
+  - Added Auto-Level (B/W Point %) and Local Contrast (CLAHE %) controls with a real-time "Compare Before" toggle to restore faded historical prints.
+- On-Device Core ML AI Optical Deblur (NAFNet-GoPro):
+  - Bundled `NAFNetDeblur.mlmodelc` for 100% offline AI optical deblurring and edge sharpness recovery.
+  - Added Foliage / Texture Protection (%) control to prevent high-frequency retinal rivalry between left and right views.
+- Instant Non-Destructive Dust Removal Preview & Update Manager Polish:
+  - Enabled instant non-destructive preview updates when toggling unilateral dust removal, and improved StudioUpdateManager initialization and localization.
+
+==================================================
+
 ViewStereo v0.1.1 リリースノート / Release Notes (2026.11.18)
 
 ==================================================

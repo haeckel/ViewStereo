@@ -1,6 +1,6 @@
 # ViewStereo 🎞️✨
 
-[![Version](https://img.shields.io/badge/version-0.1.1-brightgreen.svg)](https://viewstereo.p-media.jp/)
+[![Version](https://img.shields.io/badge/version-0.1.2-brightgreen.svg)](https://viewstereo.p-media.jp/)
 [![Status](https://img.shields.io/badge/status-Early%20Development-amber.svg)](#development-status)
 [![Platform](https://img.shields.io/badge/platform-macOS%2014.0+-lightgrey.svg)](https://apple.co/macos)
 [![Technology](https://img.shields.io/badge/tech-Card%20Segmentation%20%7C%207--DoF%20Homography%20%7C%20Stereo%20Window%20%7C%20Digital%20Remount-orange.svg)](https://viewstereo.p-media.jp/)
@@ -16,6 +16,10 @@ Designed as the archival restoration and geometric alignment companion to **Spla
 ---
 
 ## 🚀 Key Features
+
+### 🎞️ v0.1.2 New: Vintage Photo Restoration & Core ML AI Optical Deblur
+- **Vintage Print Tone & Contrast Recovery**: Non-destructive 1860s Albumen Sepia, 1890s Warm Silver, and Pure Monochrome tone presets paired with Auto-Level (B/W Point) and Local Contrast (CLAHE) restoration plus a real-time **Compare Before** toggle.
+- **On-Device NAFNet-GoPro Optical Deblur**: Bundled `NAFNetDeblur.mlmodelc` restores lens softness and archival edge detail 100% offline, with **Foliage / Texture Protection** to prevent stereoscopic retinal rivalry.
 
 ### ✨ v0.1.1 Enhancements: Full-Composition Remount & StereoView Workflow
 - **100% Aspect Ratio Preservation on Card Remount**: Uses Aspect Fit bilinear resampling with symmetric slot centering so remounted stereoview cards preserve the exact full-frame composition of the aligned SBS view, plus automatic joined-gap detection for gapless source cards.

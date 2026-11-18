@@ -1,3 +1,4 @@
+import StereoCore
 import StereoStudioCore
 import SwiftUI
 import UniformTypeIdentifiers
@@ -152,10 +153,20 @@ struct ContentView: View {
                         .padding(.bottom, 22)
                 }
                 .transition(.move(edge: .bottom).combined(with: .opacity))
+            } else if vm.isRestoringPreview && !vm.isProcessing {
+                VStack {
+                    Spacer()
+                    restorationProgressOverlay
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 22)
+                }
+                .allowsHitTesting(false)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .animation(.easeInOut(duration: 0.2), value: vm.isBatchRunning)
         .animation(.easeInOut(duration: 0.2), value: vm.batchCompletionSummary != nil)
+        .animation(.easeInOut(duration: 0.18), value: vm.isRestoringPreview)
     }
 
     private var topToolbarStrip: some View {
@@ -171,6 +182,8 @@ struct ContentView: View {
                         .padding(.horizontal, 4)
 
                     topSwapButton
+
+                    topBeforeAfterButton
                 }
             }
 
@@ -213,6 +226,68 @@ struct ContentView: View {
         .disabled(vm.displayMode == .twoD)
         .opacity((vm.displayMode == .twoD) ? 0.45 : 1.0)
         .customTooltip("左右眼を入れ替え (X)")
+    }
+
+    private var topBeforeAfterButton: some View {
+        let canCompare = vm.hasLoadedImages && vm.hasActiveVintageRestoration
+        let isBefore = vm.isShowingBeforeRestoration && canCompare
+        return Button {
+            vm.isShowingBeforeRestoration.toggle()
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: isBefore ? "eye.slash" : "circle.lefthalf.filled")
+                    .font(.system(size: 11, weight: .semibold))
+                Text(isBefore ? LocalizedStringKey("Before (Original)") : LocalizedStringKey("Compare Before"))
+                    .appSystemFont(size: 11, weight: .semibold)
+            }
+            .foregroundColor(isBefore ? .white : .primary)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(isBefore ? Color.brightPink.opacity(0.85) : Color.white.opacity(0.06))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(isBefore ? Color.brightPink : Color.white.opacity(0.12), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(!canCompare)
+        .opacity(canCompare ? 1.0 : 0.40)
+        .customTooltip("退色・階調復元の適用前/適用後を比較")
+    }
+
+    @ViewBuilder
+    private var restorationProgressOverlay: some View {
+        let pct = min(100, max(0, Int((vm.restorationProgress * 100.0).rounded())))
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                ProgressView()
+                    .controlSize(.small)
+                Text(vm.restorationProgressMessage.isEmpty ? String(localized: "Restoring preview...") : vm.restorationProgressMessage)
+                    .appSystemFont(size: 12, weight: .semibold)
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 12)
+                Text("\(pct)%")
+                    .appSystemFont(size: 12, weight: .bold, design: .monospaced)
+                    .foregroundColor(.brightPink)
+            }
+
+            ProgressView(value: min(1.0, max(0.0, vm.restorationProgress)))
+                .tint(.brightPink)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .frame(maxWidth: 440)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.brightPink.opacity(0.45), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.45), radius: 16, x: 0, y: 6)
     }
 
     @ViewBuilder
@@ -495,6 +570,7 @@ struct ContentView: View {
                     statusSummarySection
                     stereoWindowSection
                     stereoviewCardMountSection
+                    vintageRestorationSection
                     basicRecipeDisclosure
                     batchProcessingDisclosure
                 }
@@ -838,6 +914,188 @@ struct ContentView: View {
         )
     }
 
+    // MARK: - Section 3.8: Vintage Photo Restoration (Collapsible)
+
+    private var vintageRestorationSummaryText: String {
+        if !vm.hasActiveVintageRestoration {
+            return String(localized: "Off")
+        }
+        if vm.isShowingBeforeRestoration {
+            return String(localized: "Before (Original)")
+        }
+        return String(localized: String.LocalizationValue(vm.restorationPrintTone.rawValue))
+    }
+
+    private var vintageRestorationSection: some View {
+        DisclosureGroup(isExpanded: $vm.isRestorationSectionExpanded) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 8) {
+                    Button {
+                        vm.applyVintage19thCenturyPreset()
+                    } label: {
+                        Label("1860s Albumen Preset", systemImage: "wand.and.stars")
+                            .appSystemFont(size: 11, weight: .semibold)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .tint(.brightPink)
+                    .disabled(!vm.hasLoadedImages || vm.isProcessing)
+
+                    Button {
+                        vm.resetVintageRestoration()
+                    } label: {
+                        Image(systemName: "arrow.counterclockwise")
+                            .font(.system(size: 11))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(!vm.hasActiveVintageRestoration || vm.isProcessing)
+                    .customTooltip("退色・階調復元設定をリセット")
+                }
+
+                Toggle("Remove Unilateral Noise & Dust", isOn: $vm.removeUnilateralNoise)
+                    .appSystemFont(size: 11.5)
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .tint(.brightPink)
+                    .disabled(!vm.hasLoadedImages || vm.isProcessing)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Print Tone")
+                        .appSystemFont(size: 11, weight: .semibold)
+                        .foregroundColor(.secondary)
+                    Picker("Print Tone", selection: $vm.restorationPrintTone) {
+                        ForEach(VintagePrintTone.allCases) { tone in
+                            Text(LocalizedStringKey(tone.rawValue)).tag(tone)
+                        }
+                    }
+                    .labelsHidden()
+                    .disabled(!vm.hasLoadedImages)
+                }
+
+                // 3点セット: Auto-Level (Black & White Point)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Auto-Level (B/W Point %)")
+                            .appSystemFont(size: 11.5, weight: .semibold)
+                        Spacer()
+                        ResetButton(isModified: vm.restorationAutoLevel > 0.05) {
+                            vm.restorationAutoLevel = 0.0
+                        }
+                        .disabled(!vm.hasLoadedImages)
+                        NumericInput(
+                            value: $vm.restorationAutoLevel,
+                            range: 0.0...100.0,
+                            format: "%.0f"
+                        )
+                        .disabled(!vm.hasLoadedImages)
+                    }
+                    Slider(value: $vm.restorationAutoLevel, in: 0.0...100.0)
+                        .tint(.brightPink)
+                        .disabled(!vm.hasLoadedImages)
+                }
+
+                // 3点セット: Local Contrast (CLAHE)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Local Contrast (CLAHE %)")
+                            .appSystemFont(size: 11.5, weight: .semibold)
+                        Spacer()
+                        ResetButton(isModified: vm.restorationLocalContrast > 0.05) {
+                            vm.restorationLocalContrast = 0.0
+                        }
+                        .disabled(!vm.hasLoadedImages)
+                        NumericInput(
+                            value: $vm.restorationLocalContrast,
+                            range: 0.0...100.0,
+                            format: "%.0f"
+                        )
+                        .disabled(!vm.hasLoadedImages)
+                    }
+                    Slider(value: $vm.restorationLocalContrast, in: 0.0...100.0)
+                        .tint(.brightPink)
+                        .disabled(!vm.hasLoadedImages)
+                }
+
+                Divider().opacity(0.3)
+
+                // 3点セット: Optical Deblur (NAFNet / Edge-Aware)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Optical Deblur (%)")
+                            .appSystemFont(size: 11.5, weight: .semibold)
+                        Spacer()
+                        ResetButton(isModified: vm.restorationDeblurStrength > 0.05) {
+                            vm.restorationDeblurStrength = 0.0
+                        }
+                        .disabled(!vm.hasLoadedImages)
+                        NumericInput(
+                            value: $vm.restorationDeblurStrength,
+                            range: 0.0...100.0,
+                            format: "%.0f"
+                        )
+                        .disabled(!vm.hasLoadedImages)
+                    }
+                    Slider(value: $vm.restorationDeblurStrength, in: 0.0...100.0)
+                        .tint(.brightPink)
+                        .disabled(!vm.hasLoadedImages)
+                    Text(vm.isCoreMLDeblurAvailable ? LocalizedStringKey("Core ML: NAFNet-GoPro Active") : LocalizedStringKey("Edge-Aware Fallback (Add NAFNetDeblur.mlmodelc for AI Deblur)"))
+                        .appSystemFont(size: 9.5)
+                        .foregroundColor(.secondary)
+                }
+
+                // 3点セット: Foliage / Texture Protection
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Foliage / Texture Protection (%)")
+                            .appSystemFont(size: 11.5, weight: .semibold)
+                        Spacer()
+                        ResetButton(isModified: abs(vm.restorationTextureProtection - 60.0) > 0.5) {
+                            vm.restorationTextureProtection = 60.0
+                        }
+                        .disabled(!vm.hasLoadedImages || vm.restorationDeblurStrength <= 0.05)
+                        NumericInput(
+                            value: $vm.restorationTextureProtection,
+                            range: 0.0...100.0,
+                            format: "%.0f"
+                        )
+                        .disabled(!vm.hasLoadedImages || vm.restorationDeblurStrength <= 0.05)
+                    }
+                    Slider(value: $vm.restorationTextureProtection, in: 0.0...100.0)
+                        .tint(.brightPink)
+                        .disabled(!vm.hasLoadedImages || vm.restorationDeblurStrength <= 0.05)
+                }
+                .opacity(vm.restorationDeblurStrength > 0.05 ? 1.0 : 0.45)
+
+                Toggle("Show Original (Before Restore)", isOn: $vm.isShowingBeforeRestoration)
+                    .appSystemFont(size: 11.5)
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .tint(.brightPink)
+                    .disabled(!vm.hasLoadedImages || !vm.hasActiveVintageRestoration)
+            }
+            .padding(.top, 10)
+        } label: {
+            HStack {
+                sectionHeader(title: "VINTAGE PHOTO RESTORATION", color: .brightPink)
+                Spacer()
+                if !vm.isRestorationSectionExpanded {
+                    Text(vintageRestorationSummaryText)
+                        .appSystemFont(size: 10.5)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
+            }
+        }
+        .padding(12)
+        .background(Color.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(vm.hasActiveVintageRestoration ? Color.brightPink.opacity(0.35) : Color.white.opacity(0.08), lineWidth: 1)
+        )
+    }
+
     // MARK: - Section 4: Basic Recipe (Collapsible Default Settings)
 
     private var recipeSummaryText: String {
@@ -952,11 +1210,6 @@ struct ContentView: View {
                     }
                     .pickerStyle(.segmented)
                     .labelsHidden()
-
-                    Toggle("Remove Unilateral Noise & Dust", isOn: $vm.removeUnilateralNoise)
-                        .appSystemFont(size: 12)
-                        .toggleStyle(.switch)
-                        .tint(.brightPink)
 
                     HStack(spacing: 8) {
                         Button("Match Left") {

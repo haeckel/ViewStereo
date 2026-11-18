@@ -216,3 +216,42 @@
 "Check for Updates..." = "アップデートを確認...";
 "Update Check Error" = "アップデート確認エラー";
 "ViewStereo is Up to Date" = "お使いの ViewStereo は最新です";
+
+/* Vintage Photo Restoration */
+"VINTAGE PHOTO RESTORATION" = "古写真・退色階調復元";
+"1860s Albumen Preset" = "1860年代 鶏卵紙プリセット";
+"Print Tone" = "プリントトーン";
+"Original" = "オリジナル (元色維持)";
+"Albumen Sepia (1860s)" = "金調色鶏卵紙セピア (1860s)";
+"Warm Silver (1890s)" = "ゼラチンシルバー調 (1890s)";
+"Pure Monochrome" = "純モノクローム";
+"Auto-Level (B/W Point %)" = "自動黒締め・白抜き (%)";
+"Local Contrast (CLAHE %)" = "局所コントラスト CLAHE (%)";
+"Show Original (Before Restore)" = "元の画像を表示 (復元前と比較)";
+"Compare Before" = "復元前と比較";
+"Before (Original)" = "復元前 (オリジナル)";
+"Optical Deblur (%)" = "光学デブラー・輪郭復元 (%)";
+"Foliage / Texture Protection (%)" = "高周波・葉/粒子保護 (視野闘争防止 %)";
+"Core ML: NAFNet-GoPro Active" = "Core ML: NAFNet-GoPro 有効";
+"Edge-Aware Fallback (Add NAFNetDeblur.mlmodelc for AI Deblur)" = "エッジ限定フォールバック (NAFNetDeblur.mlmodelc 追加で AI デブラー有効)";
+"Restoring preview..." = "プレビューを復元処理中...";
+"Applying AI optical deblur (NAFNet)..." = "AI 光学デブラー (NAFNet) を適用中...";
+"Removing unilateral noise & dust..." = "片側ノイズ・ダストを除去中...";
+"Removing unilateral dust & restoring photo..." = "片側ノイズ除去・復元処理を実行中...";
+
+/* Update Manager */
+"update_available_title" = "新しいアップデートがあります";
+"update_changelog_header" = "更新内容:";
+"update_btn_install" = "今すぐダウンロード";
+"update_btn_later" = "後で";
+"update_btn_skip" = "このバージョンを無視";
+"update_downloading" = "ダウンロード中...";
+"update_opening_installer" = "インストーラを開いています...";
+"update_cancel" = "キャンセル";
+"update_ready_title" = "インストーラを開きました";
+"update_ready_instruction" = "Finder で ViewStereo を Applications フォルダへドラッグ＆ドロップして上書きしてください。\n上書きを完了するため、アプリを終了してください。";
+"update_btn_quit" = "アプリを終了して更新";
+"update_btn_close" = "後で手動で上書きする";
+"update_error_download" = "ダウンロードに失敗しました";
+"update_check_error_title" = "アップデート確認エラー";
+"update_already_latest" = "お使いの ViewStereo は最新です";
