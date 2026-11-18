@@ -5,7 +5,9 @@ import UniformTypeIdentifiers
 struct ContentView: View {
     @ObservedObject var vm: ViewStereoViewModel
     @ObservedObject var settings = ViewStereoSettings.shared
+    @ObservedObject private var updateManager = StudioUpdateManager.shared
     @State private var isDropTargeted = false
+    @State private var isShowingUpdateSheet = false
 
     private var inspectorWidth: CGFloat {
         settings.useLargeTextMode ? 450 : 400
@@ -33,6 +35,38 @@ struct ContentView: View {
         }
         .preferredColorScheme(.dark)
         .frame(minWidth: 1024, minHeight: 680)
+        .sheet(isPresented: $isShowingUpdateSheet) {
+            StudioUpdateNotificationSheet(manager: updateManager)
+        }
+        .onAppear {
+            if updateManager.updateAvailable {
+                isShowingUpdateSheet = true
+            }
+            updateManager.checkForUpdates()
+        }
+        .onChange(of: updateManager.updateAvailable) { _, newValue in
+            if newValue {
+                isShowingUpdateSheet = true
+            }
+        }
+        .alert(String(localized: "Update Check Error"), isPresented: Binding(
+            get: { updateManager.errorMessage != nil },
+            set: { if !$0 { updateManager.errorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            if let error = updateManager.errorMessage {
+                Text(error)
+            }
+        }
+        .alert(String(localized: "ViewStereo is Up to Date"), isPresented: Binding(
+            get: { updateManager.isUpToDateAlert },
+            set: { updateManager.isUpToDateAlert = $0 }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Version \(updateManager.currentVersion)")
+        }
     }
 
     // MARK: - Main Canvas & Landing View

@@ -24,6 +24,7 @@ final class ViewStereoAppDelegate: NSObject, NSApplicationDelegate {
         NSApp.appearance = NSAppearance(named: .darkAqua)
         NSWindow.allowsAutomaticWindowTabbing = false
         UserDefaults.standard.set(false, forKey: "NSQuitAlwaysKeepsWindows")
+        StudioUpdateManager.shared.configure(brand: .viewStereo)
     }
 }
 
@@ -48,6 +49,9 @@ struct ViewStereoApp: App {
             CommandGroup(replacing: .appInfo) {
                 Button("About ViewStereo") {
                     openWindow(id: "about")
+                }
+                Button("Check for Updates...") {
+                    StudioUpdateManager.shared.checkForUpdates(isUserInitiated: true)
                 }
             }
             CommandGroup(replacing: .newItem) {

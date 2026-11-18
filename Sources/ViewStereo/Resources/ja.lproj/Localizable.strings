@@ -213,3 +213,6 @@
 "Use Filename When Title Is Empty" = "タイトル未入力時はファイル名を印字";
 "Left Margin (Upward)" = "左マージン縦書 (出版社等)";
 "Right Margin (Downward)" = "右マージン縦書 (シリーズ等)";
+"Check for Updates..." = "アップデートを確認...";
+"Update Check Error" = "アップデート確認エラー";
+"ViewStereo is Up to Date" = "お使いの ViewStereo は最新です";
