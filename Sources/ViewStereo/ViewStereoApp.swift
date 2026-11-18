@@ -11,8 +11,8 @@ extension AboutBrandInfo {
         engineTagline: "19th Century Stereoview Restoration & Intelligent Stereo Window Studio",
         fallbackVersion: "0.1.0",
         fallbackBuild: "1",
-        websiteURL: nil,
-        websiteLabel: nil,
+        websiteURL: URL(string: "https://viewstereo.p-media.jp/"),
+        websiteLabel: "viewstereo.p-media.jp",
         copyrightText: "© 2026 ViewStereo Project. All rights reserved.",
         windowWidth: 540,
         windowHeight: 390
