@@ -4,6 +4,32 @@ ViewStereo は現在開発中であり、特に開発初期段階のアプリケ
 
 ==================================================
 
+ViewStereo v0.1.1 リリースノート / Release Notes (2026.11.18)
+
+==================================================
+【ViewStereo v0.1.1 新機能・改善点 / New Features & Improvements】
+==================================================
+- ステレオカード台紙再構成（Digital Remount）のアスペクト比100%維持:
+  - 台紙再貼付時のクロップ・ズーム拡大（Aspect Fill）を廃止し、SBS表示と同一の全ピクセル・全構図を維持する Aspect Fit + 高品質バイリニア変倍へ刷新。
+  - 元カードが中央に隙間のない密着カード（隙間 1.5% 未満）の場合、自動設定（Auto）でも隙間なしレイアウトを自動選択するよう改善。
+- アーチ型フレーム保持（Preserve Arch）時の水平シフト最適化:
+  - アーチ枠の切り欠けや不自然な偏りを防ぐため、アーチ保持時の自動水平シフト上限を 2.0%（手動・レンダリング上限 3.5%）に最適化し、UI表示値とレンダリング結果を完全一致。
+- 表示モードメニュー名称・ショートカット順序の改善:
+  - ⌘1 のデフォルト表示モードを「StereoView」（ステレオカード台紙付表示）に変更し、「2D」を ⌘8 へ整理。
+
+==================================================
+[v0.1.1 New Features & Highlights]
+==================================================
+- Full Aspect Ratio & Composition Preservation in Digital Remount:
+  - Replaced Aspect Fill cropping with Aspect Fit + high-quality bilinear resampling when remounting prints onto stereoview cards, preserving 100% of the aligned SBS composition.
+  - Enhanced auto center-gap detection to automatically choose a seamless joined layout when the source card has less than a 1.5% center gap.
+- Optimized Horizontal Shift Limits for Arch-Top Preservation:
+  - Refined maximum stereo window shift when preserving arch-top frames (2.0% auto / 3.5% manual limit) and synchronized clamped decision values with UI metrics.
+- Improved Display Mode Menu & Shortcuts:
+  - Promoted "StereoView" (stereoview card display) to ⌘1 and moved "2D" to ⌘8.
+
+==================================================
+
 ViewStereo v0.1.0 リリースノート / Release Notes (2026.11.18)
 
 ==================================================

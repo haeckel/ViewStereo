@@ -17,14 +17,14 @@ enum AnaglyphType: Sendable {
 
 /// プレビュー表示モード（Trilogy 立体視方式準拠）
 enum StereoDisplayMode: Int, CaseIterable, Identifiable {
-    case twoD = 0
+    case stereoviewCard = 0
     case sbs
     case lrrl
     case dubois
     case colorAnaglyph
     case grayAnaglyph
     case polarized
-    case stereoviewCard
+    case twoD
 
     var id: Int { rawValue }
 
@@ -34,52 +34,52 @@ enum StereoDisplayMode: Int, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .twoD: return "2D"
+        case .stereoviewCard: return "StereoView"
         case .sbs: return "SBS"
         case .lrrl: return "LR/RL"
         case .dubois: return "Dubois"
         case .colorAnaglyph: return "Color Anaglyph"
         case .grayAnaglyph: return "Gray Anaglyph"
         case .polarized: return "Polarized"
-        case .stereoviewCard: return "Card"
+        case .twoD: return "2D"
         }
     }
 
     var iconName: String {
         switch self {
-        case .twoD: return "square"
+        case .stereoviewCard: return "photo.artframe"
         case .sbs: return "rectangle.split.2x1"
         case .lrrl: return "square.grid.2x2"
         case .dubois, .colorAnaglyph, .grayAnaglyph: return "eyeglasses"
         case .polarized: return "polarized.glasses"
-        case .stereoviewCard: return "photo.artframe"
+        case .twoD: return "square"
         }
     }
 
     var correspondingExportLayout: StereoExportLayout? {
         switch self {
-        case .twoD: return .twoD
+        case .stereoviewCard: return .stereoviewCard
         case .sbs: return .sbs
         case .lrrl: return .lrrl
         case .dubois: return .dubois
         case .colorAnaglyph: return .colorAnaglyph
         case .grayAnaglyph: return .grayAnaglyph
         case .polarized: return .polarized
-        case .stereoviewCard: return .stereoviewCard
+        case .twoD: return .twoD
         }
     }
 }
 
 /// 書き出し立体視方式
 enum StereoExportLayout: String, CaseIterable, Identifiable {
-    case twoD = "2D"
+    case stereoviewCard = "Stereoview Card"
     case sbs = "SBS"
     case lrrl = "LR/RL (4-Way)"
     case dubois = "Dubois"
     case colorAnaglyph = "Color Anaglyph"
     case grayAnaglyph = "Gray Anaglyph"
     case polarized = "Polarized"
-    case stereoviewCard = "Stereoview Card"
+    case twoD = "2D"
     case separateLR = "Separate L/R"
     case spatialPhoto = "Spatial Photo (HEIC)"
     case mpo = "MPO (3D Camera)"
@@ -222,7 +222,7 @@ final class ViewStereoViewModel: ObservableObject {
         }
     }
     private var isSyncingLayoutAndMode = false
-    @Published var displayMode: StereoDisplayMode = .sbs {
+    @Published var displayMode: StereoDisplayMode = .stereoviewCard {
         didSet {
             if displayMode == .stereoviewCard {
                 isCardMountSectionExpanded = true
@@ -237,7 +237,7 @@ final class ViewStereoViewModel: ObservableObject {
     }
 
     // ステレオカード（台紙）再構築・書き出し設定
-    @Published var isCardMountSectionExpanded: Bool = false
+    @Published var isCardMountSectionExpanded: Bool = true
     @Published var cardMountPreset: StereoCardMountPreset = .originalRemount {
         didSet {
             UserDefaults.standard.set(cardMountPreset.rawValue, forKey: "VS.cardMountPreset")
@@ -408,7 +408,7 @@ final class ViewStereoViewModel: ObservableObject {
     @Published var isAligned: Bool = false
 
     // 書き出し設定（立体視方式 × 画像フォーマット）
-    @Published var exportLayout: StereoExportLayout = .sbs {
+    @Published var exportLayout: StereoExportLayout = .stereoviewCard {
         didSet {
             UserDefaults.standard.set(exportLayout.rawValue, forKey: "VS.exportLayout")
             if !isSyncingLayoutAndMode, let mode = exportLayout.correspondingDisplayMode, displayMode != mode {
@@ -565,6 +565,9 @@ final class ViewStereoViewModel: ObservableObject {
         }
         if ud.object(forKey: "VS.cardUseFilenameAsCaption") != nil {
             self.cardUseFilenameAsCaption = ud.bool(forKey: "VS.cardUseFilenameAsCaption")
+        }
+        if self.displayMode != .stereoviewCard {
+            self.isCardMountSectionExpanded = false
         }
     }
 
@@ -1161,9 +1164,18 @@ final class ViewStereoViewModel: ObservableObject {
         }
 
         let winOpts = makeWindowOptimizationOptions(preserveArch: preserveArch)
-        let windowDecision = IntelligentStereoWindow.solveOptimalHorizontalShift(samples: samples, imageWidth: Double(w), imageHeight: Double(h), options: winOpts)
-        let maxArchShift = Double(w) * 0.045
-        let tx = preserveArch ? min(maxArchShift, max(-maxArchShift, windowDecision.optimalShiftX)) : windowDecision.optimalShiftX
+        let rawWindowDecision = IntelligentStereoWindow.solveOptimalHorizontalShift(samples: samples, imageWidth: Double(w), imageHeight: Double(h), options: winOpts)
+        // ステレオカード（preserveArch）は当時すでに職人により立体窓の奥に適正マウントされているため、
+        // 過大なシフトで写真が枠外へ飛び出したり被写体が切断・巨大ズームされるのを防ぐため、最大シフト幅を 2%（±16px程度）に制限
+        let maxArchShift = Double(w) * 0.020
+        let tx = preserveArch ? min(maxArchShift, max(-maxArchShift, rawWindowDecision.optimalShiftX)) : rawWindowDecision.optimalShiftX
+        let windowDecision = StereoWindowDecision(
+            optimalShiftX: tx,
+            minShiftedParallax: rawWindowDecision.minShiftedParallax,
+            farShiftedParallax: rawWindowDecision.farShiftedParallax,
+            hasWindowViolationRisk: rawWindowDecision.hasWindowViolationRisk,
+            requiresFloatingWindow: rawWindowDecision.requiresFloatingWindow
+        )
 
         // 5. 対称水平シフトを適用した最終行列と MAAIR 内接矩形算出
         let shiftL = HomographyGeometry.translation(dx: -0.5 * tx, dy: 0) * rectRes.homographyLeftPixel
@@ -1342,7 +1354,7 @@ final class ViewStereoViewModel: ObservableObject {
         lastDisparitySamples = updatedSamples
         let winOpts = Self.makeWindowOptimizationOptions(preserveArch: hasPreservedArch)
         let decision = IntelligentStereoWindow.solveOptimalHorizontalShift(samples: updatedSamples, imageWidth: w, imageHeight: h, options: winOpts)
-        let maxArchShift = w * 0.045
+        let maxArchShift = w * 0.020
         let optTx = hasPreservedArch ? min(maxArchShift, max(-maxArchShift, decision.optimalShiftX)) : decision.optimalShiftX
         autoOptimalShiftX = optTx
         windowShiftX = optTx
@@ -1513,9 +1525,11 @@ final class ViewStereoViewModel: ObservableObject {
 
         let w = imageWidth, h = imageHeight
         let pw = previewWidth, ph = previewHeight
-        let tx = windowShiftX
-        let keepAR = keepOriginalAspectRatio
         let preserveArch = hasPreservedArch
+        let rawTx = windowShiftX
+        let maxArchShift = Double(w) * 0.035
+        let tx = preserveArch ? min(maxArchShift, max(-maxArchShift, rawTx)) : rawTx
+        let keepAR = keepOriginalAspectRatio
         let samples = lastDisparitySamples
         let mode = displayMode
         let style = frameStyle
@@ -1661,9 +1675,11 @@ final class ViewStereoViewModel: ObservableObject {
             return false
         }
         let w = imageWidth, h = imageHeight
-        let tx = windowShiftX
-        let keepAR = keepOriginalAspectRatio
         let preserveArch = hasPreservedArch
+        let rawTx = windowShiftX
+        let maxArchShift = Double(w) * 0.035
+        let tx = preserveArch ? min(maxArchShift, max(-maxArchShift, rawTx)) : rawTx
+        let keepAR = keepOriginalAspectRatio
 
         let res = await Task.detached(priority: .userInitiated) { () -> ([UInt8], [UInt8], Int, Int)? in
             let shiftL = HomographyGeometry.translation(dx: -0.5 * tx, dy: 0) * rectRes.homographyLeftPixel

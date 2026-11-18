@@ -1,6 +1,6 @@
 # ViewStereo 🎞️✨
 
-[![Version](https://img.shields.io/badge/version-0.1.0-brightgreen.svg)](https://viewstereo.p-media.jp/)
+[![Version](https://img.shields.io/badge/version-0.1.1-brightgreen.svg)](https://viewstereo.p-media.jp/)
 [![Status](https://img.shields.io/badge/status-Early%20Development-amber.svg)](#development-status)
 [![Platform](https://img.shields.io/badge/platform-macOS%2014.0+-lightgrey.svg)](https://apple.co/macos)
 [![Technology](https://img.shields.io/badge/tech-Card%20Segmentation%20%7C%207--DoF%20Homography%20%7C%20Stereo%20Window%20%7C%20Digital%20Remount-orange.svg)](https://viewstereo.p-media.jp/)
@@ -16,6 +16,10 @@ Designed as the archival restoration and geometric alignment companion to **Spla
 ---
 
 ## 🚀 Key Features
+
+### ✨ v0.1.1 Enhancements: Full-Composition Remount & StereoView Workflow
+- **100% Aspect Ratio Preservation on Card Remount**: Uses Aspect Fit bilinear resampling with symmetric slot centering so remounted stereoview cards preserve the exact full-frame composition of the aligned SBS view, plus automatic joined-gap detection for gapless source cards.
+- **Refined Arch-Top Shift Bounds & Shortcuts**: Caps horizontal window shift to prevent arch-top clipping (`2.0%` auto / `3.5%` manual limit) and promotes `StereoView` card display to `⌘1` (with `2D` at `⌘8`).
 
 ### 🧩 Core ML Stereoview Card Segmentation
 - **Automatic Card & Arch-Top Detection**: Drop scanned 19th-century stereoview cards directly onto the canvas. `StereoCardSeg` (U-Net) paired with selectable **MobileSAM** or **SAM 2.1 Tiny** refinement accurately isolates left/right photographic prints and authentic arch-top frames.

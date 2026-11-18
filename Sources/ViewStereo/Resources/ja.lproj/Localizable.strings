@@ -174,6 +174,7 @@
 "Output: <Input>/ViewStereo_Output" = "出力先: <入力>/ViewStereo_Output";
 
 /* Stereoview Card Mount Reconstruction */
+"StereoView" = "StereoView";
 "Card" = "カード";
 "Stereoview Card" = "ステレオカード (台紙付)";
 "STEREOVIEW CARD MOUNT" = "ステレオカード台紙設定";

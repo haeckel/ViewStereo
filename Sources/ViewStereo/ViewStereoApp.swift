@@ -9,7 +9,7 @@ extension AboutBrandInfo {
         badgeLetter: "V",
         subtitleKey: nil,
         engineTagline: "19th Century Stereoview Restoration & Intelligent Stereo Window Studio",
-        fallbackVersion: "0.1.0",
+        fallbackVersion: "0.1.1",
         fallbackBuild: "1",
         websiteURL: URL(string: "https://viewstereo.p-media.jp/"),
         websiteLabel: "viewstereo.p-media.jp",
@@ -85,7 +85,7 @@ struct ViewStereoApp: App {
 
                 Divider()
 
-                Button("2D") { vm.displayMode = .twoD }
+                Button("StereoView") { vm.displayMode = .stereoviewCard }
                     .keyboardShortcut("1", modifiers: .command)
                 Button("SBS") { vm.displayMode = .sbs }
                     .keyboardShortcut("2", modifiers: .command)
@@ -99,7 +99,7 @@ struct ViewStereoApp: App {
                     .keyboardShortcut("6", modifiers: .command)
                 Button("Polarized") { vm.displayMode = .polarized }
                     .keyboardShortcut("7", modifiers: .command)
-                Button("Stereoview Card") { vm.displayMode = .stereoviewCard }
+                Button("2D") { vm.displayMode = .twoD }
                     .keyboardShortcut("8", modifiers: .command)
             }
             CommandGroup(replacing: .help) {

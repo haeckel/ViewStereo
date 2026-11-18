@@ -1,10 +1,10 @@
 {
-  "latest_version": "0.1.0",
+  "latest_version": "0.1.1",
   "release_date": "2026/11/18",
   "download_url": "https://viewstereo.p-media.jp/ViewStereo.dmg",
   "changelog": {
-    "ja": "【ViewStereo 0.1.0 初回リリース】\n・19世紀ステレオカード（Stereoview / Stereograph）の自動検出・分割（Core ML StereoCardSeg + MobileSAM / SAM 2.1 Tiny）を搭載。\n・7自由度対称ホモグラフィ整準（LAPACK dposv_ + IRLS）による垂直視差ゼロ化、および MAAIR 最大共通内接矩形クロップを実装。\n・最前景＆Vision顕著性に基づくインテリジェント・ステレオウィンドウ決定とリアルタイム微調整UIを搭載。\n・8種類の歴史的台紙プリセット（1850s〜1900s）＆Vision OCR活版タイポグラフィによるデジタル・リマウント機能を搭載。\n・Apple Vision Pro 空間写真（HEIC / MV-HEVC）、SBS、アナグリフ、MPO、フォルダ一括バッチ処理に対応。",
-    "en": "[ViewStereo 0.1.0 Initial Release]\n- Core ML Stereoview Card Auto-Segmentation (StereoCardSeg + MobileSAM / SAM 2.1 Tiny) with arch-top frame detection.\n- 7-DoF Symmetric Homography alignment (LAPACK dposv_ + IRLS) for zero vertical disparity and MAAIR optimal cropping.\n- Intelligent Stereo Window placement with Vision Attention Saliency and real-time fine-tuning controls.\n- Digital Remount engine featuring 8 era-authentic mount presets (1850s–1900s) and Vision OCR letterpress typography.\n- Export to Apple Vision Pro Spatial Photo (HEIC / MV-HEVC), SBS, Anaglyph, MPO, and folder batch processing."
+    "ja": "【ViewStereo 0.1.1 アップデート】\n・ステレオカード台紙再構成（Digital Remount）のアスペクト比100%維持：台紙再貼付時のクロップ・ズーム拡大を廃止し、SBS表示と同一の全ピクセル・全構図を維持する Aspect Fit + 高品質バイリニア変倍へ刷新。密着カード（隙間1.5%未満）の自動隙間なし判定も強化。\n・アーチ型フレーム保持時の水平シフト最適化：アーチ枠の切り欠けを防ぐため、自動水平シフト上限を 2.0%（手動・レンダリング上限 3.5%）に最適化し、UI表示値とレンダリング結果を一致。\n・表示モードメニューとショートカットの刷新：⌘1 のデフォルト表示モードを「StereoView」（ステレオカード台紙付表示）に変更し、「2D」を ⌘8 へ移動。",
+    "en": "[ViewStereo 0.1.1 Update]\n- Full Aspect Ratio & Composition Preservation in Digital Remount: Replaced Aspect Fill cropping with Aspect Fit + bilinear resampling when remounting prints onto stereoview cards, preserving 100% of the aligned SBS composition, with enhanced seamless gap detection (<1.5%) for gapless cards.\n- Optimized Horizontal Shift Limits for Arch-Top Preservation: Refined maximum stereo window shift when preserving arch-top frames (2.0% auto / 3.5% manual limit) and synchronized clamped decision values with UI metrics.\n- Improved Display Mode Menu & Shortcuts: Promoted 'StereoView' (stereoview card display) to ⌘1 and moved '2D' to ⌘8."
   },
   "minimum_supported_version": "0.0.1"
 }

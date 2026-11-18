@@ -2805,26 +2805,42 @@ enum StereoCardMountRenderer {
             seedOffset: 202
         )
 
-        // Step 3: 整準・立体窓調整済みプリントのシンメトリック再貼付（元のスロット枠サイズを維持）
+        // Step 3: 整準・立体窓調整済みプリントのシンメトリック再貼付（SBS表示の完全なアスペクト比・全構図を100%維持）
         let slotLW = lx1 - lx0
         let slotLH = ly1 - ly0
         let slotRW = rx1 - rx0
         let slotRH = ry1 - ry0
 
-        let dstPrintW = max(16, min(slotLW, slotRW))
-        let dstPrintH = max(16, min(slotLH, slotRH))
+        let maxSlotW = max(16, min(slotLW, slotRW))
+        let maxSlotH = max(16, min(slotLH, slotRH))
+
+        let printAspect = Double(printWidth) / Double(printHeight)
+        let slotAspect = Double(maxSlotW) / Double(maxSlotH)
+
+        // 写真をクロップ（ズーム拡大）せず、SBS表示と同一の全ピクセルが収まる Aspect Fit サイズを算出
+        let dstPrintW: Int
+        let dstPrintH: Int
+        if printAspect > slotAspect {
+            dstPrintW = maxSlotW
+            dstPrintH = max(16, Int((Double(maxSlotW) / printAspect).rounded()))
+        } else {
+            dstPrintH = maxSlotH
+            dstPrintW = max(16, Int((Double(maxSlotH) * printAspect).rounded()))
+        }
 
         let centerLY = Double(ly0 + ly1) * 0.5
         let centerRY = Double(ry0 + ry1) * 0.5
         let syncCenterY = (centerLY + centerRY) * 0.5
         let pasteY = max(0, min(targetCardH - dstPrintH, Int((syncCenterY - Double(dstPrintH) * 0.5).rounded())))
 
-        let pasteLX = max(0, min(targetCardW - dstPrintW, lx1 - dstPrintW))
-        let pasteRX = max(0, min(targetCardW - dstPrintW, rx0))
+        let centerLX = Double(lx0 + lx1) * 0.5
+        let centerRX = Double(rx0 + rx1) * 0.5
+        let pasteLX = max(0, min(targetCardW - dstPrintW, Int((centerLX - Double(dstPrintW) * 0.5).rounded())))
+        let pasteRX = max(0, min(targetCardW - dstPrintW, Int((centerRX - Double(dstPrintW) * 0.5).rounded())))
 
-        // 水平シフトでプリント幅が数%トリミングされていても、スロット枠に Aspect Fill して本来の正方形サイズを維持
-        let scaledL = resizeAspectFillRGB(leftRGB, sw: printWidth, sh: printHeight, dw: dstPrintW, dh: dstPrintH)
-        let scaledR = resizeAspectFillRGB(rightRGB, sw: printWidth, sh: printHeight, dw: dstPrintW, dh: dstPrintH)
+        // クロップ・ズームを排除し、アスペクト比100%維持の高品質バイリニア変倍でSBSと全く同一の構図を保つ
+        let scaledL = resizeBilinearRGB(leftRGB, sw: printWidth, sh: printHeight, dw: dstPrintW, dh: dstPrintH)
+        let scaledR = resizeBilinearRGB(rightRGB, sw: printWidth, sh: printHeight, dw: dstPrintW, dh: dstPrintH)
 
         pastePrintOntoMount(
             canvasRGB: &canvasRGB,
@@ -2897,7 +2913,19 @@ enum StereoCardMountRenderer {
         // 1. 7インチ物理規格（Keystone 実測黄金比：左右マージン各 0.49"、上マージン 0.095"、下マージン 0.345"）
         let hasGap: Bool
         switch config.centerGapStyle {
-        case .autoFromPreset: hasGap = effectivePreset.defaultHasCenterGap
+        case .autoFromPreset:
+            if let ctx = mountContext {
+                let rawGap = max(0, ctx.rightBox.x0 - ctx.leftBox.x1)
+                let gapRatio = Double(rawGap) / Double(max(1, ctx.cardWidth))
+                // 元カードが月カードのように中央分離のない密着カード（隙間1.5%未満）なら密着を自動選択
+                if gapRatio < 0.015 {
+                    hasGap = false
+                } else {
+                    hasGap = effectivePreset.defaultHasCenterGap
+                }
+            } else {
+                hasGap = effectivePreset.defaultHasCenterGap
+            }
         case .joined:         hasGap = false
         case .separated:      hasGap = true
         }
@@ -2925,14 +2953,24 @@ enum StereoCardMountRenderer {
         let slotW = max(32, availTotalW / 2)
         let slotH = max(32, cardH - topMarginPx - bottomMarginPx)
 
-        // 元カードがある場合は元カードのプリント枠アスペクト比を尊重し、それ以外はスロット枠全体に充填
-        let dstPrintW = slotW
-        let dstPrintH = slotH
+        // SBS表示のアスペクト比・全構図を100%維持（拡大クロップによる切断をゼロに抑える Aspect Fit 配置）
+        let printAspect = Double(printWidth) / Double(printHeight)
+        let slotAspect = Double(slotW) / Double(slotH)
+
+        let dstPrintW: Int
+        let dstPrintH: Int
+        if printAspect > slotAspect {
+            dstPrintW = slotW
+            dstPrintH = max(16, Int((Double(slotW) / printAspect).rounded()))
+        } else {
+            dstPrintH = slotH
+            dstPrintW = max(16, Int((Double(slotH) * printAspect).rounded()))
+        }
 
         let centerX = cardW / 2
         let pasteLX = centerX - gapPx / 2 - dstPrintW
         let pasteRX = centerX + (gapPx + 1) / 2
-        let pasteY = topMarginPx
+        let pasteY = topMarginPx + max(0, (slotH - dstPrintH) / 2)
 
         // 2. 台紙ベース（カラー + 曲面マウント陰影 + 紙質グレイン + 1870sバイカラーベベル）の生成
         var canvasRGB = generateMountBoardSurface(
@@ -2943,9 +2981,9 @@ enum StereoCardMountRenderer {
             bicolorEdge: effectivePreset.bicolorEdgeRGB
         )
 
-        // 3. 左右プリントの Aspect Fill 変倍 & ドームアーチ貼付合成
-        let scaledL = resizeAspectFillRGB(leftRGB, sw: printWidth, sh: printHeight, dw: dstPrintW, dh: dstPrintH)
-        let scaledR = resizeAspectFillRGB(rightRGB, sw: printWidth, sh: printHeight, dw: dstPrintW, dh: dstPrintH)
+        // 3. 左右プリントの変倍 & ドームアーチ貼付合成（クロップなしの高品質リサイズ）
+        let scaledL = resizeBilinearRGB(leftRGB, sw: printWidth, sh: printHeight, dw: dstPrintW, dh: dstPrintH)
+        let scaledR = resizeBilinearRGB(rightRGB, sw: printWidth, sh: printHeight, dw: dstPrintW, dh: dstPrintH)
 
         let cutStyle: StereoCardPrintCutStyle = (config.printCutStyle == .autoFromPreset)
             ? effectivePreset.defaultPrintCutStyle

@@ -167,6 +167,7 @@
 "Output: <Input>/ViewStereo_Output" = "Output: <Input>/ViewStereo_Output";
 
 /* Stereoview Card Mount Reconstruction */
+"StereoView" = "StereoView";
 "Card" = "Card";
 "Stereoview Card" = "Stereoview Card";
 "STEREOVIEW CARD MOUNT" = "STEREOVIEW CARD MOUNT";
