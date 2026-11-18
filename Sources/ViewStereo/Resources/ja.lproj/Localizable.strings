@@ -1,0 +1,214 @@
+/* ViewStereo Japanese Localization */
+
+/* App & Menus */
+"About ViewStereo" = "ViewStereo について";
+"Open L/R or SBS..." = "ステレオカード・L/R・SBS を開く...";
+"Open Stereoview Card, L/R or SBS..." = "ステレオカード・L/R・SBS を開く...";
+"Batch Process Folder..." = "フォルダを一括自動調整...";
+"Stereo" = "ステレオ";
+"Auto Align & Window" = "自動位置合わせ＆ウィンドウ決定";
+"Swap Left / Right" = "左右画像を入れ替え";
+"Card Tab" = "台紙タブ";
+"Alignment Tab" = "位置合わせタブ";
+"Window Tab" = "立体窓タブ";
+"Restore Tab" = "復元タブ";
+"Export Tab" = "書き出しタブ";
+"ViewStereo Help" = "ViewStereo ヘルプ";
+"Appearance & Accessibility" = "外観とアクセシビリティ";
+"Large Text Mode (1.2x UI Scale)" = "大きい文字モード（UI 1.2倍）";
+
+/* Display Modes & Tabs */
+"SBS View" = "SBS表示";
+"Anaglyph" = "アナグリフ";
+"L/R Matches" = "L/R対応点";
+"Card" = "台紙";
+"Align" = "位置合わせ";
+"Window" = "立体窓";
+"Restore" = "復元";
+"Export" = "書き出し";
+
+/* Formats & Options */
+"SBS (JPEG)" = "SBS (JPEG)";
+"SBS (PNG)" = "SBS (PNG)";
+"Separate L/R (PNG)" = "左右個別 (PNG)";
+"Anaglyph (PNG)" = "アナグリフ (PNG)";
+"Spatial Photo (HEIC)" = "空間写真 (HEIC)";
+"MPO (3D Camera)" = "MPO (3Dカメラ)";
+"Off" = "オフ";
+"Left Ref" = "左基準";
+"Right Ref" = "右基準";
+"Auto (L/R Pairs + SBS)" = "自動（L/Rペア + SBS）";
+"SBS Images Only" = "SBS画像のみ";
+"Consecutive L/R Pairs" = "連番2枚ペア (L/R)";
+
+/* Landing View */
+"Util Series | 7-DoF Rectification & Intelligent Stereo Window" = "Util シリーズ | 7自由度平行化 & インテリジェント・ステレオウィンドウ";
+"1. Open L/R Pair, SBS Image, or Folder" = "1. L/Rペア・SBS画像・フォルダを開く";
+"Drop files for instant auto-align, or drop a folder for batch processing" = "ファイルをドロップで即座に自動調整、フォルダをドロップで一括処理";
+"2. 7-DoF Auto Alignment & Vision Window" = "2. 7自由度自動位置合わせ & Vision ウィンドウ決定";
+"Accelerate LAPACK dposv_ + Metal 1-pass Lanczos-3 warp" = "Accelerate LAPACK dposv_ + Metal 1パス Lanczos-3 ワープ";
+"Processing..." = "処理中...";
+
+/* Alignment Tab */
+"INPUT & PAIR" = "入力・ペア";
+"Open L/R or SBS" = "L/R・SBSを開く";
+"Swap" = "左右入替";
+"7-DOF RECTIFICATION" = "7自由度平行化・基本設定";
+"Auto Align & Color on Load" = "読み込み時に自動調整・色補正";
+"Vision Person Motion Mask (Cha-Cha)" = "Vision 人物動体マスク（チャチャ撮影）";
+"Keep Original Aspect Ratio (MAAIR)" = "元アスペクト比を維持（MAAIR）";
+"Remove Unilateral Noise" = "片側ノイズ自動除去";
+"Stereo Card Mode" = "ステレオカード処理";
+"Crop Inner" = "矩形クロップ";
+"Keep Arch (Black)" = "元枠を残す";
+"Use Core ML Card Segmentation" = "Core ML カード領域推定を使用";
+"Auto Color Match" = "自動カラーマッチング";
+"COLOR MATCHING" = "カラーマッチング（手動）";
+"Match to Left" = "左に合わせる";
+"Match to Right" = "右に合わせる";
+"GEOMETRY TELEMETRY" = "幾何テレメトリー";
+"Input Size" = "入力サイズ";
+"MAAIR Crop" = "MAAIR 切り抜き";
+"Matches / Inliers" = "対応点 / インライヤー";
+"Vertical RMSE" = "垂直視差 RMSE";
+"Pipeline Time" = "処理時間";
+
+/* Window Tab */
+"INTELLIGENT STEREO WINDOW" = "インテリジェント・ステレオウィンドウ";
+"Vision Saliency Subject Priority" = "Vision Saliency 主被写体優先";
+"Horizontal Shift (px)" = "水平シフト (px)";
+"CARD FRAME STYLE" = "ステレオカード枠";
+"Card Frame" = "仕上げフレーム合成（元枠なし時）";
+"Rounded" = "角丸";
+"Arch" = "アーチ";
+"ERGONOMICS TELEMETRY" = "人間工学テレメトリー";
+"Auto Optimal Shift" = "自動最適シフト";
+"Disparity Range" = "視差レンジ";
+"Window Violation" = "ウィンドウ・バイオレーション";
+"Detected (Edge)" = "検出（端飛び出し）";
+"Clear" = "問題なし";
+"Floating Window" = "フローティングウィンドウ";
+"Recommended" = "推奨";
+"Not Needed" = "不要";
+
+/* Export & Batch Tab */
+"METAL LANCZOS-3 EXPORT" = "METAL LANCZOS-3 書き出し";
+"Export Image" = "画像を書き出す";
+"BATCH FOLDER AUTO-ALIGN" = "フォルダ一括自動調整";
+"Input Pairing" = "ペアリング方式";
+"Save Adjustment Report (.txt)" = "調整レポート (.txt) を保存";
+"Output..." = "出力先...";
+"Select Folder & Run Batch" = "フォルダを選択して一括実行";
+"Ready (or drop a folder onto canvas)" = "待機中（フォルダをドロップでも開始）";
+"ALIGNMENT LOG" = "位置合わせログ";
+
+/* 1-Pane Utility Inspector */
+"Export Image..." = "画像を書き出す...";
+"ViewStereo Utility" = "ViewStereo ユーティリティ";
+"Ready to Drop" = "ドロップ待機中";
+"Batch Running" = "一括処理実行中";
+"Unaligned" = "未調整";
+"Check Window" = "立体窓を確認";
+"Auto-Restored" = "自動復元済み";
+"Open" = "開く";
+"RESTORATION STATUS" = "復元ステータス";
+"Re-Align" = "再調整";
+"Output Size" = "出力サイズ";
+"Window" = "立体窓";
+"STEREO WINDOW" = "ステレオウィンドウ微調整";
+"BASIC RECIPE" = "基本設定（自動処理レシピ）";
+"STEREO CARD DETECTION" = "ステレオカード検出";
+"Core ML Card Segmentation (AI)" = "Core ML カード領域推定 (AI)";
+"Segmentation Refiner" = "輪郭リファイナー";
+"AUTO ALIGNMENT & AI" = "自動整準 & AI マスク";
+"Auto Align on Load" = "読み込み時に自動整準";
+"STEREO COLOR & RESTORE" = "色調整合 & 復元";
+"Remove Unilateral Noise & Dust" = "片側ノイズ・ダスト自動除去";
+"Match Left" = "左に合わせる";
+"Match Right" = "右に合わせる";
+"BATCH PROCESSING" = "複数一括処理 (バッチ)";
+"Cancel Batch" = "一括処理を中止";
+"Format" = "出力形式";
+
+/* Batch Canvas Overlay */
+"Batch Processing..." = "一括自動処理を実行中...";
+"Batch Complete" = "一括処理が完了しました";
+"Batch Finished with Errors" = "一括処理が終了しました（一部失敗）";
+"Batch Cancelled" = "一括処理を中止しました";
+"Open Output" = "出力先を開く";
+"%d / %d completed → %@/" = "%d / %d 件完了 → %@/";
+"%d succeeded, %d failed → %@/" = "成功 %d 件 / 失敗 %d 件 → %@/";
+"%d succeeded → %@/" = "%d 件の書き出しが完了 → %@/";
+
+/* Export Layout & Format */
+"Stereo Layout" = "立体視方式";
+"Image Format" = "画像形式";
+"SBS (LR / Parallel)" = "SBS (LR / 平行法)";
+"SBS (RL / Cross-eye)" = "SBS (RL / 交差法)";
+"Separate L/R" = "左右個別 (2ファイル)";
+"Anaglyph" = "アナグリフ";
+
+/* Trilogy Stereo Modes */
+"STEREO MODE" = "立体視方式";
+"Swap L/R" = "左右スワップ";
+"Swapped (R⇄L)" = "スワップ中 (R ⇄ L)";
+"Swap L/R (Active)" = "左右スワップ (R ⇄ L)";
+"2D" = "2D";
+"SBS" = "SBS";
+"LR/RL" = "LR/RL";
+"LR/RL (4-Way)" = "LR/RL (4面)";
+"Dubois" = "Dubois";
+"Color Anaglyph" = "カラー";
+"Gray Anaglyph" = "グレイ";
+"Polarized" = "偏光";
+
+/* Landing View & Additional Strings */
+"19th Century Stereoview Restoration & Intelligent Stereo Window Studio" = "19世紀ステレオビュー復元 & インテリジェント立体窓スタジオ";
+"1. Open Stereoview Card, L/R Pair, or Folder" = "1. ステレオカード・L/Rペア・フォルダを開く";
+"Drop vintage stereo cards or modern stereo photos for auto-segmentation & alignment" = "ヴィンテージカードやステレオ写真をドロップして自動切り出し・整準を開始";
+"2. AI Card Segmentation & 7-DoF Alignment" = "2. AI カード切り出し & 7自由度自動整準";
+"Core ML (StereoCardSeg + MobileSAM) + LAPACK dposv_ & Metal Lanczos-3" = "Core ML (StereoCardSeg + MobileSAM) + LAPACK dposv_ & Metal Lanczos-3";
+"3. Intelligent Stereo Window & Spatial Photo" = "3. インテリジェント立体窓 & 空間写真書き出し";
+"Optimized zero-parallax window with Vision Pro Spatial Photo & VR export" = "最適なゼロ視差ウィンドウを自動決定し、空間写真・VR向けに高品位出力";
+"Auto: %.1f px" = "自動: %.1f px";
+"Output: <Input>/ViewStereo_Output" = "出力先: <入力>/ViewStereo_Output";
+
+/* Stereoview Card Mount Reconstruction */
+"Card" = "カード";
+"Stereoview Card" = "ステレオカード (台紙付)";
+"STEREOVIEW CARD MOUNT" = "ステレオカード台紙設定";
+"Mount Style" = "台紙スタイル (年代・仕様)";
+"Source Card Detected" = "元カード検出済";
+"Original Mount (Remount)" = "元台紙を復元 (リマウント)";
+"Auto Sample Source Color" = "元カードの台紙色を継承";
+"1900s Keystone Dark" = "1900s Keystone ダークグレー (曲面)";
+"1880s Classic Buff" = "1880s バフ (黄褐色・アースカラー)";
+"1870s Cabinet Terracotta" = "1870s テラコッタ (バイカラー縁)";
+"1870s Victorian Green" = "1870s ヴィクトリアン・グリーン";
+"1860s Chrome Yellow" = "1860s クローム・イエロー (山吹色)";
+"1850s Early Ivory" = "1850s 初期ブリストル紙 (アイボリー)";
+"Card Size (7-inch Standard)" = "台紙サイズ (横7インチ規格)";
+"Standard (7 × 3.5 in)" = "標準 Standard (7 × 3.5 in)";
+"Cabinet (7 × 4.0 in)" = "大型 Cabinet (7 × 4.0 in)";
+"Imperial (7 × 4.5 in)" = "特大 Imperial (7 × 4.5 in)";
+"Print Cut" = "印画カット形状";
+"Auto (Match Era)" = "自動 (年代準拠)";
+"Arched Top" = "アーチトップ";
+"Rounded Corners" = "四隅角丸";
+"Square" = "スクエア (直角)";
+"Center Division" = "左右プリント境界";
+"Auto" = "自動";
+"Joined (Seamless)" = "密着 (1870s〜)";
+"Separated (3mm)" = "隙間あり (1850s〜60s)";
+"Mount Typography & Text" = "台紙テキスト・活版クレジット";
+"OCR Read Card" = "元台紙からOCR読取";
+"Text Mode" = "テキスト方式";
+"Letterpress (Auto OCR)" = "活版フォント印字 (自動OCR)";
+"Letterpress (Manual)" = "活版フォント印字 (手動入力)";
+"OCR Reading..." = "OCR 自動認識中...";
+"No Text" = "テキストなし (無地)";
+"Top No." = "中央上番号";
+"Bottom Title / Caption" = "下部タイトル / キャプション";
+"Use Filename When Title Is Empty" = "タイトル未入力時はファイル名を印字";
+"Left Margin (Upward)" = "左マージン縦書 (出版社等)";
+"Right Margin (Downward)" = "右マージン縦書 (シリーズ等)";

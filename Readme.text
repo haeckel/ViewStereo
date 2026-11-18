@@ -1,0 +1,62 @@
+【開発初期・現在開発中のお知らせ / Early Development Notice】
+ViewStereo は現在開発中であり、特に開発初期段階のアプリケーションです。ダウンロードしてご利用いただくユーザーの皆様には、実際の運用を通じたアプリの仕様向上・機能改善およびデバッグ作業にお付き合いいただく形となります。動作の不安定さや予期せぬ不具合、仕様・UIの大幅な変更が生じる可能性がありますので、あらかじめご了承のうえご利用ください。
+(ViewStereo is currently under active development and in an early stage of development. Users who download and use this app are participating in improving its specifications and debugging. Please expect potential instability, bugs, and breaking changes.)
+
+==================================================
+
+ViewStereo v0.1.0 リリースノート / Release Notes (2026.11.18)
+
+==================================================
+【ViewStereo v0.1.0 新機能・ハイライト】
+==================================================
+- Core ML ステレオカード自動検出・分割 (Card Segmentation):
+  - スキャンした19世紀ステレオカード（台紙付き）から、Core ML（StereoCardSeg U-Net + MobileSAM / SAM 2.1 Tiny）により左右の写真領域およびアーチ型（Arch-top）枠を高精度に自動検出・抽出。
+  - Card Mode として `Crop Inner` / `Keep Arch (Black)` / `Off` を選択可能。現代写真向けの角丸・アーチ枠演出（Card Frame）にも対応。
+- 7自由度対称ホモグラフィ整準 & MAAIR クロップ:
+  - `StereoCore` による Apple Accelerate LAPACK (`dposv_`) + IRLS ロバスト最適化を搭載。手貼りによる回転・スケール差・台形歪み・垂直視差をサブピクセル精度で解消。
+  - MAAIR（最大面積軸平行内接矩形）により、黒枠を残さず有効領域を最大化して自動トリミング（アスペクト比維持オプション対応）。
+  - チャチャ撮影（Cha-Cha）対応の Vision 人物モーションマスク機能を搭載。
+- インテリジェント・ステレオウィンドウ決定 & ヴィンテージ復元:
+  - 最前景（最近接被写体）および Apple Vision 顕著性解析（Saliency Subject Priority）に基づき最適なステレオウィンドウ位置を自動設定し、ウィンドウバイオレーションを防止。
+  - 3点セットUI（スライダー＋リセット＋数値入力）によるリアルタイム水平シフト微調整。
+  - 左右カラーマッチング（Left Ref / Right Ref）および片側ノイズ・ダスト除去機能を搭載。
+- 時代別デジタル・リマウント & 活版OCRタイポグラフィ:
+  - 1850s Early Ivory から 1900s Keystone Dark まで8種類の時代別台紙プリセット、7インチ規格（Standard / Cabinet / Imperial）、印画カット形状、バイカラー縁、曲面シェーディングを再現。
+  - Vision OCR による元台紙の番号・タイトル・左右余白クレジット自動読み取り＆活版印刷風タイポグラフィ再印字に対応。
+- マルチフォーマット表示・書き出し & フォルダ一括バッチ処理:
+  - 8つのプレビューモード（`2D`, `SBS`, `LR/RL`, `Dubois`, `Color Anaglyph`, `Gray Anaglyph`, `Polarized`, `Card`）と 11種類の書き出しレイアウト（`Spatial Photo (HEIC / MV-HEVC)`, `MPO`, `Separate L/R`, `Stereoview Card` 等）に対応。
+  - フォルダ単位の一括バッチ処理（`Auto`, `SBS Only`, `Consecutive L/R Pairs`）および調整レポート（`.txt`）出力に対応。
+
+==================================================
+[v0.1.0 New Features & Highlights]
+==================================================
+- Core ML Stereoview Card Auto-Segmentation:
+  - Automatically detects and isolates left/right photographic prints and vintage arch-top borders from scanned 19th-century stereo cards using Core ML (StereoCardSeg U-Net + MobileSAM / SAM 2.1 Tiny).
+  - Supports `Crop Inner`, `Keep Arch (Black)`, and `Off` extraction modes, plus optional `Rounded` and `Arch` frames for modern stereo photos.
+- 7-DoF Symmetric Homography Alignment & MAAIR Cropping:
+  - Powered by `StereoCore` using Apple Accelerate LAPACK (`dposv_`) + IRLS robust optimization to resolve roll, scale mismatch, keystoning, and vertical disparity to sub-pixel precision.
+  - MAAIR (Maximum Area Axis-aligned Inscribed Rectangle) computes the largest valid rectangular crop with zero black borders, with an optional aspect-ratio lock.
+  - Includes Vision Person Motion Mask for handheld Cha-Cha stereo pairs.
+- Intelligent Stereo Window & Vintage Restoration:
+  - Automatically calculates optimal horizontal stereo window placement from foreground disparity and Apple Vision Attention Saliency to eliminate window violations.
+  - Real-time 3-piece studio controls (slider, reset, numeric input) for manual window fine-tuning, plus automatic L/R color harmonization and unilateral dust removal.
+- Era-Authentic Digital Remount & Letterpress OCR Typography:
+  - Reconstructs damaged stereoviews across 8 historical mount presets (1850s Early Ivory to 1900s Keystone Dark), 7-inch card standards (Standard / Cabinet / Imperial), curved mount shading, and period bicolor edges.
+  - Vision OCR automatically extracts catalog numbers, captions, and vertical side-margin publisher credits and re-typesets them in letterpress typography.
+- Multi-Format Display, Export & Batch Processing:
+  - 8 real-time display modes (`2D`, `SBS`, `LR/RL`, `Dubois`, `Color Anaglyph`, `Gray Anaglyph`, `Polarized`, `Card`) and 11 export layouts including Apple Vision Pro `Spatial Photo (HEIC / MV-HEVC)`, `MPO`, `Separate L/R`, and `Stereoview Card`.
+  - Folder-level batch processing (`Auto`, `SBS Only`, `Consecutive L/R Pairs`) with optional `.txt` adjustment reports.
+
+==================================================
+System Requirements / 動作環境
+==================================================
+- OS: macOS 14.0 (Sonoma) or later (macOS 15+ Sequoia supported)
+- Hardware: Apple Silicon Mac (M1 / M2 / M3 / M4) recommended
+- Memory: 8 GB RAM minimum (16 GB+ recommended for high-resolution archival scans)
+
+==================================================
+Links & Support / 公式リンク
+==================================================
+- Official Website: https://viewstereo.p-media.jp/
+- Online Manual (JA): https://viewstereo.p-media.jp/docs.html
+- Online Manual (EN): https://viewstereo.p-media.jp/docs_en.html

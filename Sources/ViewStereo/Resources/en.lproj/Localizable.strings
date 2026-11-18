@@ -1,0 +1,207 @@
+/* ViewStereo English Localization */
+
+"About ViewStereo" = "About ViewStereo";
+"Open L/R or SBS..." = "Open L/R or SBS...";
+"Open Stereoview Card, L/R or SBS..." = "Open Stereoview Card, L/R or SBS...";
+"Batch Process Folder..." = "Batch Process Folder...";
+"Stereo" = "Stereo";
+"Auto Align & Window" = "Auto Align & Window";
+"Swap Left / Right" = "Swap Left / Right";
+"Card Tab" = "Card Tab";
+"Alignment Tab" = "Alignment Tab";
+"Window Tab" = "Window Tab";
+"Restore Tab" = "Restore Tab";
+"Export Tab" = "Export Tab";
+"ViewStereo Help" = "ViewStereo Help";
+"Appearance & Accessibility" = "Appearance & Accessibility";
+"Large Text Mode (1.2x UI Scale)" = "Large Text Mode (1.2x UI Scale)";
+
+"SBS View" = "SBS View";
+"Anaglyph" = "Anaglyph";
+"L/R Matches" = "L/R Matches";
+"Card" = "Card";
+"Align" = "Align";
+"Window" = "Window";
+"Restore" = "Restore";
+"Export" = "Export";
+
+"SBS (JPEG)" = "SBS (JPEG)";
+"SBS (PNG)" = "SBS (PNG)";
+"Separate L/R (PNG)" = "Separate L/R (PNG)";
+"Anaglyph (PNG)" = "Anaglyph (PNG)";
+"Spatial Photo (HEIC)" = "Spatial Photo (HEIC)";
+"MPO (3D Camera)" = "MPO (3D Camera)";
+"Off" = "Off";
+"Left Ref" = "Left Ref";
+"Right Ref" = "Right Ref";
+"Auto (L/R Pairs + SBS)" = "Auto (L/R Pairs + SBS)";
+"SBS Images Only" = "SBS Images Only";
+"Consecutive L/R Pairs" = "Consecutive L/R Pairs";
+
+"Util Series | 7-DoF Rectification & Intelligent Stereo Window" = "Util Series | 7-DoF Rectification & Intelligent Stereo Window";
+"1. Open L/R Pair, SBS Image, or Folder" = "1. Open L/R Pair, SBS Image, or Folder";
+"Drop files for instant auto-align, or drop a folder for batch processing" = "Drop files for instant auto-align, or drop a folder for batch processing";
+"2. 7-DoF Auto Alignment & Vision Window" = "2. 7-DoF Auto Alignment & Vision Window";
+"Accelerate LAPACK dposv_ + Metal 1-pass Lanczos-3 warp" = "Accelerate LAPACK dposv_ + Metal 1-pass Lanczos-3 warp";
+"Processing..." = "Processing...";
+
+"INPUT & PAIR" = "INPUT & PAIR";
+"Open L/R or SBS" = "Open L/R or SBS";
+"Swap" = "Swap";
+"7-DOF RECTIFICATION" = "7-DOF RECTIFICATION";
+"Auto Align & Color on Load" = "Auto Align & Color on Load";
+"Vision Person Motion Mask (Cha-Cha)" = "Vision Person Motion Mask (Cha-Cha)";
+"Keep Original Aspect Ratio (MAAIR)" = "Keep Original Aspect Ratio (MAAIR)";
+"Remove Unilateral Noise" = "Remove Unilateral Noise";
+"Stereo Card Mode" = "Stereo Card Mode";
+"Crop Inner" = "Rect Crop";
+"Keep Arch (Black)" = "Keep Original";
+"Use Core ML Card Segmentation" = "Use Core ML Card Segmentation";
+"Auto Color Match" = "Auto Color Match";
+"COLOR MATCHING" = "COLOR MATCHING";
+"Match to Left" = "Match to Left";
+"Match to Right" = "Match to Right";
+"GEOMETRY TELEMETRY" = "GEOMETRY TELEMETRY";
+"Input Size" = "Input Size";
+"MAAIR Crop" = "MAAIR Crop";
+"Matches / Inliers" = "Matches / Inliers";
+"Vertical RMSE" = "Vertical RMSE";
+"Pipeline Time" = "Pipeline Time";
+
+"INTELLIGENT STEREO WINDOW" = "INTELLIGENT STEREO WINDOW";
+"Vision Saliency Subject Priority" = "Vision Saliency Subject Priority";
+"Horizontal Shift (px)" = "Horizontal Shift (px)";
+"CARD FRAME STYLE" = "CARD FRAME STYLE";
+"Card Frame" = "Finish Frame Overlay";
+"Rounded" = "Rounded";
+"Arch" = "Arch";
+"ERGONOMICS TELEMETRY" = "ERGONOMICS TELEMETRY";
+"Auto Optimal Shift" = "Auto Optimal Shift";
+"Disparity Range" = "Disparity Range";
+"Window Violation" = "Window Violation";
+"Detected (Edge)" = "Detected (Edge)";
+"Clear" = "Clear";
+"Floating Window" = "Floating Window";
+"Recommended" = "Recommended";
+"Not Needed" = "Not Needed";
+
+"METAL LANCZOS-3 EXPORT" = "METAL LANCZOS-3 EXPORT";
+"Export Image" = "Export Image";
+"BATCH FOLDER AUTO-ALIGN" = "BATCH FOLDER AUTO-ALIGN";
+"Input Pairing" = "Input Pairing";
+"Save Adjustment Report (.txt)" = "Save Adjustment Report (.txt)";
+"Output..." = "Output...";
+"Select Folder & Run Batch" = "Select Folder & Run Batch";
+"Ready (or drop a folder onto canvas)" = "Ready (or drop a folder onto canvas)";
+"ALIGNMENT LOG" = "ALIGNMENT LOG";
+
+/* 1-Pane Utility Inspector */
+"Export Image..." = "Export Image...";
+"ViewStereo Utility" = "ViewStereo Utility";
+"Ready to Drop" = "Ready to Drop";
+"Batch Running" = "Batch Running";
+"Unaligned" = "Unaligned";
+"Check Window" = "Check Window";
+"Auto-Restored" = "Auto-Restored";
+"Open" = "Open";
+"RESTORATION STATUS" = "RESTORATION STATUS";
+"Re-Align" = "Re-Align";
+"Output Size" = "Output Size";
+"Window" = "Window";
+"STEREO WINDOW" = "STEREO WINDOW";
+"BASIC RECIPE" = "BASIC RECIPE";
+"STEREO CARD DETECTION" = "STEREO CARD DETECTION";
+"Core ML Card Segmentation (AI)" = "Core ML Card Segmentation (AI)";
+"Segmentation Refiner" = "Segmentation Refiner";
+"AUTO ALIGNMENT & AI" = "AUTO ALIGNMENT & AI";
+"Auto Align on Load" = "Auto Align on Load";
+"STEREO COLOR & RESTORE" = "STEREO COLOR & RESTORE";
+"Remove Unilateral Noise & Dust" = "Remove Unilateral Noise & Dust";
+"Match Left" = "Match Left";
+"Match Right" = "Match Right";
+"BATCH PROCESSING" = "BATCH PROCESSING";
+"Cancel Batch" = "Cancel Batch";
+"Format" = "Format";
+
+/* Batch Canvas Overlay */
+"Batch Processing..." = "Batch Processing...";
+"Batch Complete" = "Batch Complete";
+"Batch Finished with Errors" = "Batch Finished with Errors";
+"Batch Cancelled" = "Batch Cancelled";
+"Open Output" = "Open Output";
+"%d / %d completed → %@/" = "%d / %d completed → %@/";
+"%d succeeded, %d failed → %@/" = "%d succeeded, %d failed → %@/";
+"%d succeeded → %@/" = "%d succeeded → %@/";
+
+/* Export Layout & Format */
+"Stereo Layout" = "Stereo Layout";
+"Image Format" = "Image Format";
+"SBS (LR / Parallel)" = "SBS (LR / Parallel)";
+"SBS (RL / Cross-eye)" = "SBS (RL / Cross-eye)";
+"Separate L/R" = "Separate L/R";
+"Anaglyph" = "Anaglyph";
+
+/* Trilogy Stereo Modes */
+"STEREO MODE" = "STEREO MODE";
+"Swap L/R" = "Swap L/R";
+"Swapped (R⇄L)" = "Swapped (R ⇄ L)";
+"Swap L/R (Active)" = "Swap L/R (Active)";
+"2D" = "2D";
+"SBS" = "SBS";
+"LR/RL" = "LR/RL";
+"LR/RL (4-Way)" = "LR/RL (4-Way)";
+"Dubois" = "Dubois";
+"Color Anaglyph" = "Color";
+"Gray Anaglyph" = "Gray";
+"Polarized" = "Polarized";
+
+/* Landing View & Additional Strings */
+"19th Century Stereoview Restoration & Intelligent Stereo Window Studio" = "19th Century Stereoview Restoration & Intelligent Stereo Window Studio";
+"1. Open Stereoview Card, L/R Pair, or Folder" = "1. Open Stereoview Card, L/R Pair, or Folder";
+"Drop vintage stereo cards or modern stereo photos for auto-segmentation & alignment" = "Drop vintage stereo cards or modern stereo photos for auto-segmentation & alignment";
+"2. AI Card Segmentation & 7-DoF Alignment" = "2. AI Card Segmentation & 7-DoF Alignment";
+"Core ML (StereoCardSeg + MobileSAM) + LAPACK dposv_ & Metal Lanczos-3" = "Core ML (StereoCardSeg + MobileSAM) + LAPACK dposv_ & Metal Lanczos-3";
+"3. Intelligent Stereo Window & Spatial Photo" = "3. Intelligent Stereo Window & Spatial Photo";
+"Optimized zero-parallax window with Vision Pro Spatial Photo & VR export" = "Optimized zero-parallax window with Vision Pro Spatial Photo & VR export";
+"Auto: %.1f px" = "Auto: %.1f px";
+"Output: <Input>/ViewStereo_Output" = "Output: <Input>/ViewStereo_Output";
+
+/* Stereoview Card Mount Reconstruction */
+"Card" = "Card";
+"Stereoview Card" = "Stereoview Card";
+"STEREOVIEW CARD MOUNT" = "STEREOVIEW CARD MOUNT";
+"Mount Style" = "Mount Style";
+"Source Card Detected" = "Source Card Detected";
+"Original Mount (Remount)" = "Original Mount (Remount)";
+"Auto Sample Source Color" = "Auto Sample Source Color";
+"1900s Keystone Dark" = "1900s Keystone Dark";
+"1880s Classic Buff" = "1880s Classic Buff";
+"1870s Cabinet Terracotta" = "1870s Cabinet Terracotta";
+"1870s Victorian Green" = "1870s Victorian Green";
+"1860s Chrome Yellow" = "1860s Chrome Yellow";
+"1850s Early Ivory" = "1850s Early Ivory";
+"Card Size (7-inch Standard)" = "Card Size (7-inch Standard)";
+"Standard (7 × 3.5 in)" = "Standard (7 × 3.5 in)";
+"Cabinet (7 × 4.0 in)" = "Cabinet (7 × 4.0 in)";
+"Imperial (7 × 4.5 in)" = "Imperial (7 × 4.5 in)";
+"Print Cut" = "Print Cut";
+"Auto (Match Era)" = "Auto (Match Era)";
+"Arched Top" = "Arched Top";
+"Rounded Corners" = "Rounded Corners";
+"Square" = "Square";
+"Center Division" = "Center Division";
+"Auto" = "Auto";
+"Joined (Seamless)" = "Joined (Seamless)";
+"Separated (3mm)" = "Separated (3mm)";
+"Mount Typography & Text" = "Mount Typography & Text";
+"OCR Read Card" = "OCR Read Card";
+"Text Mode" = "Text Mode";
+"Letterpress (Auto OCR)" = "Letterpress (Auto OCR)";
+"Letterpress (Manual)" = "Letterpress (Manual)";
+"OCR Reading..." = "OCR Reading...";
+"No Text" = "No Text";
+"Top No." = "Top No.";
+"Bottom Title / Caption" = "Bottom Title / Caption";
+"Use Filename When Title Is Empty" = "Use Filename When Title Is Empty";
+"Left Margin (Upward)" = "Left Margin (Upward)";
+"Right Margin (Downward)" = "Right Margin (Downward)";

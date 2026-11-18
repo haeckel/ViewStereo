@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ViewStereo ヘルプ - 公式マニュアル (v0.1.0)</title>
+    <link rel="icon" type="image/png" href="favicon.png?v=0.1.0">
+    <link rel="apple-touch-icon" href="apple-touch-icon.png?v=0.1.0">
+    <style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;600;700;800;900&family=Noto+Sans+JP:wght@400;500;700;900&display=swap');
+
+:root {
+    --bg-dark: #0a0a0c;
+    --bg-card: rgba(255, 255, 255, 0.03);
+    --bg-card-hover: rgba(255, 255, 255, 0.06);
+    --bg-glass: rgba(10, 10, 12, 0.88);
+    --text-primary: #ffffff;
+    --text-secondary: #a1a1a6;
+    --text-muted: #6e6e73;
+    --accent-amber: #F5A623;
+    --accent-glow: #FFB84D;
+    --accent-blue: #38bdf8;
+    --gradient-hero: linear-gradient(135deg, #0a0a0c 0%, #1c1610 50%, #261d12 100%);
+    --gradient-amber: linear-gradient(135deg, #FFB84D 0%, #F5A623 100%);
+    --border-glass: rgba(255, 255, 255, 0.08);
+    --border-highlight: rgba(245, 166, 35, 0.35);
+    --font-main: 'Inter', 'Noto Sans JP', sans-serif;
+    --font-heading: 'Outfit', 'Noto Sans JP', sans-serif;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    font-family: var(--font-main);
+    background-color: var(--bg-dark);
+    color: var(--text-primary);
+    line-height: 1.8;
+    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+}
+
+.mac-banner {
+    position: sticky;
+    top: 0;
+    width: 100%;
+    height: 36px;
+    background: rgba(245, 166, 35, 0.08);
+    border-bottom: 1px solid var(--border-highlight);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--accent-glow);
+    z-index: 1001;
+    letter-spacing: 0.05em;
+    font-family: var(--font-heading);
+}
+
+header {
+    background: var(--gradient-hero);
+    padding: 50px 30px 40px;
+    border-bottom: 1px solid var(--border-glass);
+    text-align: center;
+}
+
+.header-badge {
+    display: inline-block;
+    padding: 4px 14px;
+    border-radius: 50px;
+    background: rgba(245, 166, 35, 0.14);
+    border: 1px solid var(--border-highlight);
+    color: var(--accent-glow);
+    font-size: 0.8rem;
+    font-weight: 700;
+    margin-bottom: 14px;
+}
+
+header h1 {
+    font-family: var(--font-heading);
+    font-size: 2.5rem;
+    font-weight: 900;
+    background: var(--gradient-amber);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 10px;
+}
+
+header p {
+    color: var(--text-secondary);
+    max-width: 720px;
+    margin: 0 auto 20px;
+}
+
+.header-nav {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.nav-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 8px 18px;
+    border-radius: 50px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-glass);
+    color: var(--text-primary);
+    text-decoration: none;
+    font-size: 0.85rem;
+    font-weight: 600;
+    transition: all 0.2s;
+}
+
+.nav-pill:hover {
+    border-color: var(--border-highlight);
+    background: rgba(245, 166, 35, 0.12);
+    color: var(--accent-glow);
+}
+
+.layout {
+    max-width: 1120px;
+    margin: 40px auto 80px;
+    padding: 0 24px;
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    gap: 36px;
+}
+
+@media (max-width: 860px) {
+    .layout { grid-template-columns: 1fr; }
+    .sidebar { position: static !important; }
+}
+
+.sidebar {
+    position: sticky;
+    top: 60px;
+    align-self: start;
+    background: var(--bg-card);
+    border: 1px solid var(--border-glass);
+    border-radius: 16px;
+    padding: 20px;
+}
+
+.sidebar h3 {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--accent-glow);
+    margin-bottom: 12px;
+}
+
+.sidebar ul { list-style: none; }
+.sidebar li { margin-bottom: 6px; }
+.sidebar a {
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-size: 0.88rem;
+    display: block;
+    padding: 4px 8px;
+    border-radius: 6px;
+    transition: all 0.2s;
+}
+.sidebar a:hover {
+    color: var(--text-primary);
+    background: rgba(245, 166, 35, 0.1);
+}
+
+.content section {
+    background: var(--bg-card);
+    border: 1px solid var(--border-glass);
+    border-radius: 20px;
+    padding: 32px;
+    margin-bottom: 28px;
+}
+
+.content h2 {
+    font-family: var(--font-heading);
+    font-size: 1.55rem;
+    color: var(--accent-glow);
+    margin-bottom: 16px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border-glass);
+}
+
+.content h3 {
+    font-size: 1.15rem;
+    color: #fff;
+    margin: 22px 0 10px;
+}
+
+.content p {
+    color: var(--text-secondary);
+    margin-bottom: 14px;
+}
+
+.content ul, .content ol {
+    margin: 10px 0 16px 22px;
+    color: var(--text-secondary);
+}
+
+.content li { margin-bottom: 8px; }
+.content strong { color: #fff; }
+
+code {
+    background: rgba(245, 166, 35, 0.14);
+    color: var(--accent-glow);
+    padding: 2px 7px;
+    border-radius: 5px;
+    font-family: "SF Mono", Menlo, monospace;
+    font-size: 0.88em;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0;
+    font-size: 0.92rem;
+}
+
+th, td {
+    text-align: left;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border-glass);
+    color: var(--text-secondary);
+}
+
+th {
+    color: var(--accent-glow);
+    font-weight: 700;
+    background: rgba(245, 166, 35, 0.05);
+}
+
+.callout {
+    background: rgba(245, 166, 35, 0.08);
+    border-left: 4px solid var(--accent-amber);
+    padding: 14px 18px;
+    border-radius: 8px;
+    margin: 16px 0;
+    color: var(--text-primary);
+}
+
+footer {
+    text-align: center;
+    padding: 36px 20px;
+    border-top: 1px solid var(--border-glass);
+    color: var(--text-muted);
+    font-size: 0.88rem;
+}
+    </style>
+</head>
+<body>
+    <div class="mac-banner"> ViewStereo は macOS 専用アプリケーションです (macOS 14.0+ / Apple Silicon 推奨)</div>
+
+    <header>
+        <div class="header-badge">ViewStereo Official Manual — v0.1.0</div>
+        <h1>ViewStereo オンラインマニュアル</h1>
+        <p>19世紀ステレオカードの AI 自動検出・7自由度対称ホモグラフィ整準・インテリジェント・ステレオウィンドウ調整・デジタル・リマウント完全ガイド</p>
+        <div class="header-nav">
+            <a href="index.html" class="nav-pill">← トップページへ戻る</a>
+            <a href="docs_en.html" class="nav-pill">English Manual</a>
+        </div>
+    </header>
+
+    <div class="layout">
+        <aside class="sidebar">
+            <h3>目次 / Contents</h3>
+            <ul>
+                <li><a href="#overview">1. 概要と特長</a></li>
+                <li><a href="#workflow">2. 基本ワークフロー</a></li>
+                <li><a href="#segmentation">3. Core ML カード自動検出</a></li>
+                <li><a href="#homography">4. 7自由度ホモグラフィ &amp; MAAIR</a></li>
+                <li><a href="#window">5. ステレオウィンドウ調整</a></li>
+                <li><a href="#remount">6. デジタル・リマウント &amp; OCR</a></li>
+                <li><a href="#color">7. カラーマッチング &amp; 復元</a></li>
+                <li><a href="#export">8. 立体視モード &amp; 書き出し</a></li>
+                <li><a href="#batch">9. フォルダ一括バッチ処理</a></li>
+                <li><a href="#shortcuts">10. ショートカット一覧</a></li>
+            </ul>
+        </aside>
+
+        <main class="content">
+            <section id="overview">
+                <h2>1. 概要と特長</h2>
+                <p><strong>ViewStereo（ビューステレオ）</strong> は、19世紀〜20世紀初頭の歴史的ステレオカード（Stereoview / Stereograph）のスキャン画像や、現代の2眼・チャチャ（Cha-Cha）ステレオ写真を、<strong>Core ML</strong> と <strong>数理幾何最適化</strong> によって自動復元・整準し、Apple Vision Pro 空間写真（MV-HEVC）や各種3Dフォーマットへ変換する macOS ネイティブスタジオアプリです。</p>
+                <div class="callout">
+                    <strong>開発初期段階のお知らせ：</strong> ViewStereo (v0.1.0) は現在アクティブに開発中の初期リリースです。すべての AI モデルはアプリに同梱されており、100% オフライン・オンデバイスで動作します。
+                </div>
+            </section>
+
+            <section id="workflow">
+                <h2>2. 基本ワークフロー</h2>
+                <ol>
+                    <li><strong>画像を読み込む</strong>：スキャンしたステレオカード、左右ペア画像（L/R）、SBS画像、またはフォルダをキャンバスへドラッグ＆ドロップ（または <code>⌘O</code>）。</li>
+                    <li><strong>自動検出 ＆ 整準</strong>：読み込み時に Core ML カード分割 → 7-DoF 対称ホモグラフィ整準 → カラーマッチング → ステレオウィンドウ最適化が自動実行されます（手動再実行は <code>⇧⌘A</code>）。</li>
+                    <li><strong>プレビュー確認</strong>：上部ツールストリップまたは <code>⌘1</code>〜<code>⌘8</code> で表示方式を切り替え、必要に応じて <code>X</code> キーで左右を入れ替えます。</li>
+                    <li><strong>微調整 / リマウント</strong>：インスペクターの <strong>STEREO WINDOW</strong> や <strong>STEREOVIEW CARD MOUNT</strong> で奥行き位置や台紙デザインを調整します。</li>
+                    <li><strong>書き出し</strong>：下部の <strong>Stereo Layout</strong> を選択し、<code>⌘E</code> で書き出します。</li>
+                </ol>
+            </section>
+
+            <section id="segmentation">
+                <h2>3. Core ML カード自動検出</h2>
+                <p><strong>BASIC RECIPE &gt; STEREO CARD DETECTION</strong> で、スキャン画像からの左右写真切り出しを制御します。</p>
+                <ul>
+                    <li><strong>Card Mode</strong>：
+                        <ul>
+                            <li><code>Off</code>：現代の L/R ペアやトリミング済み SBS 画像用（カード検出スキップ）。</li>
+                            <li><code>Crop Inner</code>：台紙とアーチ枠を除外し、左右写真領域の有効矩形を抽出（推奨）。</li>
+                            <li><code>Keep Arch (Black)</code>：19世紀特有のアーチ型（Arch-top）枠を残したまま黒マスクで整準。</li>
+                        </ul>
+                    </li>
+                    <li><strong>Core ML Card Segmentation (AI)</strong>：<code>StereoCardSeg</code> (U-Net) による自動領域・台紙輝度推定。</li>
+                    <li><strong>Segmentation Refiner</strong>：<code>MobileSAM</code>（高速・軽量）、<code>SAM 2.1 Tiny</code>（高精度・劣化カード向け）、<code>U-Net Only</code> から選択可能。</li>
+                    <li><strong>Card Frame</strong>：現代のステレオ写真にも <code>Off</code> / <code>Rounded</code> / <code>Arch</code> のクラシック枠を適用できます。</li>
+                </ul>
+            </section>
+
+            <section id="homography">
+                <h2>4. 7自由度ホモグラフィ &amp; MAAIR</h2>
+                <p>手貼りされた歴史的ステレオカード特有の傾き（ロール）、倍率差（スケール）、台形歪み（キーストーン）、上下ズレ（垂直視差）を、<code>StereoCore</code> の <strong>Accelerate LAPACK (<code>dposv_</code>) + IRLS</strong> によりサブピクセル精度で対称補正し、垂直視差をゼロ化します。</p>
+                <ul>
+                    <li><strong>Vision Person Motion Mask (Cha-Cha)</strong>：チャチャ法で撮影した際、動いた人物を自動マスクし背景の静物を基準に正確に整準します。</li>
+                    <li><strong>Keep Original Aspect Ratio (MAAIR)</strong>：補正後の左右有効領域から黒枠を一切含まない最大面積の内接矩形（MAAIR）を自動算出してトリミングします。</li>
+                </ul>
+            </section>
+
+            <section id="window">
+                <h2>5. ステレオウィンドウ調整</h2>
+                <p>被写体が画面端で切れながら手前に飛び出す「ウィンドウバイオレーション」を防ぐため、最前景の視差から最適な水平シフト量（<code>Auto: ○○ px</code>）を自動計算します。</p>
+                <ul>
+                    <li><strong>Vision Saliency Subject Priority</strong>：オンにすると Apple Vision の顕著性解析により主要被写体を優先してウィンドウを設定します。</li>
+                    <li><strong>Horizontal Shift (px)</strong>：スライダー・リセット・数値入力（<code>-300.0</code>〜<code>+300.0 px</code>）の3点セットで、ドラッグ中もリアルタイムに奥行き位置を微調整できます。</li>
+                </ul>
+            </section>
+
+            <section id="remount">
+                <h2>6. デジタル・リマウント &amp; OCR</h2>
+                <p>表示モードまたは書き出しレイアウトで <strong>Card（Stereoview Card）</strong> を選択すると、博物館品質のステレオカードとしてデジタル再構成できます。</p>
+                <h3>時代別 Mount Style プリセット（8種類）</h3>
+                <ul>
+                    <li><code>Original Mount (Remount)</code> / <code>Auto Sample Source Color</code></li>
+                    <li><code>1900s Keystone Dark</code>（チャコール・曲面台紙）</li>
+                    <li><code>1880s Classic Buff</code>（バフ黄褐色台紙）</li>
+                    <li><code>1870s Cabinet Terracotta</code> / <code>1870s Victorian Green</code>（バイカラー縁再現）</li>
+                    <li><code>1860s Chrome Yellow</code> / <code>1850s Early Ivory</code>（初期角丸なし・スクエア印画）</li>
+                </ul>
+                <h3>規格・印画カット・活版OCR</h3>
+                <p>7インチ基準の <code>Standard (7 × 3.5 in)</code> / <code>Cabinet (7 × 4.0 in)</code> / <code>Imperial (7 × 4.5 in)</code>、印画カット（<code>Arched Top</code> / <code>Rounded Corners</code> / <code>Square</code>）、中央境界（<code>Joined</code> / <code>Separated 3mm</code>）を選択可能。さらに <strong>Vision OCR (Letterpress Auto OCR)</strong> が元カードの番号・下部タイトル・左右余白の出版社クレジットを自動認識し、活版印刷風タイポグラフィで綺麗に再印字します。</p>
+            </section>
+
+            <section id="color">
+                <h2>7. カラーマッチング &amp; 復元</h2>
+                <ul>
+                    <li><strong>Auto Color Match</strong>：<code>Off</code> / <code>Left Ref</code>（左基準） / <code>Right Ref</code>（右基準）から選択し、左右の露光差や経年退色を自動整合します。</li>
+                    <li><strong>Remove Unilateral Noise &amp; Dust</strong>：片側の写真にのみ存在するホコリ・傷・シミを自動低減します。</li>
+                </ul>
+            </section>
+
+            <section id="export">
+                <h2>8. 立体視モード &amp; 書き出し</h2>
+                <p><strong>8種類のプレビュー表示</strong>（<code>2D</code> / <code>SBS</code> / <code>LR/RL</code> / <code>Dubois</code> / <code>Color Anaglyph</code> / <code>Gray Anaglyph</code> / <code>Polarized</code> / <code>Card</code>）と、<strong>11種類の書き出しレイアウト</strong>（上記8種 + <code>Separate L/R</code> / <code>Spatial Photo (HEIC / MV-HEVC)</code> / <code>MPO (3D Camera)</code>）に対応しています。調整レポート（<code>.txt</code>）の保存も可能です。</p>
+            </section>
+
+            <section id="batch">
+                <h2>9. フォルダ一括バッチ処理</h2>
+                <p><code>⇧⌘B</code> またはフォルダのドラッグ＆ドロップで大量のアーカイブを一括処理できます。ペアリング方式は <code>Auto (L/R Pairs + SBS)</code>、<code>SBS Images Only</code>、<code>Consecutive L/R Pairs</code> の3種類に対応し、出力先はデフォルトで <code>&lt;入力フォルダ&gt;/ViewStereo_Output</code> に生成されます。</p>
+            </section>
+
+            <section id="shortcuts">
+                <h2>10. ショートカット一覧</h2>
+                <table>
+                    <thead>
+                        <tr><th>ショートカット</th><th>機能</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td><code>⌘ O</code></td><td>ステレオカード、L/R ペア、または SBS 画像を開く</td></tr>
+                        <tr><td><code>⇧ ⌘ B</code></td><td>フォルダ一括バッチ処理を開く</td></tr>
+                        <tr><td><code>⌘ E</code></td><td>現在のレイアウトで画像を書き出す</td></tr>
+                        <tr><td><code>⇧ ⌘ A</code></td><td>自動カード検出・7-DoF 整準＆ウィンドウ決定を実行</td></tr>
+                        <tr><td><code>X</code></td><td>左右画像のスワップ（L ⇄ R）</td></tr>
+                        <tr><td><code>⌘ 1</code> 〜 <code>⌘ 8</code></td><td>プレビュー表示モード切替（2D 〜 Card）</td></tr>
+                        <tr><td><code>⌘ ?</code></td><td>ヘルプウィンドウを開く</td></tr>
+                        <tr><td><code>⌘ ,</code></td><td>設定ウィンドウを開く（Large Text Mode 1.2x）</td></tr>
+                    </tbody>
+                </table>
+            </section>
+        </main>
+    </div>
+
+    <footer>
+        &copy; 2026 ViewStereo Project. All rights reserved.
+    </footer>
+</body>
+</html>

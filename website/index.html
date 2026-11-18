@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" data-i18n="meta-desc" content="ViewStereo - 19世紀ステレオカードのAI自動検出・7自由度ホモグラフィ整準・デジタルリマウント & 空間写真復元スタジオ">
+    <title data-i18n="title">ViewStereo | 歴史的ステレオカード復元 & インテリジェント・ステレオウィンドウスタジオ</title>
+
+    <!-- Open Graph / Facebook -->
+    <meta property="og:title" content="ViewStereo | 歴史的ステレオカード復元 & インテリジェント・ステレオウィンドウスタジオ">
+    <meta property="og:description" content="19世紀の歴史的ステレオカード（Stereoview）および現代ステレオ写真を、Core ML自動検出・7自由度対称ホモグラフィ整準・ステレオウィンドウ最適化によって高品位な空間写真・SBS・デジタルリマウントカードへ復元する macOS 専用アプリ。">
+    <meta property="og:image" content="https://viewstereo.p-media.jp/assets/share.jpg?v=0.1.0">
+    <meta property="og:type" content="website">
+
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="ViewStereo | 歴史的ステレオカード復元 & インテリジェント・ステレオウィンドウスタジオ">
+    <meta name="twitter:description" content="19世紀の歴史的ステレオカード（Stereoview）および現代ステレオ写真を、Core ML自動検出・7自由度対称ホモグラフィ整準・ステレオウィンドウ最適化によって高品位な空間写真・SBS・デジタルリマウントカードへ復元する macOS 専用アプリ。">
+    <meta name="twitter:image" content="https://viewstereo.p-media.jp/assets/share.jpg?v=0.1.0">
+
+    <link rel="icon" type="image/png" href="favicon.png?v=0.1.0">
+    <link rel="apple-touch-icon" href="apple-touch-icon.png?v=0.1.0">
+    <link rel="stylesheet" href="styles.css?v=0.1.0">
+    <link rel="stylesheet" href="trilogy-shared.css?v=0.1.0">
+</head>
+<body>
+
+    <div class="mac-exclusive-banner" data-i18n="mac-exclusive"> ViewStereo は macOS 専用アプリケーションです。</div>
+
+    <nav>
+        <div class="logo"><span class="depth">View</span><span class="stereo">Stereo</span></div>
+        <div class="nav-links">
+            <a href="#features" data-i18n="nav-features">機能</a>
+            <a href="#tech" data-i18n="nav-tech">テクノロジー</a>
+            <a href="#download" data-i18n="nav-download">ダウンロード</a>
+            <a href="docs.html" data-i18n="foot-doc">オンラインマニュアル</a>
+            <button class="lang-toggle" id="lang-toggle">English</button>
+        </div>
+        <a href="#download" class="btn-cta" data-i18n="btn-get-beta">無料ダウンロード</a>
+    </nav>
+
+    <div class="tategaki">記憶の奥行きを、呼び覚ます。</div>
+
+    <section class="hero">
+        <div class="hero-background">
+            <div class="hero-ambient-glow"></div>
+            <canvas id="spatial-canvas" class="hero-canvas"></canvas>
+        </div>
+        <div class="hero-content">
+            <div class="hero-text-panel reveal">
+                <div class="hero-app-header">
+                    <a href="#download" class="hero-app-badge-icon" title="ViewStereo">
+                        <img src="assets/app_icon.png?v=0.1.0" alt="ViewStereo Icon" width="512" height="512" fetchpriority="high">
+                    </a>
+                    <div>
+                        <div class="hero-app-name"><span class="depth">View</span><span class="stereo">Stereo</span></div>
+                        <div class="hero-version-row">
+                            <div class="hero-version" data-i18n="hero-version">v0.1.0 (2026.11.18)</div>
+                            <span class="dev-status-pill status-early" data-i18n="dev-status-badge">開発初期・現在開発中</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="badge-zen">19th Century Stereoview Restoration Studio</div>
+                <h1 data-i18n="hero-title"><span>時を超えた立体視、</span><br><span>精密に蘇る。</span></h1>
+                <p data-i18n="hero-subtitle">ViewStereo は、19世紀の歴史的ステレオカード（Stereoview / Stereograph）や現代のステレオ写真を、Core ML自動検出・7自由度対称ホモグラフィ整準・ステレオウィンドウ最適化によって高品位な空間写真やデジタル・リマウントカードへ復元する macOS 専用アプリケーションです。</p>
+                <div class="hero-btns">
+                    <a href="#download" class="btn-cta" data-i18n="btn-try-free" style="padding: 16px 40px; font-size: 1.1rem;">今すぐ無料ダウンロード</a>
+                    <a href="#features" class="btn-secondary" data-i18n="btn-view-features">機能を見る</a>
+                </div>
+            </div>
+
+            <!-- 3D Studio Mockup Showcase -->
+            <div class="hero-showcase reveal" id="hero-showcase">
+                <div class="studio-window">
+                    <div class="window-header">
+                        <div class="traffic-lights">
+                            <span class="light close"></span>
+                            <span class="light minimize"></span>
+                            <span class="light maximize"></span>
+                        </div>
+                        <div class="window-title">
+                            <span class="window-brand">ViewStereo Studio</span>
+                            <span class="window-file">— 1898_keystone_stereoview_scan.png</span>
+                        </div>
+                        <div class="window-status-pill">
+                            <span class="status-dot"></span>
+                            <span>7-DoF Rectified</span>
+                        </div>
+                    </div>
+                    <div class="window-viewport">
+                        <div class="layer-stage" id="layer-stage">
+                            <!-- Layer 1: Source Stereoview Card -->
+                            <div class="stage-layer layer-card" data-layer="card">
+                                <div class="layer-tag">1. Vintage Stereoview Scan</div>
+                                <div class="layer-img-container">
+                                    <img src="assets/hero_card.jpg?v=0.1.0" alt="Historical Stereoview Card Scan" width="1376" height="768" fetchpriority="high">
+                                </div>
+                            </div>
+                            <!-- Layer 2: Core ML Card Segmentation & 7-DoF -->
+                            <div class="stage-layer layer-seg" data-layer="seg">
+                                <div class="layer-tag">2. Core ML Seg + 7-DoF Homography</div>
+                                <div class="depth-visual-surface"></div>
+                            </div>
+                            <!-- Layer 3: Intelligent Stereo Window & Remount -->
+                            <div class="stage-layer layer-window" data-layer="window">
+                                <div class="layer-tag">3. Stereo Window &amp; Spatial Photo</div>
+                                <div class="stereo-visual-surface">
+                                    <div class="stereo-grid-overlay"></div>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Viewport HUD Overlay -->
+                        <div class="viewport-hud">
+                            <div class="hud-pill"><span class="hud-label">MAAIR</span> 0px Border</div>
+                            <div class="hud-pill"><span class="hud-label">Refiner</span> SAM 2.1 Tiny</div>
+                            <div class="hud-pill active"><span class="hud-label">Window</span> Optimal</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="about-project">
+        <div class="container reveal">
+            <p data-i18n="about-desc">
+                <!-- Content will be injected by script.js -->
+            </p>
+        </div>
+    </section>
+
+    <!-- Stereo Creative Studio Trilogy Section (Mounted by trilogy-shared.js) -->
+    <div id="trilogy-mount" data-current="view" data-asset-version="0.1.0"></div>
+
+    <section class="features" id="features">
+        <div class="section-header reveal">
+            <h2 data-i18n="feat-header-title">研ぎ澄まされた機能</h2>
+            <p data-i18n="feat-header-subtitle">AI セグメンテーションと数理幾何最適化の結晶が、歴史的立体写真を現代に蘇らせます。</p>
+        </div>
+
+        <div class="feature-gallery">
+            <div class="feature-item reveal">
+                <div class="feature-info">
+                    <div class="badge-zen">Core ML &amp; 7-DoF</div>
+                    <h3 data-i18n="feat-1-title">ステレオカード自動検出 ＆ 7自由度ホモグラフィ整準</h3>
+                    <p data-i18n="feat-1-desc">StereoCardSeg (U-Net) と MobileSAM / SAM 2.1 Tiny により、台紙から左右の写真領域とアーチ型枠を自動抽出。LAPACK dposv_ + IRLS の7自由度対称ホモグラフィ整準により、手貼りによる傾き・歪み・垂直視差をサブピクセル精度で解消します。</p>
+                </div>
+                <div class="feature-visual" style="background-image: url('assets/feat_ai.jpg?v=0.1.0');"></div>
+            </div>
+
+            <div class="feature-item reveal">
+                <div class="feature-info">
+                    <div class="badge-zen">Stereo Window</div>
+                    <h3 data-i18n="feat-2-title">インテリジェント・ステレオウィンドウ ＆ MAAIR</h3>
+                    <p data-i18n="feat-2-desc">最前景と Apple Vision 顕著性解析から最適なステレオウィンドウ位置を自動算出し、枠抜け（ウィンドウバイオレーション）を防止。さらに MAAIR（最大面積軸平行内接矩形）で黒枠のない最大有効領域を自動トリミングします。</p>
+                </div>
+                <div class="feature-visual" style="background-image: url('assets/feat_window.jpg?v=0.1.0');"></div>
+            </div>
+
+            <div class="feature-item reveal">
+                <div class="feature-info">
+                    <div class="badge-zen">Digital Remount</div>
+                    <h3 data-i18n="feat-3-title">時代別デジタル・リマウント ＆ 活版OCRタイポグラフィ</h3>
+                    <p data-i18n="feat-3-desc">1850年代の初期アイボリーから1900年代 Keystone ダーク曲面台紙まで8種類の時代別プリセットを搭載。Vision OCR が元台紙のタイトルや出版社クレジットを読み取り、活版印刷風タイポグラフィで美しく再構成します。</p>
+                </div>
+                <div class="feature-visual" style="background-image: url('assets/feat_remount.jpg?v=0.1.0');"></div>
+            </div>
+
+            <div class="feature-item reveal">
+                <div class="feature-info">
+                    <div class="badge-zen">Spatial &amp; Batch</div>
+                    <h3 data-i18n="feat-4-title">Spatial Photo 書き出し ＆ フォルダ一括バッチ処理</h3>
+                    <p data-i18n="feat-4-desc">Apple Vision Pro 用の MV-HEVC 空間写真（HEIC）、SBS、アナグリフ（Dubois/Color/Gray）、偏光、MPO、個別L/Rなど11形式の出力に対応。大量のアーカイブをフォルダごと自動処理し、調整レポート（.txt）も保存できます。</p>
+                </div>
+                <div class="feature-visual" style="background-image: url('assets/feat_export.jpg?v=0.1.0');"></div>
+            </div>
+        </div>
+    </section>
+
+    <section class="tech" id="tech">
+        <div class="section-header reveal">
+            <h2 data-i18n="tech-header-title">Powered by State-of-the-Art Tech</h2>
+            <p data-i18n="tech-header-subtitle">Core ML、Vision、Accelerate LAPACK を核とし、Apple Silicon に最適化された精密処理。</p>
+            <div class="tech-description reveal" data-i18n="about-sharp-content" style="max-width: 800px; margin: 30px auto 0; font-size: 1.1rem; line-height: 1.8; color: var(--text-secondary);">
+                <!-- Tech content will be injected by script.js -->
+            </div>
+        </div>
+        <div class="tech-grid reveal">
+            <div class="tech-item">
+                <div class="tech-icon">ML</div>
+                <span>Core ML + SAM 2.1</span>
+            </div>
+            <div class="tech-item">
+                <div class="tech-icon">LA</div>
+                <span>LAPACK 7-DoF</span>
+            </div>
+            <div class="tech-item">
+                <div class="tech-icon">VN</div>
+                <span>Vision OCR &amp; AI</span>
+            </div>
+            <div class="tech-item">
+                <div class="tech-icon">AV</div>
+                <span>MV-HEVC Spatial</span>
+            </div>
+        </div>
+    </section>
+
+    <section class="download" id="download" style="padding: 100px 20px; text-align: center;">
+        <div class="reveal">
+            <h2 data-i18n="dl-title" style="font-size: 3rem; margin-bottom: 24px;">体験を、今すぐ。</h2>
+            <p data-i18n="dl-subtitle" style="color: var(--accent-view-glow); font-weight: 600; text-shadow: 0 0 15px rgba(245, 166, 35, 0.35); margin-bottom: 40px;">ViewStereo v0.1.0 がリリースされました。</p>
+            <a href="https://viewstereo.p-media.jp/ViewStereo.dmg" class="btn-cta" data-i18n="btn-download" style="padding: 20px 60px; font-size: 1.2rem;">ViewStereo をダウンロード</a>
+            <p data-i18n="dl-support" style="margin-top: 20px; font-size: 0.8rem; color: #555;">Supported on macOS 14.0+ (Apple Silicon Recommended)</p>
+            <div class="dev-notice-box" data-i18n="dev-notice-box">
+                <strong>【開発初期・開発中のソフトウェアに関するご注意】</strong>
+                <p>ViewStereo は現在開発中であり、特に開発初期段階（v0.1系）にあります。ダウンロードしてご利用いただくユーザーには、アプリの仕様向上およびデバッグ作業にお付き合いいただく形となります。動作の不安定さや予期せぬ不具合、今後の仕様変更の可能性がありますので、あらかじめご了承のうえお試しください。</p>
+            </div>
+        </div>
+    </section>
+
+    <section class="updates" id="updates">
+        <div class="section-header reveal">
+            <h2 data-i18n="upd-header-title">更新履歴</h2>
+            <p data-i18n="upd-header-subtitle">精度と再現性の向上のため、進化し続けます。</p>
+        </div>
+        <div class="updates-container reveal">
+            <!-- v0.1.0 -->
+            <div class="changelog-item">
+                <div class="version-header">
+                    <span class="version-tag">v0.1.0</span>
+                    <span class="version-date">2026.11.18</span>
+                </div>
+                <ul class="change-list">
+                    <li data-i18n="upd-010-1">Core ML（StereoCardSeg U-Net + MobileSAM / SAM 2.1 Tiny）による19世紀ステレオカード左右領域・アーチ枠の自動セグメンテーションを搭載</li>
+                    <li data-i18n="upd-010-2">StereoCore 7自由度対称ホモグラフィ整準（LAPACK dposv_ + IRLS）および MAAIR 最大共通内接矩形クロップを実装</li>
+                    <li data-i18n="upd-010-3">最前景＆Vision顕著性に基づくインテリジェント・ステレオウィンドウ決定と、リアルタイム微調整UI・カラーマッチング・片側ダスト除去を搭載</li>
+                    <li data-i18n="upd-010-4">8種類の歴史的台紙プリセット（1850s〜1900s）＆ Vision OCR 活版タイポグラフィによるデジタル・リマウントエンジンを実装</li>
+                    <li data-i18n="upd-010-5">Apple Vision Pro 空間写真（MV-HEVC HEIC）、SBS、アナグリフ、偏光、MPO、フォルダ一括バッチ処理に対応</li>
+                </ul>
+            </div>
+        </div>
+    </section>
+
+    <!-- Stereo Realist Heritage & Historical Inspiration Section (Mounted by trilogy-shared.js) -->
+    <div id="heritage-mount" data-current="view" data-asset-version="0.1.0"></div>
+
+    <!-- Disclaimer / Licensing Note Section -->
+    <section class="disclaimer" id="disclaimer" style="padding: 60px 20px; background: rgba(255, 255, 255, 0.02); border-top: 1px solid var(--border-glass); text-align: center;">
+        <div class="container reveal" style="max-width: 800px; margin: 0 auto;">
+            <h3 data-i18n="disclaimer-title" style="font-size: 1.4rem; margin-bottom: 20px; color: var(--text-primary); font-weight: 600;">免責事項 / 開発状況・ライセンスに関するご注意</h3>
+            <p data-i18n="disclaimer-content" style="font-size: 0.95rem; line-height: 1.8; color: var(--text-secondary); text-align: left; max-width: 700px; margin: 0 auto; opacity: 0.85;"></p>
+        </div>
+    </section>
+
+    <footer>
+        <div class="footer-content">
+            <div class="logo"><span class="depth">View</span><span class="stereo">Stereo</span></div>
+
+            <div id="footer-trilogy-mount" data-current="view"></div>
+
+            <div class="footer-links">
+                <a href="privacy.html" data-i18n="foot-privacy">プライバシーポリシー</a>
+                <a href="credits.html" data-i18n="foot-credits">謝辞</a>
+            </div>
+            <p class="copyright">&copy; 2026 ViewStereo Project. All rights reserved.</p>
+        </div>
+    </footer>
+
+    <script src="trilogy-shared.js?v=0.1.0"></script>
+    <script src="script.js?v=0.1.0"></script>
+</body>
+</html>

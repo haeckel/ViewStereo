@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ViewStereo Help - Official Manual (v0.1.0)</title>
+    <link rel="icon" type="image/png" href="favicon.png?v=0.1.0">
+    <link rel="apple-touch-icon" href="apple-touch-icon.png?v=0.1.0">
+    <style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;600;700;800;900&display=swap');
+
+:root {
+    --bg-dark: #0a0a0c;
+    --bg-card: rgba(255, 255, 255, 0.03);
+    --text-primary: #ffffff;
+    --text-secondary: #a1a1a6;
+    --text-muted: #6e6e73;
+    --accent-amber: #F5A623;
+    --accent-glow: #FFB84D;
+    --gradient-hero: linear-gradient(135deg, #0a0a0c 0%, #1c1610 50%, #261d12 100%);
+    --gradient-amber: linear-gradient(135deg, #FFB84D 0%, #F5A623 100%);
+    --border-glass: rgba(255, 255, 255, 0.08);
+    --border-highlight: rgba(245, 166, 35, 0.35);
+    --font-main: 'Inter', sans-serif;
+    --font-heading: 'Outfit', sans-serif;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    font-family: var(--font-main);
+    background-color: var(--bg-dark);
+    color: var(--text-primary);
+    line-height: 1.8;
+    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+}
+
+.mac-banner {
+    position: sticky;
+    top: 0;
+    width: 100%;
+    height: 36px;
+    background: rgba(245, 166, 35, 0.08);
+    border-bottom: 1px solid var(--border-highlight);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--accent-glow);
+    z-index: 1001;
+    letter-spacing: 0.05em;
+    font-family: var(--font-heading);
+}
+
+header {
+    background: var(--gradient-hero);
+    padding: 50px 30px 40px;
+    border-bottom: 1px solid var(--border-glass);
+    text-align: center;
+}
+
+.header-badge {
+    display: inline-block;
+    padding: 4px 14px;
+    border-radius: 50px;
+    background: rgba(245, 166, 35, 0.14);
+    border: 1px solid var(--border-highlight);
+    color: var(--accent-glow);
+    font-size: 0.8rem;
+    font-weight: 700;
+    margin-bottom: 14px;
+}
+
+header h1 {
+    font-family: var(--font-heading);
+    font-size: 2.5rem;
+    font-weight: 900;
+    background: var(--gradient-amber);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 10px;
+}
+
+header p {
+    color: var(--text-secondary);
+    max-width: 720px;
+    margin: 0 auto 20px;
+}
+
+.header-nav {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.nav-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 8px 18px;
+    border-radius: 50px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-glass);
+    color: var(--text-primary);
+    text-decoration: none;
+    font-size: 0.85rem;
+    font-weight: 600;
+    transition: all 0.2s;
+}
+
+.nav-pill:hover {
+    border-color: var(--border-highlight);
+    background: rgba(245, 166, 35, 0.12);
+    color: var(--accent-glow);
+}
+
+.layout {
+    max-width: 1120px;
+    margin: 40px auto 80px;
+    padding: 0 24px;
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    gap: 36px;
+}
+
+@media (max-width: 860px) {
+    .layout { grid-template-columns: 1fr; }
+    .sidebar { position: static !important; }
+}
+
+.sidebar {
+    position: sticky;
+    top: 60px;
+    align-self: start;
+    background: var(--bg-card);
+    border: 1px solid var(--border-glass);
+    border-radius: 16px;
+    padding: 20px;
+}
+
+.sidebar h3 {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--accent-glow);
+    margin-bottom: 12px;
+}
+
+.sidebar ul { list-style: none; }
+.sidebar li { margin-bottom: 6px; }
+.sidebar a {
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-size: 0.88rem;
+    display: block;
+    padding: 4px 8px;
+    border-radius: 6px;
+    transition: all 0.2s;
+}
+.sidebar a:hover {
+    color: var(--text-primary);
+    background: rgba(245, 166, 35, 0.1);
+}
+
+.content section {
+    background: var(--bg-card);
+    border: 1px solid var(--border-glass);
+    border-radius: 20px;
+    padding: 32px;
+    margin-bottom: 28px;
+}
+
+.content h2 {
+    font-family: var(--font-heading);
+    font-size: 1.55rem;
+    color: var(--accent-glow);
+    margin-bottom: 16px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border-glass);
+}
+
+.content h3 {
+    font-size: 1.15rem;
+    color: #fff;
+    margin: 22px 0 10px;
+}
+
+.content p {
+    color: var(--text-secondary);
+    margin-bottom: 14px;
+}
+
+.content ul, .content ol {
+    margin: 10px 0 16px 22px;
+    color: var(--text-secondary);
+}
+
+.content li { margin-bottom: 8px; }
+.content strong { color: #fff; }
+
+code {
+    background: rgba(245, 166, 35, 0.14);
+    color: var(--accent-glow);
+    padding: 2px 7px;
+    border-radius: 5px;
+    font-family: "SF Mono", Menlo, monospace;
+    font-size: 0.88em;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0;
+    font-size: 0.92rem;
+}
+
+th, td {
+    text-align: left;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border-glass);
+    color: var(--text-secondary);
+}
+
+th {
+    color: var(--accent-glow);
+    font-weight: 700;
+    background: rgba(245, 166, 35, 0.05);
+}
+
+.callout {
+    background: rgba(245, 166, 35, 0.08);
+    border-left: 4px solid var(--accent-amber);
+    padding: 14px 18px;
+    border-radius: 8px;
+    margin: 16px 0;
+    color: var(--text-primary);
+}
+
+footer {
+    text-align: center;
+    padding: 36px 20px;
+    border-top: 1px solid var(--border-glass);
+    color: var(--text-muted);
+    font-size: 0.88rem;
+}
+    </style>
+</head>
+<body>
+    <div class="mac-banner"> ViewStereo is exclusively designed for macOS (macOS 14.0+ / Apple Silicon Recommended)</div>
+
+    <header>
+        <div class="header-badge">ViewStereo Official Manual — v0.1.0</div>
+        <h1>ViewStereo Online Manual</h1>
+        <p>Complete guide to Core ML stereoview card segmentation, 7-DoF symmetric homography alignment, intelligent stereo window calibration, and digital remounting.</p>
+        <div class="header-nav">
+            <a href="index.html?lang=en" class="nav-pill">← Back to Home</a>
+            <a href="docs.html" class="nav-pill">日本語マニュアル</a>
+        </div>
+    </header>
+
+    <div class="layout">
+        <aside class="sidebar">
+            <h3>Contents</h3>
+            <ul>
+                <li><a href="#overview">1. Overview</a></li>
+                <li><a href="#workflow">2. Basic Workflow</a></li>
+                <li><a href="#segmentation">3. Core ML Card Segmentation</a></li>
+                <li><a href="#homography">4. 7-DoF Homography &amp; MAAIR</a></li>
+                <li><a href="#window">5. Stereo Window Calibration</a></li>
+                <li><a href="#remount">6. Digital Remount &amp; OCR</a></li>
+                <li><a href="#color">7. Color Harmonization</a></li>
+                <li><a href="#export">8. Display Modes &amp; Export</a></li>
+                <li><a href="#batch">9. Batch Folder Processing</a></li>
+                <li><a href="#shortcuts">10. Keyboard Shortcuts</a></li>
+            </ul>
+        </aside>
+
+        <main class="content">
+            <section id="overview">
+                <h2>1. Overview</h2>
+                <p><strong>ViewStereo</strong> is a native macOS studio application for automatically detecting, rectifying, and restoring 19th-century historical stereoview cards (stereographs) as well as modern stereo photographs into Apple Vision Pro Spatial Photos (MV-HEVC), Side-by-Side (SBS), Anaglyph, MPO, and digitally remounted cards.</p>
+                <div class="callout">
+                    <strong>Early Development Notice:</strong> ViewStereo (v0.1.0) is currently in active early development. All Core ML models are bundled directly inside the app and run 100% offline on your Mac.
+                </div>
+            </section>
+
+            <section id="workflow">
+                <h2>2. Basic Workflow</h2>
+                <ol>
+                    <li><strong>Import Media</strong>: Drag and drop a scanned stereoview card, a Left/Right image pair, an SBS image, or a folder onto the canvas (or press <code>⌘O</code>).</li>
+                    <li><strong>Auto Segmentation &amp; Alignment</strong>: When enabled, ViewStereo automatically runs Core ML card segmentation, 7-DoF homography alignment, color matching, and stereo window placement (re-run manually with <code>⇧⌘A</code>).</li>
+                    <li><strong>Inspect Preview</strong>: Switch between 8 display modes via the top toolbar or <code>⌘1</code>–<code>⌘8</code>. Press <code>X</code> to swap Left/Right views if needed.</li>
+                    <li><strong>Fine-Tune or Remount</strong>: Adjust <strong>STEREO WINDOW</strong> horizontal shift or customize <strong>STEREOVIEW CARD MOUNT</strong> presets.</li>
+                    <li><strong>Export</strong>: Choose your target <strong>Stereo Layout</strong> in the footer and press <code>⌘E</code>.</li>
+                </ol>
+            </section>
+
+            <section id="segmentation">
+                <h2>3. Core ML Card Segmentation</h2>
+                <p>Configure card extraction under <strong>BASIC RECIPE &gt; STEREO CARD DETECTION</strong>:</p>
+                <ul>
+                    <li><strong>Card Mode</strong>:
+                        <ul>
+                            <li><code>Off</code>: Skips card segmentation for modern L/R pairs and pre-cropped SBS images.</li>
+                            <li><code>Crop Inner</code>: Removes the cardboard mount and extracts clean rectangular L/R prints (recommended).</li>
+                            <li><code>Keep Arch (Black)</code>: Preserves vintage arch-top silhouettes against a black mask.</li>
+                        </ul>
+                    </li>
+                    <li><strong>Core ML Card Segmentation (AI)</strong>: Uses <code>StereoCardSeg</code> (U-Net) to localize left/right prints and estimate mount luminance.</li>
+                    <li><strong>Segmentation Refiner</strong>: Choose between <code>MobileSAM</code> (fast &amp; lightweight), <code>SAM 2.1 Tiny</code> (high precision for aged borders), or <code>U-Net Only</code>.</li>
+                    <li><strong>Card Frame</strong>: Apply classic <code>Off</code>, <code>Rounded</code>, or <code>Arch</code> borders to modern stereo photos.</li>
+                </ul>
+            </section>
+
+            <section id="homography">
+                <h2>4. 7-DoF Homography &amp; MAAIR</h2>
+                <p>Historical hand-mounted prints frequently suffer from roll tilt, magnification mismatch, keystoning, and vertical disparity. ViewStereo’s <code>StereoCore</code> solver uses Apple Accelerate <strong>LAPACK (<code>dposv_</code>) + IRLS</strong> to symmetrically rectify both views and eliminate vertical disparity to sub-pixel precision.</p>
+                <ul>
+                    <li><strong>Vision Person Motion Mask (Cha-Cha)</strong>: Masks moving human subjects in handheld Cha-Cha captures so static backgrounds align accurately.</li>
+                    <li><strong>Keep Original Aspect Ratio (MAAIR)</strong>: Computes the Maximum Area Axis-aligned Inscribed Rectangle across both warped views to guarantee zero black borders.</li>
+                </ul>
+            </section>
+
+            <section id="window">
+                <h2>5. Stereo Window Calibration</h2>
+                <p>To prevent uncomfortable frame-edge window violations, ViewStereo automatically calculates the optimal horizontal shift (<code>Auto: XX.X px</code>) from foreground disparity.</p>
+                <ul>
+                    <li><strong>Vision Saliency Subject Priority</strong>: Prioritizes the primary subject detected by Apple Vision Attention Saliency when placing the stereo window.</li>
+                    <li><strong>Horizontal Shift (px)</strong>: Real-time 3-piece studio control (slider, reset button, and numeric input from <code>-300.0</code> to <code>+300.0 px</code>).</li>
+                </ul>
+            </section>
+
+            <section id="remount">
+                <h2>6. Digital Remount &amp; OCR</h2>
+                <p>Select <strong>Card (Stereoview Card)</strong> in the display mode or export layout to reconstruct museum-grade stereoview cards.</p>
+                <h3>Era-Authentic Mount Styles (8 Presets)</h3>
+                <ul>
+                    <li><code>Original Mount (Remount)</code> &amp; <code>Auto Sample Source Color</code></li>
+                    <li><code>1900s Keystone Dark</code> (charcoal slate curved mount)</li>
+                    <li><code>1880s Classic Buff</code> (warm buff mount)</li>
+                    <li><code>1870s Cabinet Terracotta</code> &amp; <code>1870s Victorian Green</code> (with period bicolor edges)</li>
+                    <li><code>1860s Chrome Yellow</code> &amp; <code>1850s Early Ivory</code> (square corners &amp; prints)</li>
+                </ul>
+                <h3>Specs, Print Cuts &amp; Letterpress OCR</h3>
+                <p>Supports 7-inch card standards (<code>Standard 7 × 3.5 in</code>, <code>Cabinet 7 × 4.0 in</code>, <code>Imperial 7 × 4.5 in</code>), print cuts (<code>Arched Top</code>, <code>Rounded Corners</code>, <code>Square</code>), and center division styles. With <strong>Letterpress (Auto OCR)</strong>, Vision OCR reads catalog numbers, captions, and vertical publisher credits from the original scan and re-typesets them cleanly.</p>
+            </section>
+
+            <section id="color">
+                <h2>7. Color Harmonization</h2>
+                <ul>
+                    <li><strong>Auto Color Match</strong>: Choose <code>Off</code>, <code>Left Ref</code>, or <code>Right Ref</code> to harmonize exposure differences and uneven sepia aging between left and right prints.</li>
+                    <li><strong>Remove Unilateral Noise &amp; Dust</strong>: Suppresses dust specks and scratches that appear in only one eye’s view.</li>
+                </ul>
+            </section>
+
+            <section id="export">
+                <h2>8. Display Modes &amp; Export</h2>
+                <p>Switch seamlessly between <strong>8 real-time display modes</strong> (<code>2D</code>, <code>SBS</code>, <code>LR/RL</code>, <code>Dubois</code>, <code>Color Anaglyph</code>, <code>Gray Anaglyph</code>, <code>Polarized</code>, <code>Card</code>) and export across <strong>11 layouts</strong>, including <code>Separate L/R</code>, <code>Spatial Photo (HEIC / MV-HEVC)</code> for Apple Vision Pro, and <code>MPO (3D Camera)</code>. Adjustment reports (<code>.txt</code>) can also be saved.</p>
+            </section>
+
+            <section id="batch">
+                <h2>9. Batch Folder Processing</h2>
+                <p>Press <code>⇧⌘B</code> or drop a folder directly onto the canvas to batch-process entire archives. Supports <code>Auto (L/R Pairs + SBS)</code>, <code>SBS Images Only</code>, and <code>Consecutive L/R Pairs</code>, outputting by default to <code>&lt;Input&gt;/ViewStereo_Output</code>.</p>
+            </section>
+
+            <section id="shortcuts">
+                <h2>10. Keyboard Shortcuts</h2>
+                <table>
+                    <thead>
+                        <tr><th>Shortcut</th><th>Action</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td><code>⌘ O</code></td><td>Open Stereoview Card, L/R pair, or SBS image</td></tr>
+                        <tr><td><code>⇧ ⌘ B</code></td><td>Batch Process Folder</td></tr>
+                        <tr><td><code>⌘ E</code></td><td>Export Image in current layout</td></tr>
+                        <tr><td><code>⇧ ⌘ A</code></td><td>Run Auto Align &amp; Window calibration</td></tr>
+                        <tr><td><code>X</code></td><td>Swap Left / Right views (L ⇄ R)</td></tr>
+                        <tr><td><code>⌘ 1</code> – <code>⌘ 8</code></td><td>Switch preview display mode (2D to Card)</td></tr>
+                        <tr><td><code>⌘ ?</code></td><td>Open Help window</td></tr>
+                        <tr><td><code>⌘ ,</code></td><td>Open Settings (Large Text Mode 1.2x)</td></tr>
+                    </tbody>
+                </table>
+            </section>
+        </main>
+    </div>
+
+    <footer>
+        &copy; 2026 ViewStereo Project. All rights reserved.
+    </footer>
+</body>
+</html>

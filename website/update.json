@@ -1,0 +1,10 @@
+{
+  "latest_version": "0.1.0",
+  "release_date": "2026/11/18",
+  "download_url": "https://viewstereo.p-media.jp/ViewStereo.dmg",
+  "changelog": {
+    "ja": "【ViewStereo 0.1.0 初回リリース】\n・19世紀ステレオカード（Stereoview / Stereograph）の自動検出・分割（Core ML StereoCardSeg + MobileSAM / SAM 2.1 Tiny）を搭載。\n・7自由度対称ホモグラフィ整準（LAPACK dposv_ + IRLS）による垂直視差ゼロ化、および MAAIR 最大共通内接矩形クロップを実装。\n・最前景＆Vision顕著性に基づくインテリジェント・ステレオウィンドウ決定とリアルタイム微調整UIを搭載。\n・8種類の歴史的台紙プリセット（1850s〜1900s）＆Vision OCR活版タイポグラフィによるデジタル・リマウント機能を搭載。\n・Apple Vision Pro 空間写真（HEIC / MV-HEVC）、SBS、アナグリフ、MPO、フォルダ一括バッチ処理に対応。",
+    "en": "[ViewStereo 0.1.0 Initial Release]\n- Core ML Stereoview Card Auto-Segmentation (StereoCardSeg + MobileSAM / SAM 2.1 Tiny) with arch-top frame detection.\n- 7-DoF Symmetric Homography alignment (LAPACK dposv_ + IRLS) for zero vertical disparity and MAAIR optimal cropping.\n- Intelligent Stereo Window placement with Vision Attention Saliency and real-time fine-tuning controls.\n- Digital Remount engine featuring 8 era-authentic mount presets (1850s–1900s) and Vision OCR letterpress typography.\n- Export to Apple Vision Pro Spatial Photo (HEIC / MV-HEVC), SBS, Anaglyph, MPO, and folder batch processing."
+  },
+  "minimum_supported_version": "0.0.1"
+}

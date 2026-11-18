@@ -1,0 +1,370 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		SW0100010000000000000001 /* ViewStereoApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = SW0200010000000000000001 /* ViewStereoApp.swift */; };
+		SW0100020000000000000001 /* ViewStereoModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = SW0200020000000000000001 /* ViewStereoModels.swift */; };
+		SW0100030000000000000001 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SW0200030000000000000001 /* ContentView.swift */; };
+		SW0100040000000000000001 /* help_ja.html in Resources */ = {isa = PBXBuildFile; fileRef = SW0200040000000000000001 /* help_ja.html */; };
+		SW0100050000000000000001 /* help_en.html in Resources */ = {isa = PBXBuildFile; fileRef = SW0200050000000000000001 /* help_en.html */; };
+		SW0100060000000000000001 /* StereoStudioCore in Frameworks */ = {isa = PBXBuildFile; productRef = SW0800010000000000000001 /* StereoStudioCore */; };
+		SW0100070000000000000001 /* StereoCore in Frameworks */ = {isa = PBXBuildFile; productRef = SW0800020000000000000001 /* StereoCore */; };
+		SW0100080000000000000001 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = SW0200060000000000000001 /* Localizable.strings */; };
+		SW0100090000000000000001 /* StereoCardSegmenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = SW0200090000000000000001 /* StereoCardSegmenter.swift */; };
+		SW0100100000000000000001 /* StereoCardSeg.mlmodelc in Resources */ = {isa = PBXBuildFile; fileRef = SW0200100000000000000001 /* StereoCardSeg.mlmodelc */; };
+		SW0100110000000000000001 /* MobileSAMEncoder.mlmodelc in Resources */ = {isa = PBXBuildFile; fileRef = SW0200110000000000000001 /* MobileSAMEncoder.mlmodelc */; };
+		SW0100120000000000000001 /* MobileSAMDecoder.mlmodelc in Resources */ = {isa = PBXBuildFile; fileRef = SW0200120000000000000001 /* MobileSAMDecoder.mlmodelc */; };
+		SW0100130000000000000001 /* SAM2_1TinyImageEncoderFLOAT16.mlmodelc in Resources */ = {isa = PBXBuildFile; fileRef = SW0200130000000000000001 /* SAM2_1TinyImageEncoderFLOAT16.mlmodelc */; };
+		SW0100140000000000000001 /* SAM2_1TinyPromptEncoderFLOAT16.mlmodelc in Resources */ = {isa = PBXBuildFile; fileRef = SW0200140000000000000001 /* SAM2_1TinyPromptEncoderFLOAT16.mlmodelc */; };
+		SW0100150000000000000001 /* SAM2_1TinyMaskDecoderFLOAT16.mlmodelc in Resources */ = {isa = PBXBuildFile; fileRef = SW0200150000000000000001 /* SAM2_1TinyMaskDecoderFLOAT16.mlmodelc */; };
+		SW0100160000000000000001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = SW0200160000000000000001 /* Assets.xcassets */; };
+		SW0100170000000000000001 /* WelcomeIcon.png in Resources */ = {isa = PBXBuildFile; fileRef = SW0200170000000000000001 /* WelcomeIcon.png */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		SW0200000000000000000001 /* ViewStereo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ViewStereo.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		SW0200010000000000000001 /* ViewStereoApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewStereoApp.swift; sourceTree = "<group>"; };
+		SW0200020000000000000001 /* ViewStereoModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewStereoModels.swift; sourceTree = "<group>"; };
+		SW0200030000000000000001 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		SW0200040000000000000001 /* help_ja.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = help_ja.html; sourceTree = "<group>"; };
+		SW0200050000000000000001 /* help_en.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = help_en.html; sourceTree = "<group>"; };
+		SW0200070000000000000001 /* ja */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ja; path = ja.lproj/Localizable.strings; sourceTree = "<group>"; };
+		SW0200080000000000000001 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
+		SW0200090000000000000001 /* StereoCardSegmenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StereoCardSegmenter.swift; sourceTree = "<group>"; };
+		SW0200100000000000000001 /* StereoCardSeg.mlmodelc */ = {isa = PBXFileReference; lastKnownFileType = folder; path = StereoCardSeg.mlmodelc; sourceTree = "<group>"; };
+		SW0200110000000000000001 /* MobileSAMEncoder.mlmodelc */ = {isa = PBXFileReference; lastKnownFileType = folder; path = MobileSAMEncoder.mlmodelc; sourceTree = "<group>"; };
+		SW0200120000000000000001 /* MobileSAMDecoder.mlmodelc */ = {isa = PBXFileReference; lastKnownFileType = folder; path = MobileSAMDecoder.mlmodelc; sourceTree = "<group>"; };
+		SW0200130000000000000001 /* SAM2_1TinyImageEncoderFLOAT16.mlmodelc */ = {isa = PBXFileReference; lastKnownFileType = folder; path = SAM2_1TinyImageEncoderFLOAT16.mlmodelc; sourceTree = "<group>"; };
+		SW0200140000000000000001 /* SAM2_1TinyPromptEncoderFLOAT16.mlmodelc */ = {isa = PBXFileReference; lastKnownFileType = folder; path = SAM2_1TinyPromptEncoderFLOAT16.mlmodelc; sourceTree = "<group>"; };
+		SW0200150000000000000001 /* SAM2_1TinyMaskDecoderFLOAT16.mlmodelc */ = {isa = PBXFileReference; lastKnownFileType = folder; path = SAM2_1TinyMaskDecoderFLOAT16.mlmodelc; sourceTree = "<group>"; };
+		SW0200160000000000000001 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		SW0200170000000000000001 /* WelcomeIcon.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = WelcomeIcon.png; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		SW0300010000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				SW0100060000000000000001 /* StereoStudioCore in Frameworks */,
+				SW0100070000000000000001 /* StereoCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		SW0400000000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				SW0400010000000000000001 /* Sources */,
+				SW0400020000000000000001 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		SW0400010000000000000001 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				SW0400030000000000000001 /* ViewStereo */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		SW0400020000000000000001 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				SW0200000000000000000001 /* ViewStereo.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		SW0400030000000000000001 /* ViewStereo */ = {
+			isa = PBXGroup;
+			children = (
+				SW0200010000000000000001 /* ViewStereoApp.swift */,
+				SW0400040000000000000001 /* Models */,
+				SW0400050000000000000001 /* Views */,
+				SW0400060000000000000001 /* Resources */,
+			);
+			path = ViewStereo;
+			sourceTree = "<group>";
+		};
+		SW0400040000000000000001 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				SW0200020000000000000001 /* ViewStereoModels.swift */,
+				SW0200090000000000000001 /* StereoCardSegmenter.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		SW0400050000000000000001 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				SW0200030000000000000001 /* ContentView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		SW0400060000000000000001 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				SW0200040000000000000001 /* help_ja.html */,
+				SW0200050000000000000001 /* help_en.html */,
+				SW0200060000000000000001 /* Localizable.strings */,
+				SW0200100000000000000001 /* StereoCardSeg.mlmodelc */,
+				SW0200110000000000000001 /* MobileSAMEncoder.mlmodelc */,
+				SW0200120000000000000001 /* MobileSAMDecoder.mlmodelc */,
+				SW0200130000000000000001 /* SAM2_1TinyImageEncoderFLOAT16.mlmodelc */,
+				SW0200140000000000000001 /* SAM2_1TinyPromptEncoderFLOAT16.mlmodelc */,
+				SW0200150000000000000001 /* SAM2_1TinyMaskDecoderFLOAT16.mlmodelc */,
+				SW0200160000000000000001 /* Assets.xcassets */,
+				SW0200170000000000000001 /* WelcomeIcon.png */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		SW0500010000000000000001 /* ViewStereo */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = SW0900020000000000000001 /* Build configuration list for PBXNativeTarget "ViewStereo" */;
+			buildPhases = (
+				SW0500020000000000000001 /* Sources */,
+				SW0300010000000000000001 /* Frameworks */,
+				SW0500030000000000000001 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ViewStereo;
+			packageProductDependencies = (
+				SW0800010000000000000001 /* StereoStudioCore */,
+				SW0800020000000000000001 /* StereoCore */,
+			);
+			productName = ViewStereo;
+			productReference = SW0200000000000000000001 /* ViewStereo.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		SW0600010000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1540;
+				LastUpgradeCheck = 1540;
+			};
+			buildConfigurationList = SW0900010000000000000001 /* Build configuration list for PBXProject "ViewStereo" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = ja;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				ja,
+				en,
+				Base,
+			);
+			mainGroup = SW0400000000000000000001;
+			packageReferences = (
+				SW0700010000000000000001 /* XCLocalSwiftPackageReference "../StereoStudioCore" */,
+				SW0700020000000000000001 /* XCLocalSwiftPackageReference "../stalign_src/Packages/StereoCore" */,
+			);
+			productRefGroup = SW0400020000000000000001 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				SW0500010000000000000001 /* ViewStereo */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		SW0500030000000000000001 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				SW0100040000000000000001 /* help_ja.html in Resources */,
+				SW0100050000000000000001 /* help_en.html in Resources */,
+				SW0100080000000000000001 /* Localizable.strings in Resources */,
+				SW0100100000000000000001 /* StereoCardSeg.mlmodelc in Resources */,
+				SW0100110000000000000001 /* MobileSAMEncoder.mlmodelc in Resources */,
+				SW0100120000000000000001 /* MobileSAMDecoder.mlmodelc in Resources */,
+				SW0100130000000000000001 /* SAM2_1TinyImageEncoderFLOAT16.mlmodelc in Resources */,
+				SW0100140000000000000001 /* SAM2_1TinyPromptEncoderFLOAT16.mlmodelc in Resources */,
+				SW0100150000000000000001 /* SAM2_1TinyMaskDecoderFLOAT16.mlmodelc in Resources */,
+				SW0100160000000000000001 /* Assets.xcassets in Resources */,
+				SW0100170000000000000001 /* WelcomeIcon.png in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXVariantGroup section */
+		SW0200060000000000000001 /* Localizable.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				SW0200070000000000000001 /* ja */,
+				SW0200080000000000000001 /* en */,
+			);
+			name = Localizable.strings;
+			sourceTree = "<group>";
+		};
+/* End PBXVariantGroup section */
+
+/* Begin PBXSourcesBuildPhase section */
+		SW0500020000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				SW0100010000000000000001 /* ViewStereoApp.swift in Sources */,
+				SW0100020000000000000001 /* ViewStereoModels.swift in Sources */,
+				SW0100030000000000000001 /* ContentView.swift in Sources */,
+				SW0100090000000000000001 /* StereoCardSegmenter.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		SW0900030000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		SW0900040000000000000001 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_NO_COMMON_BLOCKS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		SW0900050000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOLS = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = ViewStereo;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "© 2026 ViewStereo Project. All rights reserved.";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = jp.p-media.ViewStereo;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		SW0900060000000000000001 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOLS = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = ViewStereo;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "© 2026 ViewStereo Project. All rights reserved.";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = jp.p-media.ViewStereo;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		SW0900010000000000000001 /* Build configuration list for PBXProject "ViewStereo" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				SW0900030000000000000001 /* Debug */,
+				SW0900040000000000000001 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		SW0900020000000000000001 /* Build configuration list for PBXNativeTarget "ViewStereo" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				SW0900050000000000000001 /* Debug */,
+				SW0900060000000000000001 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		SW0700010000000000000001 /* XCLocalSwiftPackageReference "../StereoStudioCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "../StereoStudioCore";
+		};
+		SW0700020000000000000001 /* XCLocalSwiftPackageReference "../stalign_src/Packages/StereoCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "../stalign_src/Packages/StereoCore";
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		SW0800010000000000000001 /* StereoStudioCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = SW0700010000000000000001 /* XCLocalSwiftPackageReference "../StereoStudioCore" */;
+			productName = StereoStudioCore;
+		};
+		SW0800020000000000000001 /* StereoCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = SW0700020000000000000001 /* XCLocalSwiftPackageReference "../stalign_src/Packages/StereoCore" */;
+			productName = StereoCore;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = SW0600010000000000000001 /* Project object */;
+}
