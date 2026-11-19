@@ -1,10 +1,10 @@
 {
-  "latest_version": "0.1.2",
-  "release_date": "2026/11/19",
+  "latest_version": "0.1.3",
+  "release_date": "2026/11/20",
   "download_url": "https://viewstereo.p-media.jp/ViewStereo.dmg",
   "changelog": {
-    "ja": "【ViewStereo 0.1.2 アップデート】\n・古写真・退色階調復元（Vintage Photo Restoration）を搭載：1860年代 鶏卵紙セピア（Albumen Sepia）、1890年代 ゼラチンシルバー調、純モノクロームのプリントトーン選択、自動黒締め・白抜き（Auto-Level %）、局所コントラスト（CLAHE %）、および「復元前と比較」トグルを新設。\n・Core ML AI 光学デブラー（NAFNet-GoPro）を搭載：オンデバイスモデル NAFNetDeblur.mlmodelc を内蔵し、レンズぼけや経年劣化による鮮鋭度低下をAI復元。高周波・葉/粒子保護スライダーにより視野闘争（Retinal Rivalry）を防止。\n・片側ノイズ・ダスト自動除去の即時非破壊プレビュー更新とアップデート管理ダイアログのローカライズを改善。",
-    "en": "[ViewStereo 0.1.2 Update]\n- Vintage Photo Restoration & Tone Recovery: Added non-destructive print tones (1860s Albumen Sepia, 1890s Warm Silver, Pure Monochrome, Original), Auto-Level (B/W Point %), Local Contrast (CLAHE %), and a real-time Compare Before toggle.\n- On-Device Core ML AI Optical Deblur (NAFNet-GoPro): Bundled NAFNetDeblur.mlmodelc for 100% offline optical deblurring and edge sharpness recovery, paired with Foliage / Texture Protection to prevent stereoscopic retinal rivalry.\n- Instant non-destructive dust removal preview updates and improved Update Manager initialization & localization."
+    "ja": "【ViewStereo 0.1.3 アップデート】\n・手彩色風・AI カラー化（Hand-Tinted & AI Colorization）を搭載：オンデバイス Core ML モデル StereoColorizer.mlmodelc を内蔵し、1890s 明治手彩色風（透明水彩）、AI ナチュラルカラー化、既存手彩色の左右色ムラ同期に対応。強度・温かみスライダーやワンクリックプリセットも装備。\n・ツールバー刷新 & パネル開閉トグル追加：サイドバー表示切替、退色復元・彩色・ウィンドウ・台紙・基本設定・バッチ等の専用ツールバーボタンを整備。\n・セグメンテーションエンジンの統合：MobileSAM を廃止し StereoCardSeg + SAM 2.1 Tiny パイプラインへ一本化。古写真復元の有効化トグル・実行ボタンを追加。",
+    "en": "[ViewStereo 0.1.3 Update]\n- Hand-Tinted & AI Colorization (StereoColorizer): Bundled on-device Core ML model StereoColorizer.mlmodelc supporting 1890s Hand-Tinted (Watercolor), Natural Full Color (AI), and Harmonize Existing Hand-Tint modes with Intensity & Tint Warmth sliders.\n- Redesigned Toolbar & Collapsible Panel Toggles: Added dedicated toolbar actions for Sidebar, Align, Window, Mount, Restore, Colorize, Recipe, Batch, and Export panels.\n- Streamlined Segmentation Engine: Consolidated segmentation onto StereoCardSeg + SAM 2.1 Tiny (removing redundant MobileSAM models) and added explicit restoration toggle/apply controls."
   },
   "minimum_supported_version": "0.0.1"
 }

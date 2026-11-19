@@ -18,7 +18,7 @@
   <h2>主な機能</h2>
   <div class="card">
     <ul>
-      <li><strong>ステレオカード自動検出・分割 (Card Segmentation)</strong>: 台紙付きステレオカードをドロップするだけで、Core ML（StereoCardSeg + MobileSAM / SAM 2.1 Tiny）が左右の写真領域およびアーチ型（Arch-top）枠を高精度に認識・抽出します。</li>
+      <li><strong>ステレオカード自動検出・分割 (Card Segmentation)</strong>: 台紙付きステレオカードをドロップするだけで、Core ML（StereoCardSeg + SAM 2.1 Tiny）が左右の写真領域およびアーチ型（Arch-top）枠を高精度に認識・抽出します。</li>
       <li><strong>7自由度対称ホモグラフィ最適化</strong>: 手貼りによる回転・スケール差・キーストーン・垂直視差を LAPACK <code>dposv_</code> ＋ IRLS でサブピクセル精度に完全解消します。</li>
       <li><strong>インテリジェント・ステレオウィンドウ決定</strong>: 最前景（最近接被写体）を基準にステレオウィンドウを自動設定し、目への負担（網膜闘争・ウィンドウバイオレーション）を防止します。</li>
       <li><strong>MAAIR 最大共通内接矩形</strong>: 幾何補正後の左右領域から有効領域を最大化した共通矩形を算出して自動トリミングします。</li>

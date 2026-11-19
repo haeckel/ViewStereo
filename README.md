@@ -1,6 +1,6 @@
 # ViewStereo 🎞️✨
 
-[![Version](https://img.shields.io/badge/version-0.1.2-brightgreen.svg)](https://viewstereo.p-media.jp/)
+[![Version](https://img.shields.io/badge/version-0.1.3-brightgreen.svg)](https://viewstereo.p-media.jp/)
 [![Status](https://img.shields.io/badge/status-Early%20Development-amber.svg)](#development-status)
 [![Platform](https://img.shields.io/badge/platform-macOS%2014.0+-lightgrey.svg)](https://apple.co/macos)
 [![Technology](https://img.shields.io/badge/tech-Card%20Segmentation%20%7C%207--DoF%20Homography%20%7C%20Stereo%20Window%20%7C%20Digital%20Remount-orange.svg)](https://viewstereo.p-media.jp/)
@@ -16,6 +16,10 @@ Designed as the archival restoration and geometric alignment companion to **Spla
 ---
 
 ## 🚀 Key Features
+
+### 🎨 v0.1.3 New: AI Colorization & Hand-Tint Harmonization (`StereoColorizer`)
+- **On-Device AI & Hand-Tint Colorization**: Bundled `StereoColorizer.mlmodelc` transforms monochrome stereoviews into **Natural Full Color (AI)** or **1890s Hand-Tinted (Watercolor)** prints, or **Harmonizes Existing Hand-Tint** across left and right views.
+- **Streamlined Toolbar & SAM 2.1 Tiny Pipeline**: Added dedicated toolbar toggles for Restore, Colorize, Window, Mount, Recipe, and Batch panels, and standardized segmentation on `StereoCardSeg + SAM 2.1 Tiny`.
 
 ### 🎞️ v0.1.2 New: Vintage Photo Restoration & Core ML AI Optical Deblur
 - **Vintage Print Tone & Contrast Recovery**: Non-destructive 1860s Albumen Sepia, 1890s Warm Silver, and Pure Monochrome tone presets paired with Auto-Level (B/W Point) and Local Contrast (CLAHE) restoration plus a real-time **Compare Before** toggle.

@@ -112,7 +112,6 @@
 "BASIC RECIPE" = "BASIC RECIPE";
 "STEREO CARD DETECTION" = "STEREO CARD DETECTION";
 "Core ML Card Segmentation (AI)" = "Core ML Card Segmentation (AI)";
-"Segmentation Refiner" = "Segmentation Refiner";
 "AUTO ALIGNMENT & AI" = "AUTO ALIGNMENT & AI";
 "Auto Align on Load" = "Auto Align on Load";
 "STEREO COLOR & RESTORE" = "STEREO COLOR & RESTORE";
@@ -160,13 +159,34 @@
 "1. Open Stereoview Card, L/R Pair, or Folder" = "1. Open Stereoview Card, L/R Pair, or Folder";
 "Drop vintage stereo cards or modern stereo photos for auto-segmentation & alignment" = "Drop vintage stereo cards or modern stereo photos for auto-segmentation & alignment";
 "2. AI Card Segmentation & 7-DoF Alignment" = "2. AI Card Segmentation & 7-DoF Alignment";
-"Core ML (StereoCardSeg + MobileSAM) + LAPACK dposv_ & Metal Lanczos-3" = "Core ML (StereoCardSeg + MobileSAM) + LAPACK dposv_ & Metal Lanczos-3";
+"Core ML (StereoCardSeg + SAM 2.1 Tiny) + LAPACK dposv_ & Metal Lanczos-3" = "Core ML (StereoCardSeg + SAM 2.1 Tiny) + LAPACK dposv_ & Metal Lanczos-3";
 "3. Intelligent Stereo Window & Spatial Photo" = "3. Intelligent Stereo Window & Spatial Photo";
 "Optimized zero-parallax window with Vision Pro Spatial Photo & VR export" = "Optimized zero-parallax window with Vision Pro Spatial Photo & VR export";
 "Auto: %.1f px" = "Auto: %.1f px";
 "Output: <Input>/ViewStereo_Output" = "Output: <Input>/ViewStereo_Output";
 
 /* Stereoview Card Mount Reconstruction */
+"New Stereoview" = "New Stereoview";
+"Sidebar" = "Sidebar";
+"Toggle Sidebar" = "Toggle Sidebar";
+"Toolbar Open" = "Open";
+"Toolbar Folder" = "Batch";
+"Toolbar Align" = "Align";
+"Toolbar Window" = "Window";
+"Toolbar Mount" = "Mount";
+"Toolbar Restore" = "Restore";
+"Toolbar Colorize" = "Colorize";
+"Toolbar Recipe" = "Recipe";
+"Toolbar Batch" = "Batch";
+"Toolbar Export" = "Export";
+"Panels" = "Panels";
+"Toggle Stereo Window Panel" = "Toggle Stereo Window Panel";
+"Toggle Stereoview Card Mount Panel" = "Toggle Stereoview Card Mount Panel";
+"Toggle Vintage Restoration Panel" = "Toggle Vintage Restoration Panel";
+"Toggle Colorization Panel" = "Toggle Colorization Panel";
+"COLORIZATION & HAND-TINT" = "COLORIZATION & HAND-TINT";
+"Toggle Basic Recipe Panel" = "Toggle Basic Recipe Panel";
+"Toggle Batch Processing Panel" = "Toggle Batch Processing Panel";
 "StereoView" = "StereoView";
 "Card" = "Card";
 "Stereoview Card" = "Stereoview Card";
@@ -212,6 +232,7 @@
 
 /* Vintage Photo Restoration */
 "VINTAGE PHOTO RESTORATION" = "VINTAGE PHOTO RESTORATION";
+"Enable Vintage & Noise Restoration" = "Enable Vintage & Noise Restoration";
 "1860s Albumen Preset" = "1860s Albumen Preset";
 "Print Tone" = "Print Tone";
 "Original" = "Original";
@@ -231,6 +252,20 @@
 "Applying AI optical deblur (NAFNet)..." = "Applying AI optical deblur (NAFNet)...";
 "Removing unilateral noise & dust..." = "Removing unilateral noise & dust...";
 "Removing unilateral dust & restoring photo..." = "Removing unilateral dust & restoring photo...";
+"1860s Albumen" = "1860s Albumen";
+"1890s Hand-Tint" = "1890s Hand-Tint";
+"Hand-Tinted & AI Colorization" = "Hand-Tinted & AI Colorization";
+"1890s Hand-Tinted (Watercolor)" = "1890s Hand-Tinted (Watercolor)";
+"Natural Full Color (AI)" = "Natural Full Color (AI)";
+"Harmonize Existing Hand-Tint" = "Harmonize Existing Hand-Tint";
+"Color Intensity (%)" = "Color Intensity (%)";
+"Tint Warmth (%)" = "Tint Warmth (%)";
+"Core ML: StereoColorizer Active" = "Core ML: StereoColorizer Active";
+"Hand-Tint Fallback (Add StereoColorizer.mlmodelc for AI Color)" = "Hand-Tint Fallback (Add StereoColorizer.mlmodelc for AI Color)";
+"Colorizing stereo pair..." = "Colorizing stereo pair...";
+"Apply Restoration" = "Apply Restoration";
+"Apply Colorization" = "Apply Colorization";
+"Clear Colorization" = "Clear Colorization";
 
 /* Update Manager */
 "update_available_title" = "New Update Available";

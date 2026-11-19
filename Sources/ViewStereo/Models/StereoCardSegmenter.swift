@@ -7,15 +7,7 @@ import StereoCore
 import StereoStudioCore
 import Vision
 
-enum CoreMLRefinerModel: String, CaseIterable, Identifiable, Sendable {
-    case mobileSAM = "MobileSAM"
-    case sam21Tiny = "SAM 2.1 Tiny"
-    case none = "U-Net Only"
-
-    var id: String { rawValue }
-}
-
-/// Core ML (StereoCardSeg v2 + MobileSAM / SAM 2.1 Tiny) を用いたステレオカードの台紙・左右写真領域自動セグメンテーション
+/// Core ML (StereoCardSeg v2 + SAM 2.1 Tiny) を用いたステレオカードの台紙・左右写真領域自動セグメンテーション
 final class StereoCardSegmenter: @unchecked Sendable {
     static let shared = StereoCardSegmenter()
 
@@ -48,8 +40,6 @@ final class StereoCardSegmenter: @unchecked Sendable {
     }
 
     private var cachedModel: MLModel? = nil
-    private var cachedSamEncoder: MLModel? = nil
-    private var cachedSamDecoder: MLModel? = nil
     private var cachedSam2Encoder: MLModel? = nil
     private var cachedSam2Prompt: MLModel? = nil
     private var cachedSam2Decoder: MLModel? = nil
@@ -148,8 +138,7 @@ final class StereoCardSegmenter: @unchecked Sendable {
         from rgb: [UInt8],
         width: Int,
         height: Int,
-        mode: StereoCardCropper.ExtractionMode,
-        refiner: CoreMLRefinerModel = .mobileSAM
+        mode: StereoCardCropper.ExtractionMode
     ) -> StereoCardCropper.CropResult? {
         lock.lock()
         latestCardLuma = nil
@@ -218,15 +207,143 @@ final class StereoCardSegmenter: @unchecked Sendable {
             let c1 = Int(Double(W) * 0.60)
             var splitX = W / 2
             var bestColMean = Float.greatestFiniteMagnitude
-            for x in c0..<c1 {
+            var colMeans = [Float](repeating: 0.0, count: W)
+            for x in 0..<W {
                 var sum: Float = 0
                 for y in 0..<H {
                     sum += probPhoto[y * W + x]
                 }
                 let mean = sum / Float(H)
-                if mean < bestColMean {
+                colMeans[x] = mean
+                if x >= c0 && x < c1 && mean < bestColMean {
                     bestColMean = mean
                     splitX = x
+                }
+            }
+
+            // ゼロギャップ・細線セパレータ・左右非対称マージン密着カード対策:
+            // U-Netの確率谷が浅い（bestColMean >= 0.60）場合、または谷が幾何中心からズレた対称継ぎ目がある場合に物理垂直境界線へスナップ
+            if (bestColMean >= 0.60 || bestColMean >= 0.12), width >= 64, height >= 64, rgb.count >= width * height * 3 {
+                let sy0 = Int(Double(height) * 0.22)
+                let sy1 = max(sy0 + 8, Int(Double(height) * 0.78))
+                let stepY = max(1, (sy1 - sy0) / 48)
+                var sampleCount = 0
+                var yCheck = sy0
+                while yCheck < sy1 { sampleCount += 1; yCheck += stepY }
+
+                if sampleCount >= 8 {
+                    func evalSeamColumn(_ ux: Int) -> (bestContrast: Double, physAtBestContrast: Double, bestPhys: Double, contrastAtBestPhys: Double) {
+                        var bestC = 0.0, physAtC = 0.0
+                        var bestP = 0.0, contrastAtP = 0.0
+                        rgb.withUnsafeBufferPointer { ptr in
+                            guard let base = ptr.baseAddress else { return }
+                            func lumaAt(_ px: Int, _ py: Int) -> Double {
+                                let cx = min(width - 1, max(0, px))
+                                let i = (py * width + cx) * 3
+                                return (Double(base[i]) + Double(base[i + 1]) + Double(base[i + 2])) / 3.0
+                            }
+                            let sxA = max(3, min(width - 4, ux * width / W))
+                            let sxB = max(sxA + 1, min(width - 3, (ux + 1) * width / W))
+                            for sx in sxA..<sxB {
+                                var sumContrast = 0.0
+                                var sumVertDiff = 0.0
+                                var sumL = 0.0
+                                var lumas: [Double] = []
+                                lumas.reserveCapacity(sampleCount)
+
+                                var y = sy0
+                                var prevL: Double? = nil
+                                while y < sy1 {
+                                    let lc = lumaAt(sx, y)
+                                    let lL1 = lumaAt(sx - 1, y)
+                                    let lR1 = lumaAt(sx + 1, y)
+                                    let lL3 = lumaAt(sx - 3, y)
+                                    let lR3 = lumaAt(sx + 3, y)
+                                    // 細い仕切り線（暗線・明線）または左右画面間の急峻なステップの両方を捉える
+                                    let thinContrast = abs(lc - 0.5 * (lL3 + lR3))
+                                    let stepContrast = max(abs(lR1 - lL1), abs(lR3 - lL3) * 0.7)
+                                    sumContrast += max(thinContrast, stepContrast)
+                                    if let p = prevL {
+                                        sumVertDiff += abs(lc - p)
+                                    }
+                                    prevL = lc
+                                    sumL += lc
+                                    lumas.append(lc)
+                                    y += stepY
+                                }
+
+                                let avgContrast = sumContrast / Double(lumas.count)
+                                let avgVertDiff = sumVertDiff / Double(max(1, lumas.count - 1))
+                                let meanL = sumL / Double(lumas.count)
+                                let consistentCnt = lumas.filter { abs($0 - meanL) <= 24.0 }.count
+                                let consistentRatio = Double(consistentCnt) / Double(lumas.count)
+                                let phys = (avgContrast / (avgVertDiff + 8.0)) * (0.4 + 0.6 * consistentRatio)
+
+                                if avgContrast > bestC {
+                                    bestC = avgContrast
+                                    physAtC = phys
+                                }
+                                if phys > bestP {
+                                    bestP = phys
+                                    contrastAtP = avgContrast
+                                }
+                            }
+                        }
+                        return (bestC, physAtC, bestP, contrastAtP)
+                    }
+
+                    if bestColMean >= 0.60 {
+                        let tight0 = max(c0, Int(Double(W) * 0.44))
+                        let tight1 = min(c1, Int(Double(W) * 0.56))
+                        if tight1 > tight0 + 2 {
+                            var bestHybridScore = -1.0
+                            var bestHybridX = splitX
+                            var peakLineContrast = 0.0
+                            let sigma = max(4.0, Double(W) * 0.045)
+
+                            for x in tight0..<tight1 {
+                                let res = evalSeamColumn(x)
+                                let dx = Double(x - W / 2)
+                                let centerPrior = exp(-(dx * dx) / (2.0 * sigma * sigma))
+                                let probValley = max(0.0, 1.0 - Double(colMeans[x]))
+                                let score = (res.bestPhys + probValley * 3.0) * centerPrior
+                                if score > bestHybridScore {
+                                    bestHybridScore = score
+                                    bestHybridX = x
+                                    peakLineContrast = res.contrastAtBestPhys
+                                }
+                            }
+
+                            if peakLineContrast >= 4.0 || bestColMean >= 0.85 {
+                                splitX = bestHybridX
+                            }
+                        }
+                    } else if let outerL = (0..<W).first(where: { colMeans[$0] >= 0.35 }),
+                              let outerR = (0..<W).reversed().first(where: { colMeans[$0] >= 0.35 }),
+                              outerR > outerL + W / 3 {
+                        // 左右非対称マージン＋密着カード向けの対称物理継ぎ目補正
+                        let midU = (outerL + outerR) / 2
+                        if abs(splitX - midU) >= 5 && midU >= c0 && midU < c1 {
+                            var uNearC = 0.0
+                            for ux in max(c0, splitX - 2)...min(c1 - 1, splitX + 2) {
+                                uNearC = max(uNearC, evalSeamColumn(ux).bestContrast)
+                            }
+                            var midBestX = midU
+                            var midBestC = 0.0
+                            var midBestP = 0.0
+                            for ux in max(c0, midU - 4)...min(c1 - 1, midU + 4) {
+                                let res = evalSeamColumn(ux)
+                                if res.bestContrast > midBestC {
+                                    midBestC = res.bestContrast
+                                    midBestP = res.physAtBestContrast
+                                    midBestX = ux
+                                }
+                            }
+                            if midBestC >= 40.0 && midBestP >= 1.20 && midBestC >= uNearC * 1.6 {
+                                splitX = midBestX
+                            }
+                        }
+                    }
                 }
             }
 
@@ -269,48 +386,65 @@ final class StereoCardSegmenter: @unchecked Sendable {
                 return nil
             }
 
-            // 外周ラベル枠（P. Rossier / Keystone 等）の垂直境界線トリミング + 台紙境界エッジへのスナップ + 左右の上下Y範囲同期
+            // 外周ラベル枠（P. Rossier / Keystone 等）の垂直境界線トリミング + 台紙境界エッジへのスナップ + 帯域検証付き左右上下Y範囲同期
             trimOuterLabelBorders(rgb: rgb, srcW: width, srcH: height, boxL: &roughBoxL, boxR: &roughBoxR, maskW: W, maskH: H)
             refineVerticalBoundsInMask(rgb: rgb, srcW: width, srcH: height, boxL: &roughBoxL, boxR: &roughBoxR, maskW: W, maskH: H)
-            let syncRoughMinY = min(roughBoxL.minY, roughBoxR.minY)
-            let syncRoughMaxY = max(roughBoxL.maxY, roughBoxR.maxY)
-            roughBoxL = IntBox(minX: roughBoxL.minX, minY: syncRoughMinY, maxX: roughBoxL.maxX, maxY: syncRoughMaxY)
-            roughBoxR = IntBox(minX: roughBoxR.minX, minY: syncRoughMinY, maxX: roughBoxR.maxX, maxY: syncRoughMaxY)
+            syncRoughBoundsY(rgb: rgb, srcW: width, srcH: height, boxL: &roughBoxL, boxR: &roughBoxR, maskW: W, maskH: H)
+
+            lock.lock()
+            let prelimCardLuma = latestCardLuma
+            lock.unlock()
+            let preLx0 = max(0, roughBoxL.minX * width / W)
+            let preLx1 = min(width, (roughBoxL.maxX + 1) * width / W)
+            var preLy0 = max(0, roughBoxL.minY * height / H)
+            let preLy1 = min(height, (roughBoxL.maxY + 1) * height / H)
+            let preRx0 = max(0, roughBoxR.minX * width / W)
+            let preRx1 = min(width, (roughBoxR.maxX + 1) * width / W)
+            var preRy0 = max(0, roughBoxR.minY * height / H)
+            let preRy1 = min(height, (roughBoxR.maxY + 1) * height / H)
+            let prelimCardRGB = Self.sampleLocalCardRGB(
+                rgb: rgb, srcW: width, srcH: height,
+                yTop: min(preLy0, preRy0), yBot: max(preLy1, preRy1),
+                xLeft: preLx0, xRight: preRx1,
+                fallbackLuma: prelimCardLuma
+            )
+            if let prelimCardRGB {
+                let origPreLy0 = preLy0
+                let origPreRy0 = preRy0
+                Self.recoverOvercroppedTopEdgeRGB(
+                    rgb: rgb, srcW: width, srcH: height,
+                    cLx0: preLx0, cLx1: preLx1, cLy0: &preLy0, cLy1: preLy1,
+                    cRx0: preRx0, cRx1: preRx1, cRy0: &preRy0, cRy1: preRy1,
+                    cardRGB: prelimCardRGB
+                )
+                if preLy0 < origPreLy0 {
+                    roughBoxL.minY = min(roughBoxL.minY, max(0, preLy0 * H / height))
+                }
+                if preRy0 < origPreRy0 {
+                    roughBoxR.minY = min(roughBoxR.minY, max(0, preRy0 * H / height))
+                }
+            }
 
             var finalMaskL = maskL
             var finalMaskR = maskR
             var mw = W
             var mh = H
 
-            let refinedResult: RefinedMasks?
-            switch refiner {
-            case .mobileSAM:
-                refinedResult = refineWithMobileSAM(
-                    cgImage: cgImage,
-                    srcW: width,
-                    srcH: height,
-                    boxL: roughBoxL,
-                    boxR: roughBoxR,
-                    refMaskL: maskL,
-                    refMaskR: maskR,
-                    refW: W,
-                    refH: H
-                )
-            case .sam21Tiny:
-                refinedResult = refineWithSAM21Tiny(
-                    cgImage: cgImage,
-                    srcW: width,
-                    srcH: height,
-                    boxL: roughBoxL,
-                    boxR: roughBoxR,
-                    refMaskL: maskL,
-                    refMaskR: maskR,
-                    refW: W,
-                    refH: H
-                )
-            case .none:
-                refinedResult = nil
-            }
+            let refinedResult = refineWithSAM21Tiny(
+                cgImage: cgImage,
+                rgb: rgb,
+                cardRGB: prelimCardRGB,
+                srcW: width,
+                srcH: height,
+                boxL: roughBoxL,
+                boxR: roughBoxR,
+                refMaskL: maskL,
+                refMaskR: maskR,
+                probPhoto: probPhoto,
+                splitX: splitX,
+                refW: W,
+                refH: H
+            )
 
             if let refined = refinedResult {
                 finalMaskL = refined.maskL
@@ -358,11 +492,11 @@ final class StereoCardSegmenter: @unchecked Sendable {
             let insetLY = max(2.0, (rawLy1 - rawLy0) * 0.004)
 
             var cLx0 = max(0, Int(floor(rawLx0 + insetLX)))
-            let cLx1 = min(width, Int(ceil(rawLx1 - insetLX)))
+            var cLx1 = min(width, Int(ceil(rawLx1 - insetLX)))
             var cLy0 = max(0, Int(floor(rawLy0 + insetLY)))
             var cLy1 = min(height, Int(ceil(rawLy1)))
 
-            let cRx0 = max(0, Int(floor(rawRx0 + insetRX)))
+            var cRx0 = max(0, Int(floor(rawRx0 + insetRX)))
             var cRx1 = min(width, Int(ceil(rawRx1 - insetRX)))
             var cRy0 = max(0, Int(floor(rawRy0 + insetRY)))
             var cRy1 = min(height, Int(ceil(rawRy1)))
@@ -373,8 +507,18 @@ final class StereoCardSegmenter: @unchecked Sendable {
             let effectiveCardRGB = Self.sampleLocalCardRGB(
                 rgb: rgb, srcW: width, srcH: height,
                 yTop: min(cLy0, cRy0), yBot: max(cLy1, cRy1),
+                xLeft: cLx0, xRight: cRx1,
                 fallbackLuma: cardLuma
             )
+
+            if let effectiveCardRGB {
+                Self.recoverOvercroppedTopEdgeRGB(
+                    rgb: rgb, srcW: width, srcH: height,
+                    cLx0: cLx0, cLx1: cLx1, cLy0: &cLy0, cLy1: cLy1,
+                    cRx0: cRx0, cRx1: cRx1, cRy0: &cRy0, cRy1: cRy1,
+                    cardRGB: effectiveCardRGB
+                )
+            }
 
             Self.trimHorizontalCardAndCaptionBorders(
                 rgb: rgb, srcW: width, srcH: height,
@@ -385,8 +529,8 @@ final class StereoCardSegmenter: @unchecked Sendable {
             if let effectiveCardRGB {
                 Self.trimOuterCardColumnsRGB(
                     rgb: rgb, srcW: width, srcH: height,
-                    cLx0: &cLx0, cLx1: cLx1, cLy0: cLy0, cLy1: cLy1,
-                    cRx0: cRx0, cRx1: &cRx1, cRy0: cRy0, cRy1: cRy1,
+                    cLx0: &cLx0, cLx1: &cLx1, cLy0: cLy0, cLy1: cLy1,
+                    cRx0: &cRx0, cRx1: &cRx1, cRy0: cRy0, cRy1: cRy1,
                     cardRGB: effectiveCardRGB
                 )
             }
@@ -417,17 +561,31 @@ final class StereoCardSegmenter: @unchecked Sendable {
 
             // フル解像度の外側コーナー（中央谷間の番号 594 等の影響を受けない L左上 & R右上）からアーチ形状を精密計測
             if let cardRGB = effectiveCardRGB {
-                if let measured = Self.measureOuterCornerArchShapeRGB(leftRGB: fullOutL, rightRGB: fullOutR, width: cw, height: ch, cardRGB: cardRGB) {
+                let topSquare = Self.isCornersSquareRGB(leftRGB: fullOutL, rightRGB: fullOutR, width: cw, height: ch, cardRGB: cardRGB, isTop: true)
+                let botSquare = Self.isCornersSquareRGB(leftRGB: fullOutL, rightRGB: fullOutR, width: cw, height: ch, cardRGB: cardRGB, isTop: false)
+                if topSquare {
+                    archParams = ArchShapeParams(topRxRatio: 0.0, topRyRatio: 0.0, botRxRatio: 0.0, botRyRatio: 0.0)
+                } else if let measured = Self.measureOuterCornerArchShapeRGB(leftRGB: fullOutL, rightRGB: fullOutR, width: cw, height: ch, cardRGB: cardRGB) {
                     archParams.topRxRatio = max(archParams.topRxRatio, measured.topRxRatio)
                     archParams.topRyRatio = max(archParams.topRyRatio, measured.topRyRatio)
+                    archParams.botRxRatio = 0.0
+                    archParams.botRyRatio = 0.0
+                } else if archParams.topRyRatio < 0.24 {
+                    // フル解像度 RGB で明確なアーチ肩が検出されず低解像度マスク値のみが 0.24 未満（角欠け・空誤差）の場合は直角プリントとみなす
+                    archParams.topRxRatio = 0.0
+                    archParams.topRyRatio = 0.0
+                }
+                if botSquare {
+                    archParams.botRxRatio = 0.0
+                    archParams.botRyRatio = 0.0
                 }
             }
 
-            let finalTopRx = max(0.04, archParams.topRxRatio)
-            let finalTopRy = max(0.04, archParams.topRyRatio)
-            let isArchTop = finalTopRy >= 0.05
-            var finalBotRx = (isArchTop || archParams.botRxRatio < 0.05) ? 0.0 : archParams.botRxRatio
-            var finalBotRy = (isArchTop || archParams.botRyRatio < 0.05) ? 0.0 : archParams.botRyRatio
+            let finalTopRx = archParams.topRxRatio < 0.02 ? 0.0 : archParams.topRxRatio
+            let finalTopRy = archParams.topRyRatio < 0.02 ? 0.0 : archParams.topRyRatio
+            let isArchTop = finalTopRy >= 0.06
+            var finalBotRx = (isArchTop || archParams.botRxRatio < 0.045) ? 0.0 : archParams.botRxRatio
+            var finalBotRy = (isArchTop || archParams.botRyRatio < 0.045) ? 0.0 : archParams.botRyRatio
             if finalBotRx > finalTopRx {
                 finalBotRx = min(finalBotRx, finalTopRx)
                 finalBotRy = min(finalBotRy, finalTopRy)
@@ -523,14 +681,35 @@ final class StereoCardSegmenter: @unchecked Sendable {
 
     // MARK: - SAM 2.1 Tiny Refinement
 
+    private struct RefinedMasks {
+        let maskL: [Bool]
+        let maskR: [Bool]
+        let probL: [Float]
+        let probR: [Float]
+        let w: Int
+        let h: Int
+    }
+
+    private struct SAMCandidateResult {
+        let mask: [Bool]
+        let box: IntBox
+        let area: Int
+        let iou: Double
+        let composite: Double
+    }
+
     private func refineWithSAM21Tiny(
         cgImage: CGImage,
+        rgb: [UInt8],
+        cardRGB: (r: Double, g: Double, b: Double)?,
         srcW: Int,
         srcH: Int,
         boxL: IntBox,
         boxR: IntBox,
         refMaskL: [Bool],
         refMaskR: [Bool],
+        probPhoto: [Float],
+        splitX: Int,
         refW: Int,
         refH: Int
     ) -> RefinedMasks? {
@@ -565,22 +744,120 @@ final class StereoCardSegmenter: @unchecked Sendable {
                 return nil
             }
 
-            func decodeSide(box: IntBox, refMask: [Bool]) -> [Bool]? {
-                guard let ptsArr = try? MLMultiArray(shape: [1, 2, 2], dataType: .float16),
-                      let lblArr = try? MLMultiArray(shape: [1, 2], dataType: .float16) else {
+            func toSAMX(_ rx: Double) -> Float {
+                Float(max(0.0, min(Double(samSize - 1), rx / Double(refW) * Double(resizedW))))
+            }
+            func toSAMY(_ ry: Double) -> Float {
+                Float(max(0.0, min(Double(samSize - 1), ry / Double(refH) * Double(resizedH))))
+            }
+
+            // Step A: 正・負ポイントプロンプト + Box（PromptEncoder は末尾にパディング +1 を付加し Decoder 上限が 15 のため N ∈ [2, 14] を厳守）
+            func buildPromptPoints(
+                box: IntBox,
+                otherBox: IntBox,
+                refMask: [Bool],
+                isLeft: Bool,
+                includePoints: Bool
+            ) -> [(x: Float, y: Float, label: Float)] {
+                var pts: [(x: Float, y: Float, label: Float)] = []
+                pts.reserveCapacity(10)
+
+                if includePoints {
+                    let cx = (box.minX + box.maxX) / 2
+                    let cy = (box.minY + box.maxY) / 2
+                    let bh = max(1, box.maxY - box.minY + 1)
+
+                    func isSafePositive(_ rx: Int, _ ry: Int) -> Bool {
+                        guard rx >= 1, rx < refW - 1, ry >= 1, ry < refH - 1,
+                              refMask[ry * refW + rx] else { return false }
+                        var cnt = 0
+                        for dy in -1...1 {
+                            for dx in -1...1 where refMask[(ry + dy) * refW + (rx + dx)] {
+                                cnt += 1
+                            }
+                        }
+                        return cnt >= 5
+                    }
+
+                    // 正ポイント (label = 1.0, 最大 3 点)
+                    let posCandidates = [
+                        (cx, cy),
+                        (cx, box.minY + Int(Double(bh) * 0.30)),
+                        (cx, box.minY + Int(Double(bh) * 0.72)),
+                    ]
+                    var seenY: [Int] = []
+                    for (px, py) in posCandidates where !seenY.contains(py) && isSafePositive(px, py) {
+                        seenY.append(py)
+                        pts.append((toSAMX(Double(px)), toSAMY(Double(py)), 1.0))
+                    }
+
+                    // 負ポイント (label = 0.0, 最大 4 点: 確信度の高い外周余白・明確な中央ギャップのみに限定し、斜めマスクや手貼り段差への干渉を防ぐ)
+                    func appendNegIfBg(_ rx: Int, _ ry: Int, threshold: Float = 0.15, verifyBackgroundRGB: Bool = true) {
+                        guard rx >= 0, rx < refW, ry >= 0, ry < refH,
+                              probPhoto[ry * refW + rx] < threshold else { return }
+                        if verifyBackgroundRGB, let cRGB = cardRGB, rgb.count >= srcW * srcH * 3 {
+                            let sx = min(srcW - 1, max(0, rx * srcW / refW))
+                            let sy = min(srcH - 1, max(0, ry * srcH / refH))
+                            let idx = (sy * srcW + sx) * 3
+                            let r = Double(rgb[idx]), g = Double(rgb[idx + 1]), b = Double(rgb[idx + 2])
+                            let luma = (r + g + b) / 3.0
+                            let cLuma = (cRGB.r + cRGB.g + cRGB.b) / 3.0
+                            let isCardLike = max(abs(r - cRGB.r), max(abs(g - cRGB.g), abs(b - cRGB.b))) <= 42.0
+                            let isScanLike = (luma >= 218.0 || luma <= 35.0)
+                            let isBlackFrameOnBright = (cLuma >= 115.0 && luma <= 85.0)
+                            guard isCardLike || isScanLike || isBlackFrameOnBright else { return }
+                        }
+                        pts.append((toSAMX(Double(rx)), toSAMY(Double(ry)), 0.0))
+                    }
+
+                    let padY = max(3, Int(Double(refH) * 0.035))
+                    let padX = max(3, Int(Double(refW) * 0.030))
+                    appendNegIfBg(cx, box.minY - padY, verifyBackgroundRGB: true)
+                    appendNegIfBg(cx, box.maxY + padY, verifyBackgroundRGB: true)
+                    if isLeft {
+                        appendNegIfBg(box.minX - padX, cy, verifyBackgroundRGB: true)
+                    } else {
+                        appendNegIfBg(box.maxX + padX, cy, verifyBackgroundRGB: true)
+                    }
+
+                    // 4px 以上の明確な隙間がある場合のみ中央ギャップ点に負ポイントを配置（密着カードには置かない）
+                    let gapStart = isLeft ? (box.maxX + 1) : (otherBox.maxX + 1)
+                    let gapEnd = isLeft ? (otherBox.minX - 1) : (box.minX - 1)
+                    if gapEnd - gapStart + 1 >= 4 {
+                        let midX = (gapStart + gapEnd) / 2
+                        appendNegIfBg(midX, cy, threshold: 0.25, verifyBackgroundRGB: false)
+                    }
+
+                    if pts.count > 12 {
+                        pts = Array(pts.prefix(12))
+                    }
+                }
+
+                // Box プロンプト（末尾に label = 2.0, 3.0）
+                pts.append((toSAMX(Double(box.minX)), toSAMY(Double(box.minY)), 2.0))
+                pts.append((toSAMX(Double(box.maxX + 1)), toSAMY(Double(box.maxY + 1)), 3.0))
+                return pts
+            }
+
+            func decodeSide(
+                box: IntBox,
+                otherBox: IntBox,
+                refMask: [Bool],
+                isLeft: Bool,
+                includePoints: Bool
+            ) -> SAMCandidateResult? {
+                let pts = buildPromptPoints(box: box, otherBox: otherBox, refMask: refMask, isLeft: isLeft, includePoints: includePoints)
+                let pointCount = min(14, max(2, pts.count))
+                guard let ptsArr = try? MLMultiArray(shape: [1, NSNumber(value: pointCount), 2], dataType: .float16),
+                      let lblArr = try? MLMultiArray(shape: [1, NSNumber(value: pointCount)], dataType: .float16) else {
                     return nil
                 }
-                let x0 = Float(box.minX) / Float(refW) * Float(resizedW)
-                let y0 = Float(box.minY) / Float(refH) * Float(resizedH)
-                let x1 = Float(box.maxX + 1) / Float(refW) * Float(resizedW)
-                let y1 = Float(box.maxY + 1) / Float(refH) * Float(resizedH)
 
-                ptsArr[[0, 0, 0] as [NSNumber]] = NSNumber(value: x0)
-                ptsArr[[0, 0, 1] as [NSNumber]] = NSNumber(value: y0)
-                ptsArr[[0, 1, 0] as [NSNumber]] = NSNumber(value: x1)
-                ptsArr[[0, 1, 1] as [NSNumber]] = NSNumber(value: y1)
-                lblArr[[0, 0] as [NSNumber]] = NSNumber(value: 2.0)
-                lblArr[[0, 1] as [NSNumber]] = NSNumber(value: 3.0)
+                for i in 0..<pointCount {
+                    ptsArr[[0, NSNumber(value: i), 0] as [NSNumber]] = NSNumber(value: pts[i].x)
+                    ptsArr[[0, NSNumber(value: i), 1] as [NSNumber]] = NSNumber(value: pts[i].y)
+                    lblArr[[0, NSNumber(value: i)] as [NSNumber]] = NSNumber(value: pts[i].label)
+                }
 
                 let pProvider = try? MLDictionaryFeatureProvider(dictionary: [
                     "points": MLFeatureValue(multiArray: ptsArr),
@@ -612,8 +889,32 @@ final class StereoCardSegmenter: @unchecked Sendable {
                 let sX = masks.strides[3].intValue
                 let isFP16 = (masks.dataType == .float16)
 
-                var bestMask: [Bool]? = nil
-                var bestIoU: Double = -1.0
+                // Step B: scores [1, 3] 出力の読み出し（IoU予測確信度）
+                var candScores = [Double](repeating: 0.5, count: cCount)
+                if let scoreArr = decOut.featureValue(for: "scores")?.multiArrayValue {
+                    let sStrideK = scoreArr.strides.last?.intValue ?? 1
+                    let sCount = min(cCount, scoreArr.shape.last?.intValue ?? cCount)
+                    if scoreArr.dataType == .float16 {
+                        let sPtr16 = scoreArr.dataPointer.assumingMemoryBound(to: Float16.self)
+                        for k in 0..<sCount {
+                            let val = Double(sPtr16[k * sStrideK])
+                            if val.isFinite {
+                                candScores[k] = min(1.0, max(0.0, val))
+                            }
+                        }
+                    } else {
+                        let sPtr32 = scoreArr.dataPointer.assumingMemoryBound(to: Float.self)
+                        for k in 0..<sCount {
+                            let val = Double(sPtr32[k * sStrideK])
+                            if val.isFinite {
+                                candScores[k] = min(1.0, max(0.0, val))
+                            }
+                        }
+                    }
+                }
+
+                var candidates: [SAMCandidateResult] = []
+                candidates.reserveCapacity(cCount)
 
                 for k in 0..<cCount {
                     var raw = [Bool](repeating: false, count: validW * validH)
@@ -642,166 +943,115 @@ final class StereoCardSegmenter: @unchecked Sendable {
                     }
 
                     let filled = hvConvexFill(raw, w: validW, h: validH)
+                    guard let samBox = robustBoundingBox(mask: filled, w: validW, h: validH) else { continue }
                     let iou = computeIoU(filled, w: validW, h: validH, refMask: refMask, refW: refW, refH: refH)
-                    if iou > bestIoU {
-                        bestIoU = iou
-                        bestMask = filled
-                    }
+                    let area = filled.reduce(0) { $0 + ($1 ? 1 : 0) }
+                    let boxArea = max(1, (samBox.maxX - samBox.minX + 1) * (samBox.maxY - samBox.minY + 1))
+                    let fillRatio = min(1.0, Double(area) / Double(boxArea))
+                    let composite = iou * 0.72 + candScores[k] * 0.15 + fillRatio * 0.13
+                    candidates.append(SAMCandidateResult(mask: filled, box: samBox, area: area, iou: iou, composite: composite))
                 }
-                guard bestIoU >= 0.65, let best = bestMask,
-                      isAcceptableSAMMask(best, w: validW, h: validH, promptBox: box, refW: refW, refH: refH) else {
-                    return nil
-                }
-                return best
+                return selectBestSAMCandidate(candidates: candidates, w: validW, h: validH, promptBox: box, refW: refW, refH: refH)
             }
 
-            guard let samL = decodeSide(box: boxL, refMask: refMaskL),
-                  let samR = decodeSide(box: boxR, refMask: refMaskR) else {
+            func decodeSideWithFallback(box: IntBox, otherBox: IntBox, refMask: [Bool], isLeft: Bool) -> SAMCandidateResult? {
+                if let withPts = decodeSide(box: box, otherBox: otherBox, refMask: refMask, isLeft: isLeft, includePoints: true) {
+                    return withPts
+                }
+                return decodeSide(box: box, otherBox: otherBox, refMask: refMask, isLeft: isLeft, includePoints: false)
+            }
+
+            func toRefMinY(_ validY: Int) -> Int {
+                max(0, min(refH - 1, Int(floor(Double(validY) / Double(validH) * Double(refH)))))
+            }
+            func toRefMaxY(_ validY: Int) -> Int {
+                max(0, min(refH - 1, Int(ceil(Double(validY + 1) / Double(validH) * Double(refH))) - 1))
+            }
+
+            // Step C: パス 1 推論 ＋ 片側失敗救済 ＋ 同一 image_embedding による高さ不整合の 2 パス自己修復
+            // （手貼りカードでは L/R で垂直位置のみ 10〜25px 段差がつくため、絶対 Y 座標ではなくプリント高さの有意差でのみ補正する）
+            var candL = decodeSideWithFallback(box: boxL, otherBox: boxR, refMask: refMaskL, isLeft: true)
+            var candR = decodeSideWithFallback(box: boxR, otherBox: boxL, refMask: refMaskR, isLeft: false)
+
+            if let l = candL, candR == nil {
+                let sy0 = toRefMinY(l.box.minY)
+                let sy1 = toRefMaxY(l.box.maxY)
+                if sy1 > sy0 + 8 {
+                    let syncBoxR = IntBox(minX: boxR.minX, minY: sy0, maxX: boxR.maxX, maxY: sy1)
+                    candR = decodeSideWithFallback(box: syncBoxR, otherBox: boxL, refMask: refMaskR, isLeft: false)
+                }
+            } else if let r = candR, candL == nil {
+                let sy0 = toRefMinY(r.box.minY)
+                let sy1 = toRefMaxY(r.box.maxY)
+                if sy1 > sy0 + 8 {
+                    let syncBoxL = IntBox(minX: boxL.minX, minY: sy0, maxX: boxL.maxX, maxY: sy1)
+                    candL = decodeSideWithFallback(box: syncBoxL, otherBox: boxR, refMask: refMaskL, isLeft: true)
+                }
+            }
+
+            guard var resL = candL, var resR = candR else {
                 return nil
             }
 
-            return RefinedMasks(
-                maskL: samL,
-                maskR: samR,
-                probL: smoothProbFromMask(samL, w: validW, h: validH),
-                probR: smoothProbFromMask(samR, w: validW, h: validH),
-                w: validW,
-                h: validH
-            )
-        } catch {
-            return nil
-        }
-    }
+            let hL = resL.box.maxY - resL.box.minY + 1
+            let hR = resR.box.maxY - resR.box.minY + 1
+            let diffH = abs(hL - hR)
+            let tolH = max(6, min(hL, hR) / 12)
 
-    // MARK: - MobileSAM Refinement
+            if diffH >= tolH {
+                let scoreDiff = resL.composite - resR.composite
+                let trustLeft: Bool
+                if abs(scoreDiff) >= 0.03 {
+                    trustLeft = scoreDiff > 0
+                } else {
+                    trustLeft = hL <= hR
+                }
+                let trust = trustLeft ? resL : resR
+                let bad = trustLeft ? resR : resL
+                let trustH = trust.box.maxY - trust.box.minY + 1
+                let targetRefH = max(16, Int((Double(trustH) / Double(validH) * Double(refH)).rounded()))
 
-    private struct RefinedMasks {
-        let maskL: [Bool]
-        let maskR: [Bool]
-        let probL: [Float]
-        let probR: [Float]
-        let w: Int
-        let h: Int
-    }
+                let badRefMinY = toRefMinY(bad.box.minY)
+                let badRefMaxY = toRefMaxY(bad.box.maxY)
+                let deltaTop = abs(bad.box.minY - trust.box.minY)
+                let deltaBot = abs(bad.box.maxY - trust.box.maxY)
 
-    private func refineWithMobileSAM(
-        cgImage: CGImage,
-        srcW: Int,
-        srcH: Int,
-        boxL: IntBox,
-        boxR: IntBox,
-        refMaskL: [Bool],
-        refMaskR: [Bool],
-        refW: Int,
-        refH: Int
-    ) -> RefinedMasks? {
-        guard let encoder = loadModel(name: "MobileSAMEncoder", cache: &cachedSamEncoder),
-              let decoder = loadModel(name: "MobileSAMDecoder", cache: &cachedSamDecoder) else {
-            return nil
-        }
-
-        let scale = Double(samSize) / Double(max(srcW, srcH))
-        let resizedW = max(1, Int((Double(srcW) * scale).rounded()))
-        let resizedH = max(1, Int((Double(srcH) * scale).rounded()))
-        let validW = max(1, Int((Double(resizedW) / 4.0).rounded()))
-        let validH = max(1, Int((Double(resizedH) / 4.0).rounded()))
-
-        guard let paddedCG = makeTopLeftPaddedCGImage(cgImage, targetSize: samSize, drawW: resizedW, drawH: resizedH) else {
-            return nil
-        }
-
-        do {
-            let imgFeature = try MLFeatureValue(
-                cgImage: paddedCG,
-                pixelsWide: samSize,
-                pixelsHigh: samSize,
-                pixelFormatType: kCVPixelFormatType_32BGRA,
-                options: nil
-            )
-            let encOut = try encoder.prediction(from: MLDictionaryFeatureProvider(dictionary: ["image": imgFeature]))
-            guard let embeddings = encOut.featureValue(for: "image_embeddings")?.multiArrayValue else {
-                return nil
-            }
-
-            func decodeSide(box: IntBox, refMask: [Bool]) -> [Bool]? {
-                let boxArr = try? MLMultiArray(shape: [1, 4], dataType: .float32)
-                guard let boxArr else { return nil }
-                boxArr[0] = NSNumber(value: Float(box.minX) / Float(refW) * Float(resizedW))
-                boxArr[1] = NSNumber(value: Float(box.minY) / Float(refH) * Float(resizedH))
-                boxArr[2] = NSNumber(value: Float(box.maxX + 1) / Float(refW) * Float(resizedW))
-                boxArr[3] = NSNumber(value: Float(box.maxY + 1) / Float(refH) * Float(resizedH))
-
-                let decProvider = try? MLDictionaryFeatureProvider(dictionary: [
-                    "image_embeddings": MLFeatureValue(multiArray: embeddings),
-                    "box": MLFeatureValue(multiArray: boxArr),
-                ])
-                guard let decProvider,
-                      let decOut = try? decoder.prediction(from: decProvider),
-                      let masks = decOut.featureValue(for: "masks")?.multiArrayValue else {
-                    return nil
+                let adjMinY: Int
+                let adjMaxY: Int
+                if deltaBot >= deltaTop {
+                    adjMinY = badRefMinY
+                    adjMaxY = min(refH - 1, adjMinY + targetRefH - 1)
+                } else {
+                    adjMaxY = badRefMaxY
+                    adjMinY = max(0, adjMaxY - targetRefH + 1)
                 }
 
-                // masks shape: [1, 3, 256, 256]
-                let cCount = masks.shape[1].intValue
-                let sC = masks.strides[1].intValue
-                let sY = masks.strides[2].intValue
-                let sX = masks.strides[3].intValue
-                let isFP16 = (masks.dataType == .float16)
-
-                var bestMask: [Bool]? = nil
-                var bestIoU: Double = -1.0
-
-                for k in 0..<cCount {
-                    var raw = [Bool](repeating: false, count: validW * validH)
-                    if isFP16 {
-                        let ptr16 = masks.dataPointer.assumingMemoryBound(to: Float16.self)
-                        let cOff = k * sC
-                        for y in 0..<validH {
-                            let yOff = cOff + y * sY
-                            for x in 0..<validW {
-                                if ptr16[yOff + x * sX] > 0 {
-                                    raw[y * validW + x] = true
-                                }
+                if adjMaxY > adjMinY + 8 {
+                    if trustLeft {
+                        let retryBoxR = IntBox(minX: boxR.minX, minY: adjMinY, maxX: boxR.maxX, maxY: adjMaxY)
+                        if let retryR = decodeSideWithFallback(box: retryBoxR, otherBox: boxL, refMask: refMaskR, isLeft: false) {
+                            let newHR = retryR.box.maxY - retryR.box.minY + 1
+                            if abs(hL - newHR) < diffH {
+                                resR = retryR
                             }
                         }
                     } else {
-                        let ptr32 = masks.dataPointer.assumingMemoryBound(to: Float.self)
-                        let cOff = k * sC
-                        for y in 0..<validH {
-                            let yOff = cOff + y * sY
-                            for x in 0..<validW {
-                                if ptr32[yOff + x * sX] > 0 {
-                                    raw[y * validW + x] = true
-                                }
+                        let retryBoxL = IntBox(minX: boxL.minX, minY: adjMinY, maxX: boxL.maxX, maxY: adjMaxY)
+                        if let retryL = decodeSideWithFallback(box: retryBoxL, otherBox: boxR, refMask: refMaskL, isLeft: true) {
+                            let newHL = retryL.box.maxY - retryL.box.minY + 1
+                            if abs(newHL - hR) < diffH {
+                                resL = retryL
                             }
                         }
                     }
-
-                    let filled = hvConvexFill(raw, w: validW, h: validH)
-                    let iou = computeIoU(filled, w: validW, h: validH, refMask: refMask, refW: refW, refH: refH)
-                    if iou > bestIoU {
-                        bestIoU = iou
-                        bestMask = filled
-                    }
                 }
-                // MobileSAM の候補を採用（縦横ともプロンプト範囲から大きく逸脱する被写体抜き・台紙拾いは不採用）
-                guard bestIoU >= 0.65, let best = bestMask,
-                      isAcceptableSAMMask(best, w: validW, h: validH, promptBox: box, refW: refW, refH: refH) else {
-                    return nil
-                }
-                return best
-            }
-
-            guard let samL = decodeSide(box: boxL, refMask: refMaskL),
-                  let samR = decodeSide(box: boxR, refMask: refMaskR) else {
-                return nil
             }
 
             return RefinedMasks(
-                maskL: samL,
-                maskR: samR,
-                probL: smoothProbFromMask(samL, w: validW, h: validH),
-                probR: smoothProbFromMask(samR, w: validW, h: validH),
+                maskL: resL.mask,
+                maskR: resR.mask,
+                probL: smoothProbFromMask(resL.mask, w: validW, h: validH),
+                probR: smoothProbFromMask(resR.mask, w: validW, h: validH),
                 w: validW,
                 h: validH
             )
@@ -879,7 +1129,29 @@ final class StereoCardSegmenter: @unchecked Sendable {
         return out
     }
 
-    /// SAM の出力マスクがプロンプト範囲から縦横に大きく逸脱していないか検証（被写体抜き・台紙拾いの防止）
+    /// SAM 2.1 Tiny の複数候補マスクから複合品質スコア（U-Net IoU + モデル確信度 scores + 矩形充填率）と境界妥当性で最良候補を選別
+    private func selectBestSAMCandidate(
+        candidates: [SAMCandidateResult],
+        w: Int,
+        h: Int,
+        promptBox: IntBox,
+        refW: Int,
+        refH: Int
+    ) -> SAMCandidateResult? {
+        let valid = candidates.filter {
+            $0.iou >= 0.65 && isAcceptableSAMMask($0.mask, w: w, h: h, promptBox: promptBox, refW: refW, refH: refH)
+        }
+        guard let best = valid.max(by: { $0.composite < $1.composite }) else { return nil }
+        // U-Net参照マスクが余白・黒枠・文字帯を含んでいる場合、複合スコアが僅差（0.03以内かつIoU 0.74以上）なら
+        // 余白を抱え込まない引き締まった（最小面積）マスクを優先する
+        let nearTop = valid.filter { $0.composite >= best.composite - 0.03 && $0.iou >= 0.74 }
+        guard !nearTop.isEmpty else { return best }
+        return nearTop.min { lhs, rhs in
+            if lhs.area != rhs.area { return lhs.area < rhs.area }
+            return lhs.composite > rhs.composite
+        }
+    }
+
     private func isAcceptableSAMMask(
         _ mask: [Bool],
         w: Int,
@@ -891,10 +1163,23 @@ final class StereoCardSegmenter: @unchecked Sendable {
         guard let samBox = robustBoundingBox(mask: mask, w: w, h: h) else { return false }
         let expectedW = Double(promptBox.maxX - promptBox.minX + 1) / Double(refW) * Double(w)
         let expectedH = Double(promptBox.maxY - promptBox.minY + 1) / Double(refH) * Double(h)
+        guard expectedW >= 8, expectedH >= 8 else { return false }
         let samW = Double(samBox.maxX - samBox.minX + 1)
         let samH = Double(samBox.maxY - samBox.minY + 1)
-        return samW >= expectedW * 0.94 && samW <= expectedW * 1.05
-            && samH >= expectedH * 0.94 && samH <= expectedH * 1.05
+        guard samW >= expectedW * 0.78 && samW <= expectedW * 1.05
+            && samH >= expectedH * 0.78 && samH <= expectedH * 1.05 else {
+            return false
+        }
+        let area = Double(mask.reduce(0) { $0 + ($1 ? 1 : 0) })
+        guard area >= (expectedW * expectedH) * 0.58 else {
+            return false
+        }
+        let expectedCx = (Double(promptBox.minX + promptBox.maxX) * 0.5 + 0.5) / Double(refW) * Double(w)
+        let expectedCy = (Double(promptBox.minY + promptBox.maxY) * 0.5 + 0.5) / Double(refH) * Double(h)
+        let samCx = Double(samBox.minX + samBox.maxX) * 0.5 + 0.5
+        let samCy = Double(samBox.minY + samBox.maxY) * 0.5 + 0.5
+        return abs(samCx - expectedCx) <= expectedW * 0.12
+            && abs(samCy - expectedCy) <= expectedH * 0.12
     }
 
     private func computeIoU(_ mask: [Bool], w: Int, h: Int, refMask: [Bool], refW: Int, refH: Int) -> Double {
@@ -1136,8 +1421,140 @@ final class StereoCardSegmenter: @unchecked Sendable {
         y1 = newY1
     }
 
+    /// U-Net / SAM が明るい天井や空などの写真上部を過小予測した場合に、
+    /// フル解像度 RGB と実測台紙色 (cardRGB) から写真本体の物理上端境界まで安全に外側（上方向）へ復元する
+    private static func recoverOvercroppedTopEdgeRGB(
+        rgb: [UInt8],
+        srcW: Int,
+        srcH: Int,
+        cLx0: Int, cLx1: Int, cLy0: inout Int, cLy1: Int,
+        cRx0: Int, cRx1: Int, cRy0: inout Int, cRy1: Int,
+        cardRGB: (r: Double, g: Double, b: Double)
+    ) {
+        guard srcW >= 64, srcH >= 64, rgb.count >= srcW * srcH * 3 else { return }
+        let cLuma = (cardRGB.r + cardRGB.g + cardRGB.b) / 3.0
+
+        // 画像最上端 (y = 1) でスキャナ背景を判定
+        let scanX0 = srcW / 4
+        let scanX1 = srcW * 3 / 4
+        let scanStep = max(1, (scanX1 - scanX0) / 64)
+        var sr = 0.0, sg = 0.0, sb = 0.0, slSq = 0.0
+        var scanCount = 0
+        rgb.withUnsafeBufferPointer { ptr in
+            guard let base = ptr.baseAddress else { return }
+            let rowOff = min(srcH - 1, 1) * srcW * 3
+            var x = scanX0
+            while x < scanX1 && scanCount < 64 {
+                let i = rowOff + x * 3
+                let r = Double(base[i]), g = Double(base[i + 1]), b = Double(base[i + 2])
+                let luma = (r + g + b) / 3.0
+                sr += r; sg += g; sb += b
+                slSq += luma * luma
+                scanCount += 1
+                x += scanStep
+            }
+        }
+        let topMeanR = scanCount > 0 ? sr / Double(scanCount) : 0.0
+        let topMeanG = scanCount > 0 ? sg / Double(scanCount) : 0.0
+        let topMeanB = scanCount > 0 ? sb / Double(scanCount) : 0.0
+        let topLuma = (topMeanR + topMeanG + topMeanB) / 3.0
+        let topStd = scanCount > 0 ? sqrt(max(0.0, slSq / Double(scanCount) - topLuma * topLuma)) : 255.0
+        let hasWhiteScan = (scanCount > 0 && topStd <= 14.0 && topLuma >= 218.0)
+        let hasBlackScan = (scanCount > 0 && topStd <= 14.0 && topLuma <= 35.0)
+
+        func recoverSide(x0: Int, x1: Int, y0: Int, y1: Int) -> Int {
+            let bw = x1 - x0
+            let bh = y1 - y0
+            guard bw >= 48, bh >= 64, y0 >= 4 else { return y0 }
+            let sx0 = max(0, x0 + bw / 4)
+            let sx1 = min(srcW, x1 - bw / 4)
+            guard sx1 > sx0 + 4 else { return y0 }
+            let step = max(1, (sx1 - sx0) / 64)
+
+            func analyzeRow(_ y: Int) -> (bgRatio: Double, darkRatio: Double, distCard: Double, meanLuma: Double, scanMatch: Bool) {
+                let cy = min(srcH - 1, max(0, y))
+                let rowOff = cy * srcW * 3
+                var rSum = 0.0, gSum = 0.0, bSum = 0.0
+                var bgCnt = 0, darkCnt = 0, n = 0
+                rgb.withUnsafeBufferPointer { ptr in
+                    guard let base = ptr.baseAddress else { return }
+                    var x = sx0
+                    while x < sx1 {
+                        let i = rowOff + x * 3
+                        let r = Double(base[i]), g = Double(base[i + 1]), b = Double(base[i + 2])
+                        let luma = (r + g + b) / 3.0
+                        rSum += r; gSum += g; bSum += b
+                        if max(abs(r - cardRGB.r), max(abs(g - cardRGB.g), abs(b - cardRGB.b))) <= 28.0 {
+                            bgCnt += 1
+                        }
+                        if luma <= 85.0 {
+                            darkCnt += 1
+                        }
+                        n += 1
+                        x += step
+                    }
+                }
+                guard n > 0 else { return (1.0, 0.0, 0.0, cLuma, false) }
+                let mr = rSum / Double(n), mg = gSum / Double(n), mb = bSum / Double(n)
+                let ml = (mr + mg + mb) / 3.0
+                let dist = sqrt(pow(mr - cardRGB.r, 2) + pow(mg - cardRGB.g, 2) + pow(mb - cardRGB.b, 2))
+                let maxDiffTop = max(abs(mr - topMeanR), max(abs(mg - topMeanG), abs(mb - topMeanB)))
+                let scanMatch = (hasWhiteScan && (ml >= 212.0 || maxDiffTop <= 28.0))
+                    || (hasBlackScan && (ml <= 38.0 || maxDiffTop <= 28.0))
+                return (Double(bgCnt) / Double(n), Double(darkCnt) / Double(n), dist, ml, scanMatch)
+            }
+
+            let maxExpand = min(Int(Double(bh) * 0.20), Int(Double(srcH) * 0.18))
+            let limitY = max(0, y0 - maxExpand)
+            let minGain = max(4, Int(Double(srcH) * 0.012))
+            guard y0 - 1 >= limitY else { return y0 }
+
+            var candY = y0
+            var bgSum = 0.0
+            var distSum = 0.0
+            var steps = 0
+
+            for y in stride(from: y0 - 1, through: limitY, by: -1) {
+                let st = analyzeRow(y)
+                if st.bgRatio >= 0.35 || st.distCard < 26.0 { break }
+                if st.scanMatch { break }
+                if cLuma >= 115.0 && st.meanLuma >= max(210.0, cLuma + 22.0) { break }
+                if cLuma >= 115.0 && ((st.darkRatio >= 0.45 && st.meanLuma <= 95.0) || st.darkRatio >= 0.55) { break }
+                candY = y
+                bgSum += st.bgRatio
+                distSum += st.distCard
+                steps += 1
+            }
+
+            guard steps >= minGain else { return y0 }
+            let meanBg = bgSum / Double(steps)
+            let meanDist = distSum / Double(steps)
+            guard meanBg <= 0.15, meanDist >= 32.0 else { return y0 }
+
+            var boundaryOK = (candY <= 2)
+            if !boundaryOK && candY >= 1 {
+                for k in 1...min(5, candY) {
+                    let st = analyzeRow(candY - k)
+                    if st.bgRatio >= 0.45 || (cLuma >= 115.0 && st.darkRatio >= 0.50) {
+                        boundaryOK = true
+                        break
+                    }
+                }
+            }
+            guard boundaryOK else { return y0 }
+
+            let inset = max(2, Int(Double(bh) * 0.004))
+            return min(y0, candY + inset)
+        }
+
+        cLy0 = recoverSide(x0: cLx0, x1: cLx1, y0: cLy0, y1: cLy1)
+        cRy0 = recoverSide(x0: cRx0, x1: cRx1, y0: cRy0, y1: cRy1)
+    }
+
     /// 写真窓の下部にある台紙帯・キャプション文字帯（London Stereoscopic... 等）や金枠・黒帯を検出し、
     /// 写真本体の水平境界線まで正確にトリミングする
+    /// 写真窓の上下端にある太い黒枠（Black Frame）・台紙帯・下部キャプション文字帯を検出し、
+    /// 写真本体の水平境界線まで安全かつ正確にトリミングする
     private static func trimHorizontalCardAndCaptionBorders(
         rgb: [UInt8],
         srcW: Int,
@@ -1146,113 +1563,406 @@ final class StereoCardSegmenter: @unchecked Sendable {
         cRx0: Int, cRx1: Int, cRy0: inout Int, cRy1: inout Int,
         cardRGB: (r: Double, g: Double, b: Double)?
     ) {
-        guard srcW >= 64, srcH >= 64, rgb.count >= srcW * srcH * 3 else { return }
-        let cRGB = cardRGB ?? (180.0, 180.0, 180.0)
-        let sxL0 = cLx0 + (cLx1 - cLx0) / 4
-        let sxL1 = cLx1 - (cLx1 - cLx0) / 4
-        let sxR0 = cRx0 + (cRx1 - cRx0) / 4
-        let sxR1 = cRx1 - (cRx1 - cRx0) / 4
+        guard srcW >= 64, srcH >= 64, rgb.count >= srcW * srcH * 3,
+              let cRGB = cardRGB else { return }
+
+        let cLuma = (cRGB.r + cRGB.g + cRGB.b) / 3.0
+        let sxL0 = cLx0 + (cLx1 - cLx0) / 6
+        let sxL1 = cLx1 - (cLx1 - cLx0) / 6
+        let sxR0 = cRx0 + (cRx1 - cRx0) / 6
+        let sxR1 = cRx1 - (cRx1 - cRx0) / 6
         guard sxL1 > sxL0 + 8, sxR1 > sxR0 + 8 else { return }
 
-        let y1Init = max(cLy1, cRy1)
-        let ch = min(cLy1 - cLy0, cRy1 - cRy0)
-        guard ch >= 64 else { return }
+        struct RowMetrics {
+            let bgRatio: Double
+            let darkRatio: Double
+            let meanLuma: Double
+            let distCard: Double
+            let std: Double
+        }
 
-        // 写真内部の被写体（衣装や足元）の誤切断を完全防止するため、
-        // スキャン範囲は下端の極小マージン（高々 3.5%）に限定する
-        let maxScan = min(Int(Double(ch) * 0.035), Int(Double(srcH) * 0.035))
-        guard maxScan >= 3 else { return }
-        let minScanY = y1Init - maxScan
-        let maxScanY = y1Init - 2
-        guard maxScanY > minScanY else { return }
-
-        func rowStats(_ y: Int, x0: Int, x1: Int) -> (mean: (r: Double, g: Double, b: Double), std: Double) {
+        func analyzeRow(_ y: Int, x0: Int, x1: Int) -> RowMetrics {
             let cy = min(srcH - 1, max(0, y))
             let rowOff = cy * srcW * 3
-            var sR = 0.0, sG = 0.0, sB = 0.0, sLumaSq = 0.0
             let step = max(1, (x1 - x0) / 64)
-            var n = 0
-            var x = x0
-            while x < x1 {
-                let i = rowOff + x * 3
-                let r = Double(rgb[i]), g = Double(rgb[i + 1]), b = Double(rgb[i + 2])
-                sR += r; sG += g; sB += b
-                let l = (r + g + b) / 3.0
-                sLumaSq += l * l
-                n += 1
-                x += step
+            var sr = 0.0, sg = 0.0, sb = 0.0, slSq = 0.0
+            var bgCnt = 0, darkCnt = 0, n = 0
+            rgb.withUnsafeBufferPointer { ptr in
+                guard let base = ptr.baseAddress else { return }
+                var x = x0
+                while x < x1 {
+                    let i = rowOff + x * 3
+                    let r = Double(base[i]), g = Double(base[i + 1]), b = Double(base[i + 2])
+                    let luma = (r + g + b) / 3.0
+                    sr += r; sg += g; sb += b
+                    slSq += luma * luma
+                    let dCard = max(abs(r - cRGB.r), max(abs(g - cRGB.g), abs(b - cRGB.b)))
+                    if dCard <= 28.0 { bgCnt += 1 }
+                    if luma <= 85.0 { darkCnt += 1 }
+                    n += 1
+                    x += step
+                }
             }
-            guard n > 0 else { return ((0, 0, 0), 0) }
-            let mR = sR / Double(n), mG = sG / Double(n), mB = sB / Double(n)
-            let mLuma = (mR + mG + mB) / 3.0
-            let std = sqrt(max(0.0, sLumaSq / Double(n) - mLuma * mLuma))
-            return ((mR, mG, mB), std)
+            guard n > 0 else { return RowMetrics(bgRatio: 0, darkRatio: 0, meanLuma: 0, distCard: 255, std: 255) }
+            let mr = sr / Double(n), mg = sg / Double(n), mb = sb / Double(n)
+            let ml = (mr + mg + mb) / 3.0
+            let std = sqrt(max(0.0, slSq / Double(n) - ml * ml))
+            let dist = sqrt(pow(mr - cRGB.r, 2) + pow(mg - cRGB.g, 2) + pow(mb - cRGB.b, 2))
+            return RowMetrics(
+                bgRatio: Double(bgCnt) / Double(n),
+                darkRatio: Double(darkCnt) / Double(n),
+                meanLuma: ml,
+                distCard: dist,
+                std: std
+            )
         }
 
         func stepDiff(_ y: Int, x0: Int, x1: Int) -> Double {
-            let yPlus = min(srcH - 1, y + 2)
-            let yMinus = max(0, y - 2)
-            let rowP = yPlus * srcW * 3
-            let rowM = yMinus * srcW * 3
+            let yP = min(srcH - 1, y + 2)
+            let yM = max(0, y - 2)
+            let rP = yP * srcW * 3
+            let rM = yM * srcW * 3
             let step = max(1, (x1 - x0) / 64)
-            var sumDist = 0.0
-            var n = 0
-            var x = x0
-            while x < x1 {
-                let iP = rowP + x * 3
-                let iM = rowM + x * 3
-                let dr = Double(rgb[iP]) - Double(rgb[iM])
-                let dg = Double(rgb[iP + 1]) - Double(rgb[iM + 1])
-                let db = Double(rgb[iP + 2]) - Double(rgb[iM + 2])
-                sumDist += sqrt(dr * dr + dg * dg + db * db)
-                n += 1
-                x += step
+            var sum = 0.0, n = 0
+            rgb.withUnsafeBufferPointer { ptr in
+                guard let base = ptr.baseAddress else { return }
+                var x = x0
+                while x < x1 {
+                    let iP = rP + x * 3, iM = rM + x * 3
+                    let dr = Double(base[iP]) - Double(base[iM])
+                    let dg = Double(base[iP + 1]) - Double(base[iM + 1])
+                    let db = Double(base[iP + 2]) - Double(base[iM + 2])
+                    sum += sqrt(dr * dr + dg * dg + db * db)
+                    n += 1
+                    x += step
+                }
             }
-            return n > 0 ? sumDist / Double(n) : 0.0
+            return n > 0 ? sum / Double(n) : 0.0
         }
 
-        var foundY: Int? = nil
-        // 下端から上に向かってスキャン（写真内部の被写体を上から誤切断するのを防止）
-        for y in stride(from: maxScanY, through: minScanY, by: -1) {
-            let dL = stepDiff(y, x0: sxL0, x1: sxL1)
-            let dR = stepDiff(y, x0: sxR0, x1: sxR1)
-            let avgDiff = (dL + dR) / 2.0
-            guard avgDiff >= 28.0 && dL >= 14.0 && dR >= 14.0 else { continue }
+        // 各サイドの上端・下端それぞれを精密トリミング
+        func trimSideBottom(yTop: Int, yBot: Int, sx0: Int, sx1: Int) -> Int {
+            let bh = yBot - yTop
+            guard bh >= 64 else { return yBot }
+            let maxScan = min(Int(Double(bh) * 0.16), Int(Double(srcH) * 0.15))
+            guard maxScan >= 4 else { return yBot }
 
-            let stAboveL = rowStats(y - 3, x0: sxL0, x1: sxL1)
-            let stAboveR = rowStats(y - 3, x0: sxR0, x1: sxR1)
-            let stBelowL = rowStats(y + 3, x0: sxL0, x1: sxL1)
-            let stBelowR = rowStats(y + 3, x0: sxR0, x1: sxR1)
+            var currentY1 = yBot
 
-            let aboveR = (stAboveL.mean.r + stAboveR.mean.r) / 2.0
-            let aboveG = (stAboveL.mean.g + stAboveR.mean.g) / 2.0
-            let aboveB = (stAboveL.mean.b + stAboveR.mean.b) / 2.0
+            // 1. 太い水平黒枠（明色台紙の内側にある均一暗帯）を検出して除去
+            // （濃灰台紙 16645-3 等の暗い空・宇宙誤切断防止のため cLuma >= 115.0 のみ対象）
+            if cLuma >= 115.0 {
+                let off1 = analyzeRow(min(srcH - 1, yBot + max(3, Int(Double(srcH) * 0.008))), x0: sx0, x1: sx1)
+                let off2 = analyzeRow(min(srcH - 1, yBot + max(8, Int(Double(srcH) * 0.025))), x0: sx0, x1: sx1)
+                if max(off1.meanLuma, off2.meanLuma) >= 115.0 || max(off1.bgRatio, off2.bgRatio) >= 0.45 {
+                    let maxDarkRows = max(5, Int(Double(bh) * 0.065))
+                    var y = currentY1 - 1
+                    let limitY = max(yTop + 48, currentY1 - maxScan)
+                    // 外周台紙帯を通過
+                    while y > limitY {
+                        let st = analyzeRow(y, x0: sx0, x1: sx1)
+                        if st.bgRatio >= 0.48 {
+                            y -= 1
+                        } else {
+                            break
+                        }
+                    }
+                    // 外縁の1px抗エイリアス滲みも1行だけ許容しつつ均一黒帯に入る
+                    if y > limitY {
+                        let stEdge = analyzeRow(y, x0: sx0, x1: sx1)
+                        let stNext = analyzeRow(y - 1, x0: sx0, x1: sx1)
+                        if stEdge.darkRatio >= 0.40 && stNext.darkRatio >= 0.62 {
+                            y -= 1
+                        }
+                    }
+                    var darkRun = 0
+                    var darkSumLuma = 0.0
+                    while y > limitY && darkRun < maxDarkRows {
+                        let st = analyzeRow(y, x0: sx0, x1: sx1)
+                        if st.darkRatio >= 0.62 && st.std <= 32.0 && st.meanLuma <= 88.0 {
+                            darkRun += 1
+                            darkSumLuma += st.meanLuma
+                            y -= 1
+                        } else {
+                            break
+                        }
+                    }
+                    if darkRun >= 2 {
+                        let darkMean = darkSumLuma / Double(darkRun)
+                        let insideSt = analyzeRow(max(yTop + 16, y - 1), x0: sx0, x1: sx1)
+                        let edge = stepDiff(y + 1, x0: sx0, x1: sx1)
+                        if insideSt.darkRatio < 0.55
+                            && (insideSt.meanLuma >= darkMean + 12.0 || edge >= 15.0 || insideSt.std >= 12.0) {
+                            currentY1 = min(currentY1, max(yTop + 32, y + 1))
+                        }
+                    }
+                }
+            }
 
-            let belowR = (stBelowL.mean.r + stBelowR.mean.r) / 2.0
-            let belowG = (stBelowL.mean.g + stBelowR.mean.g) / 2.0
-            let belowB = (stBelowL.mean.b + stBelowR.mean.b) / 2.0
+            // 2. 台紙帯・キャプション文字帯（行の多くが cardRGB で構成され、写真本体との間に明確な境界がある帯）を検出
+            let capLimitY = max(yTop + 48, yBot - maxScan)
+            if currentY1 > capLimitY + 3 {
+                var sumBgRatio = 0.0
+                var rowCount = 0
+                var photoStreak = 0
+                var missBudget = 0
+                var lastMarginY: Int? = nil
 
-            let distAbove = sqrt(pow(aboveR - cRGB.r, 2) + pow(aboveG - cRGB.g, 2) + pow(aboveB - cRGB.b, 2))
-            let distBelow = sqrt(pow(belowR - cRGB.r, 2) + pow(belowG - cRGB.g, 2) + pow(belowB - cRGB.b, 2))
+                // 外縁から内側（上）へ向かって台紙・文字行を辿る
+                for y in stride(from: currentY1 - 1, through: capLimitY, by: -1) {
+                    let st = analyzeRow(y, x0: sx0, x1: sx1)
+                    let isMarginOrTextRow = st.bgRatio >= 0.42
+                    let isDarkRuleRow = st.darkRatio >= 0.62 && st.std <= 28.0
+                    if isMarginOrTextRow || isDarkRuleRow {
+                        sumBgRatio += st.bgRatio
+                        rowCount += 1
+                        photoStreak = 0
+                        missBudget = 0
+                        lastMarginY = y
+                    } else if st.bgRatio >= 0.28 && missBudget < 2 && rowCount >= 1 {
+                        // キャプション文字密度が濃い1〜2行を跨ぐための極小許容（写真側侵入は連続判定で弾く）
+                        sumBgRatio += st.bgRatio
+                        rowCount += 1
+                        missBudget += 1
+                    } else {
+                        photoStreak += 1
+                        if photoStreak >= 3 {
+                            // 連続3行以上明確な写真領域に突入 → 直前までが台紙/文字帯の候補
+                            break
+                        }
+                    }
+                }
 
-            let stdAbove = (stAboveL.std + stAboveR.std) / 2.0
-            let stdBelow = (stBelowL.std + stBelowR.std) / 2.0
+                if let borderY = lastMarginY, rowCount >= 2 {
+                    let overallBgMean = sumBgRatio / Double(rowCount)
+                    let inside1 = analyzeRow(max(yTop + 8, borderY - 2), x0: sx0, x1: sx1)
+                    let inside2 = analyzeRow(max(yTop + 8, borderY - 4), x0: sx0, x1: sx1)
+                    let diff = stepDiff(borderY, x0: sx0, x1: sx1)
+                    let hasBoundaryTransition =
+                        inside1.bgRatio < 0.40 && inside2.bgRatio < 0.40 &&
+                        (diff >= 18.0 || inside1.distCard >= 18.0 || inside1.std >= 11.0)
+                    if overallBgMean >= 0.50 && hasBoundaryTransition {
+                        currentY1 = min(currentY1, max(yTop + 32, borderY))
+                    }
+                }
+            }
 
-            // 写真本体の黄色い被写体（化粧まわし等）の誤爆を防ぐため、
-            // 境界の下側が明確に台紙色であり、かつ低分散（均一な台紙帯）である場合のみに限定
-            let isCardStep = distBelow <= 22.0 && distAbove >= distBelow + 18.0 && stdBelow <= 10.0
-            let isUniformStep = stdBelow <= 8.0 && stdAbove >= 16.0 && distBelow <= 20.0
+            return currentY1
+        }
 
-            if isCardStep || isUniformStep {
-                foundY = y
-                break
+        func trimSideTop(yTop: Int, yBot: Int, sx0: Int, sx1: Int) -> Int {
+            let bh = yBot - yTop
+            guard bh >= 64 else { return yTop }
+            let maxScan = min(Int(Double(bh) * 0.08), Int(Double(srcH) * 0.075))
+            guard maxScan >= 4 else { return yTop }
+
+            // 1. 明色台紙＋均一黒枠バンドの除去
+            if cLuma >= 115.0 {
+                let off1 = analyzeRow(max(0, yTop - max(3, Int(Double(srcH) * 0.008))), x0: sx0, x1: sx1)
+                let off2 = analyzeRow(max(0, yTop - max(8, Int(Double(srcH) * 0.025))), x0: sx0, x1: sx1)
+                if max(off1.meanLuma, off2.meanLuma) >= 115.0 || max(off1.bgRatio, off2.bgRatio) >= 0.45 {
+                    var y = yTop
+                    let limitY = min(yBot - 48, yTop + maxScan)
+                    while y < limitY {
+                        let st = analyzeRow(y, x0: sx0, x1: sx1)
+                        if st.bgRatio >= 0.48 {
+                            y += 1
+                        } else {
+                            break
+                        }
+                    }
+                    if y < limitY {
+                        let stEdge = analyzeRow(y, x0: sx0, x1: sx1)
+                        let stNext = analyzeRow(y + 1, x0: sx0, x1: sx1)
+                        if stEdge.darkRatio >= 0.40 && stNext.darkRatio >= 0.62 {
+                            y += 1
+                        }
+                    }
+                    let maxDarkRows = max(5, Int(Double(bh) * 0.055))
+                    var darkRun = 0
+                    var darkSumLuma = 0.0
+                    while y < limitY && darkRun < maxDarkRows {
+                        let st = analyzeRow(y, x0: sx0, x1: sx1)
+                        if st.darkRatio >= 0.62 && st.std <= 32.0 && st.meanLuma <= 88.0 {
+                            darkRun += 1
+                            darkSumLuma += st.meanLuma
+                            y += 1
+                        } else {
+                            break
+                        }
+                    }
+                    if darkRun >= 2 {
+                        let darkMean = darkSumLuma / Double(darkRun)
+                        let insideSt = analyzeRow(min(yBot - 16, y + 1), x0: sx0, x1: sx1)
+                        let edge = stepDiff(y - 1, x0: sx0, x1: sx1)
+                        if insideSt.darkRatio < 0.55
+                            && (insideSt.meanLuma >= darkMean + 12.0 || edge >= 15.0 || insideSt.std >= 12.0) {
+                            return max(yTop, min(yBot - 32, y))
+                        }
+                    }
+                }
+            }
+
+            // 2. 上端の均一な外周台紙帯＋明瞭なプリント境界（02_white_columns 等：空誤切断を防ぐ厳格チェック）
+            let limitMarginY = min(yBot - 48, yTop + min(maxScan, Int(Double(bh) * 0.06)))
+            var y = yTop
+            var bgRun = 0
+            while y < limitMarginY {
+                let st = analyzeRow(y, x0: sx0, x1: sx1)
+                if st.bgRatio >= 0.68 && st.std <= 15.0 {
+                    bgRun += 1
+                    y += 1
+                } else {
+                    break
+                }
+            }
+            if bgRun >= 2 {
+                // 境界直下の細い枠暗線（1〜3px）を通過しつつ、その内側が明確な別トーン（空と色違い・構造あり）である場合のみカット
+                var ruleAdv = y
+                while ruleAdv < min(limitMarginY, y + 4) {
+                    let st = analyzeRow(ruleAdv, x0: sx0, x1: sx1)
+                    if st.darkRatio >= 0.45 || st.meanLuma < cLuma - 18.0 {
+                        ruleAdv += 1
+                    } else {
+                        break
+                    }
+                }
+                if ruleAdv > y {
+                    // 明確な水平境界枠線が存在したため安全にトリム
+                    return max(yTop, min(yBot - 32, ruleAdv))
+                }
+            }
+            return yTop
+        }
+
+        let newLy1 = trimSideBottom(yTop: cLy0, yBot: cLy1, sx0: sxL0, sx1: sxL1)
+        let newRy1 = trimSideBottom(yTop: cRy0, yBot: cRy1, sx0: sxR0, sx1: sxR1)
+        let newLy0 = trimSideTop(yTop: cLy0, yBot: newLy1, sx0: sxL0, sx1: sxL1)
+        let newRy0 = trimSideTop(yTop: cRy0, yBot: newRy1, sx0: sxR0, sx1: sxR1)
+
+        // ステレオ下端Y同期（もし片側だけ大きく残っていたらより清潔に切れた側の近くも確認）
+        cLy1 = min(cLy1, newLy1)
+        cRy1 = min(cRy1, newRy1)
+        cLy0 = max(cLy0, newLy0)
+        cRy0 = max(cRy0, newRy0)
+
+        // L/R の下端差が開いている場合、長い側のはみ出し分が台紙/キャプション帯なら短い側に揃える
+        let minY1 = min(cLy1, cRy1)
+        let maxY1 = max(cLy1, cRy1)
+        if maxY1 - minY1 >= 4 {
+            let wideIsLeft = cLy1 > cRy1
+            let sx0 = wideIsLeft ? sxL0 : sxR0
+            let sx1 = wideIsLeft ? sxL1 : sxR1
+            var sumBg = 0.0
+            var cnt = 0
+            for y in minY1..<maxY1 {
+                let st = analyzeRow(y, x0: sx0, x1: sx1)
+                sumBg += (st.bgRatio + (st.darkRatio >= 0.65 && st.std <= 26 ? 0.6 : 0.0))
+                cnt += 1
+            }
+            if cnt > 0 && (sumBg / Double(cnt)) >= 0.45 {
+                cLy1 = minY1
+                cRy1 = minY1
             }
         }
+    }
 
-        if let cutY = foundY {
-            cLy1 = min(cLy1, cutY)
-            cRy1 = min(cRy1, cutY)
+    /// roughBoxL と roughBoxR の上下 Y 境界を、はみ出し側帯域の局所平坦性（台紙余白・キャプション vs 写真テクスチャ）に基づいて安全に同期する
+    private func syncRoughBoundsY(
+        rgb: [UInt8],
+        srcW: Int,
+        srcH: Int,
+        boxL: inout IntBox,
+        boxR: inout IntBox,
+        maskW: Int,
+        maskH: Int
+    ) {
+        let minDiff = abs(boxL.minY - boxR.minY)
+        let maxDiff = abs(boxL.maxY - boxR.maxY)
+        guard minDiff >= 2 || maxDiff >= 2,
+              maskW >= 16, maskH >= 16, srcW >= 64, srcH >= 64, rgb.count >= srcW * srcH * 3 else {
+            let syncMinY = min(boxL.minY, boxR.minY)
+            let syncMaxY = max(boxL.maxY, boxR.maxY)
+            boxL = IntBox(minX: boxL.minX, minY: syncMinY, maxX: boxL.maxX, maxY: syncMaxY)
+            boxR = IntBox(minX: boxR.minX, minY: syncMinY, maxX: boxR.maxX, maxY: syncMaxY)
+            return
         }
+
+        // 指定したマスクY範囲の領域が「台紙余白・少数の文字のみ（局所平坦率が高い均一帯）」かどうかを判定
+        func isLikelyMarginBand(box: IntBox, yStartMask: Int, yEndMask: Int) -> Bool {
+            guard yEndMask > yStartMask else { return false }
+            let bx0 = Double(box.minX) * Double(srcW) / Double(maskW)
+            let bx1 = Double(box.maxX + 1) * Double(srcW) / Double(maskW)
+            let bw = bx1 - bx0
+            guard bw >= 24 else { return false }
+            let sx0 = max(2, Int(bx0 + bw * 0.20))
+            let sx1 = min(srcW - 3, Int(bx1 - bw * 0.20))
+            guard sx1 > sx0 + 8 else { return false }
+
+            let sy0 = max(0, yStartMask * srcH / maskH)
+            let sy1 = min(srcH, yEndMask * srcH / maskH)
+            guard sy1 > sy0 else { return false }
+
+            let stepX = max(2, (sx1 - sx0) / 48)
+            let stepY = max(1, (sy1 - sy0) / 8)
+            var totalFlatRatio = 0.0
+            var rows = 0
+
+            rgb.withUnsafeBufferPointer { ptr in
+                guard let base = ptr.baseAddress else { return }
+                var y = sy0
+                while y < sy1 {
+                    let row = y * srcW * 3
+                    var flat = 0
+                    var cnt = 0
+                    var x = sx0 + 2
+                    while x < sx1 - 2 {
+                        let iC = row + x * 3
+                        let iP = row + (x - 2) * 3
+                        let iN = row + (x + 2) * 3
+                        let lC = (Double(base[iC]) + Double(base[iC + 1]) + Double(base[iC + 2])) / 3.0
+                        let lP = (Double(base[iP]) + Double(base[iP + 1]) + Double(base[iP + 2])) / 3.0
+                        let lN = (Double(base[iN]) + Double(base[iN + 1]) + Double(base[iN + 2])) / 3.0
+                        if abs(lC - lP) <= 6.0 && abs(lC - lN) <= 6.0 {
+                            flat += 1
+                        }
+                        cnt += 1
+                        x += stepX
+                    }
+                    if cnt > 0 {
+                        totalFlatRatio += Double(flat) / Double(cnt)
+                        rows += 1
+                    }
+                    y += stepY
+                }
+            }
+            guard rows > 0 else { return false }
+            return (totalFlatRatio / Double(rows)) >= 0.65
+        }
+
+        let topLow = min(boxL.minY, boxR.minY)
+        let topHigh = max(boxL.minY, boxR.minY)
+        let finalMinY: Int
+        if minDiff >= 2 {
+            let widerTopBox = (boxL.minY < boxR.minY) ? boxL : boxR
+            finalMinY = isLikelyMarginBand(box: widerTopBox, yStartMask: topLow, yEndMask: topHigh) ? topHigh : topLow
+        } else {
+            finalMinY = topLow
+        }
+
+        let botLow = min(boxL.maxY, boxR.maxY)
+        let botHigh = max(boxL.maxY, boxR.maxY)
+        let finalMaxY: Int
+        if maxDiff >= 2 {
+            let widerBotBox = (boxL.maxY > boxR.maxY) ? boxL : boxR
+            finalMaxY = isLikelyMarginBand(box: widerBotBox, yStartMask: botLow + 1, yEndMask: botHigh + 1) ? botLow : botHigh
+        } else {
+            finalMaxY = botHigh
+        }
+
+        guard finalMaxY > finalMinY + 8 else { return }
+        boxL = IntBox(minX: boxL.minX, minY: finalMinY, maxX: boxL.maxX, maxY: finalMaxY)
+        boxR = IntBox(minX: boxR.minX, minY: finalMinY, maxX: boxR.maxX, maxY: finalMaxY)
     }
 
     /// 外周ラベル枠（P. Rossier / Keystone 等）と写真本体の間にある強い垂直境界線を検出してトリミング
@@ -1429,13 +2139,13 @@ final class StereoCardSegmenter: @unchecked Sendable {
         let rBot = min((cL.bl + cR.bl) * 0.5, (cL.br + cR.br) * 0.5)
 
         // 19世紀カードの歴史的仕様：
-        // 上部がアーチ型（rTop >= 0.05）の場合、下部は必ず完全な直角（Flat-bottom）。
-        let isArchTop = rTop >= 0.05
-        let cleanBot = (isArchTop || rBot < 0.05) ? 0.0 : min(0.10, rBot)
+        // 上部がアーチ型（rTop >= 0.045）の場合、下部は必ず完全な直角（Flat-bottom）。
+        let isArchTop = rTop >= 0.045
+        let cleanBot = (isArchTop || rBot < 0.045) ? 0.0 : min(0.10, rBot)
         let rxScale = (outerTop >= 0.14) ? 1.26 : 0.98
         return ArchShapeParams(
-            topRxRatio: min(0.36, max(0.04, rTop * rxScale)),
-            topRyRatio: min(0.34, max(0.04, rTop * 1.08)),
+            topRxRatio: isArchTop ? min(0.36, rTop * rxScale) : 0.0,
+            topRyRatio: isArchTop ? min(0.34, rTop * 1.08) : 0.0,
             botRxRatio: cleanBot,
             botRyRatio: cleanBot
         )
@@ -1450,6 +2160,10 @@ final class StereoCardSegmenter: @unchecked Sendable {
         cardRGB: (r: Double, g: Double, b: Double)
     ) -> (topRxRatio: Double, topRyRatio: Double)? {
         guard w >= 64, h >= 64, leftRGB.count >= w * h * 3, rightRGB.count >= w * h * 3 else { return nil }
+        if isCornersSquareRGB(leftRGB: leftRGB, rightRGB: rightRGB, width: w, height: h, cardRGB: cardRGB, isTop: true) {
+            return nil
+        }
+
         let tol = 25.0
         let maxScanX = min(w / 2, Int(Double(w) * 0.42))
         let maxScanY = min(h / 2, Int(Double(h) * 0.36))
@@ -1463,40 +2177,57 @@ final class StereoCardSegmenter: @unchecked Sendable {
             return max(dr, max(dg, db)) <= tol
         }
 
-        // 上隅先端に台紙色がなければ直角プリント
-        var cornerHits = 0
+        let runLen = max(6, min(14, Int(Double(h) * 0.014)))
+        let nonCardReq = runLen - max(1, runLen / 6)
+
+        func columnDropY(_ rgb: [UInt8], x: Int) -> Int {
+            guard maxScanY > runLen else { return 0 }
+            for y in 0..<(maxScanY - runLen) {
+                var nonCardRun = 0
+                for k in 0..<runLen {
+                    if !isCardPixel(rgb, x, y + k) { nonCardRun += 1 }
+                }
+                if nonCardRun >= nonCardReq { return y }
+            }
+            return maxScanY - runLen
+        }
+
+        // 天頂中央部（x ∈ [0.35w ..< 0.65w]）のドロップ量を計測：上辺全体に台紙色の空がある場合を排除
+        let centerStart = Int(Double(w) * 0.35)
+        let centerEnd = Int(Double(w) * 0.65)
+        var centerDropSum = 0.0
+        let centerSamples = 7
+        for i in 0..<centerSamples {
+            let cx = min(w - 1, max(0, centerStart + (centerEnd - centerStart) * i / max(1, centerSamples - 1)))
+            centerDropSum += Double(columnDropY(leftRGB, x: cx))
+            centerDropSum += Double(columnDropY(rightRGB, x: cx))
+        }
+        let dropCenterRatio = (centerDropSum / Double(centerSamples * 2)) / Double(h)
+        guard dropCenterRatio <= 0.045 else { return nil }
+
+        // L左上・R右上の両上隅先端に十分な台紙色が存在することを確認（片側欠けでの誤爆防止）
+        var cornerHitsL = 0
+        var cornerHitsR = 0
         for dy in 2..<min(10, maxScanY) {
             for dx in 2..<min(10, maxScanX) {
-                if isCardPixel(leftRGB, dx, dy) || isCardPixel(rightRGB, w - 1 - dx, dy) {
-                    cornerHits += 1
-                }
+                if isCardPixel(leftRGB, dx, dy) { cornerHitsL += 1 }
+                if isCardPixel(rightRGB, w - 1 - dx, dy) { cornerHitsR += 1 }
             }
         }
-        guard cornerHits >= 8 else { return nil }
+        guard cornerHitsL >= 6, cornerHitsR >= 6 else { return nil }
 
         var profile: [(fx: Double, fy: Double)] = []
         let stepX = max(1, maxScanX / 42)
         var dx = 2
         var flatRun = 0
+        let symMinThreshold = max(4, Int(Double(h) * 0.02))
         while dx < maxScanX {
-            var dropL = 0
-            for y in 0..<(maxScanY - 6) {
-                var nonCardRun = 0
-                for k in 0..<6 {
-                    if !isCardPixel(leftRGB, dx, y + k) { nonCardRun += 1 }
-                }
-                if nonCardRun >= 5 { dropL = y; break }
-            }
-            var dropR = 0
-            let rx = w - 1 - dx
-            for y in 0..<(maxScanY - 6) {
-                var nonCardRun = 0
-                for k in 0..<6 {
-                    if !isCardPixel(rightRGB, rx, y + k) { nonCardRun += 1 }
-                }
-                if nonCardRun >= 5 { dropR = y; break }
-            }
-            let drop = max(dropL, dropR)
+            let dropL = columnDropY(leftRGB, x: dx)
+            let dropR = columnDropY(rightRGB, x: w - 1 - dx)
+            // 両側とも台紙肩が確認できた列は外れ汚れを避けるため深い方を採用、片側 0 の場合は 0 とする
+            let drop = (min(dropL, dropR) >= symMinThreshold || dx <= stepX * 2 && min(dropL, dropR) >= 4)
+                ? max(dropL, dropR)
+                : min(dropL, dropR)
             let fy = Double(drop) / Double(h)
             profile.append((Double(dx) / Double(w), fy))
             if fy < 0.006 {
@@ -1508,7 +2239,17 @@ final class StereoCardSegmenter: @unchecked Sendable {
             dx += stepX
         }
 
-        guard let maxFy = profile.prefix(4).map({ $0.fy }).max(), maxFy >= 0.03 else { return nil }
+        guard let maxFy = profile.prefix(4).map({ $0.fy }).max(),
+              maxFy >= 0.045,
+              maxFy - dropCenterRatio >= 0.050 else {
+            return nil
+        }
+        let midPts = profile.filter { $0.fx >= 0.12 && $0.fx <= 0.24 }
+        if !midPts.isEmpty {
+            let midFy = midPts.map(\.fy).reduce(0.0, +) / Double(midPts.count)
+            guard maxFy > midFy + 0.015 else { return nil }
+        }
+
         let maxFx = profile.filter { $0.fy >= 0.007 }.map { $0.fx }.max() ?? 0.08
         var topRx = min(0.37, max(0.05, maxFx + 0.022))
         var topRy = min(0.34, max(0.05, maxFy + 0.012))
@@ -1696,31 +2437,46 @@ final class StereoCardSegmenter: @unchecked Sendable {
     }
 
     /// 左右外端（cLx0, cRx1）に台紙 RGB と同色の均一な帯（緑台紙等）が連続して残っている場合のみ内側へトリミングする
+    /// 左右外端（cLx0, cRx1）の均一台紙帯・縦書き文字マージン（外側文字+内側ギャップ+細枠線）・縦黒枠バンドおよび中央仕切り黒線を検出し、
+    /// 写真本体の垂直境界線まで安全かつ正確にトリミングする
     private static func trimOuterCardColumnsRGB(
         rgb: [UInt8],
         srcW: Int,
         srcH: Int,
         cLx0: inout Int,
-        cLx1: Int,
+        cLx1: inout Int,
         cLy0: Int,
         cLy1: Int,
-        cRx0: Int,
+        cRx0: inout Int,
         cRx1: inout Int,
         cRy0: Int,
         cRy1: Int,
         cardRGB: (r: Double, g: Double, b: Double)
     ) {
         guard srcW >= 64, srcH >= 64, rgb.count >= srcW * srcH * 3 else { return }
-        let tol = 20.0
+        let tol = 28.0
+        let cardLuma = (cardRGB.r + cardRGB.g + cardRGB.b) / 3.0
 
-        func isUniformCardColumn(x: Int, y0: Int, y1: Int) -> Bool {
+        struct ColMetrics {
+            let bgRatio: Double
+            let inkRatio: Double
+            let darkRatio: Double
+            let meanLuma: Double
+            let std: Double
+        }
+
+        func analyzeCol(x: Int, y0: Int, y1: Int) -> ColMetrics {
             let h = y1 - y0
-            guard h >= 16, x >= 0, x < srcW else { return false }
-            let sy0 = max(0, y0 + h / 6)
-            let sy1 = min(srcH, y1 - h / 6)
+            guard h >= 16, x >= 0, x < srcW else {
+                return ColMetrics(bgRatio: 0, inkRatio: 0, darkRatio: 0, meanLuma: 0, std: 255)
+            }
+            let sy0 = max(0, y0 + h / 7)
+            let sy1 = min(srcH, y1 - h / 7)
             let step = max(1, (sy1 - sy0) / 64)
             var count = 0
-            var match = 0
+            var bgCnt = 0
+            var inkCnt = 0
+            var darkCnt = 0
             var sum = 0.0
             var sumSq = 0.0
             rgb.withUnsafeBufferPointer { ptr in
@@ -1736,48 +2492,186 @@ final class StereoCardSegmenter: @unchecked Sendable {
                     sumSq += luma * luma
                     count += 1
                     if max(abs(r - cardRGB.r), max(abs(g - cardRGB.g), abs(b - cardRGB.b))) <= tol {
-                        match += 1
+                        bgCnt += 1
+                    } else if cardLuma >= 120.0 ? (luma <= cardLuma - 22.0) : (luma >= cardLuma + 22.0) {
+                        inkCnt += 1
+                    }
+                    if luma <= 92.0 {
+                        darkCnt += 1
                     }
                     y += step
                 }
             }
-            guard count >= 8 else { return false }
+            guard count >= 8 else {
+                return ColMetrics(bgRatio: 0, inkRatio: 0, darkRatio: 0, meanLuma: 0, std: 255)
+            }
             let mean = sum / Double(count)
             let std = sqrt(max(0.0, sumSq / Double(count) - mean * mean))
-            return Double(match) / Double(count) >= 0.80 && std <= 12.0
+            return ColMetrics(
+                bgRatio: Double(bgCnt) / Double(count),
+                inkRatio: Double(inkCnt) / Double(count),
+                darkRatio: Double(darkCnt) / Double(count),
+                meanLuma: mean,
+                std: std
+            )
         }
 
-        let lw = cLx1 - cLx0
-        if lw >= 64 {
-            let maxTrimL = max(4, Int(Double(lw) * 0.10))
-            var newLx0 = cLx0
-            for dx in 0..<maxTrimL {
-                let x = cLx0 + dx
-                if isUniformCardColumn(x: x, y0: cLy0, y1: cLy1) {
-                    newLx0 = x + 1
+        // 外側から内側へ向かって最大 20% 範囲でマージン/縦文字/黒枠境界を探索（dir = +1: cLx0→右, -1: cRx1-1→左）
+        func scanOuterEdge(startEdge: Int, dir: Int, widthBound: Int, y0: Int, y1: Int) -> Int? {
+            let maxTrim = min(Int(Double(widthBound) * 0.20), max(4, widthBound - 64))
+            guard maxTrim >= 4 else { return nil }
+
+            // 開始位置の外側にすでに明るい台紙色があるか事前チェック（U-Netが黒枠の直前で止まったケース向け）
+            var outerEdgeHasCard = false
+            for back in 1...8 {
+                let bx = startEdge - dir * back
+                if bx >= 0 && bx < srcW {
+                    let st = analyzeCol(x: bx, y0: y0, y1: y1)
+                    if st.bgRatio >= 0.45 {
+                        outerEdgeHasCard = true
+                        break
+                    }
+                }
+            }
+
+            var cols: [ColMetrics] = []
+            cols.reserveCapacity(maxTrim)
+            var photoMissStreak = 0
+            for dx in 0..<maxTrim {
+                let x = dir > 0 ? (startEdge + dx) : (startEdge - dx)
+                let st = analyzeCol(x: x, y0: y0, y1: y1)
+                cols.append(st)
+                let isMarginLike =
+                    st.bgRatio >= 0.42 ||
+                    st.darkRatio >= 0.64 ||
+                    (st.bgRatio >= 0.24 && (st.bgRatio + st.inkRatio) >= 0.74)
+                if isMarginLike {
+                    photoMissStreak = 0
+                } else {
+                    photoMissStreak += 1
+                    // 連続4列以上、純粋な写真テクスチャが続いたら探索打ち切り（写真内誤侵食を防止）
+                    if photoMissStreak >= 4 {
+                        break
+                    }
+                }
+            }
+
+            let validLen = cols.count - photoMissStreak
+            guard validLen >= 1 else { return nil }
+
+            // 1. 最も内側にある連続クリーン台紙ギャップ（または外側文字を越えた境界クリーンギャップ）終端を探す
+            var pureRun = 0
+            var bestCutIdx: Int? = nil
+            var prefixBgSum = 0.0
+            for idx in 0..<validLen {
+                let st = cols[idx]
+                prefixBgSum += st.bgRatio
+                let isPure = st.bgRatio >= 0.66 && st.std <= 20.0
+                let prevIsNearPure = idx > 0 && cols[idx - 1].bgRatio >= 0.64
+                if isPure {
+                    pureRun += 1
+                    if idx < 4 || pureRun >= 2 || (prevIsNearPure && st.std <= 16.0) {
+                        let meanPrefixBg = prefixBgSum / Double(idx + 1)
+                        if meanPrefixBg >= 0.36 {
+                            bestCutIdx = idx + 1
+                        }
+                    }
+                } else {
+                    pureRun = 0
+                }
+            }
+
+            // 1b. 上記純粋台紙境界の直内側に 1〜6px の暗い縦枠線・縁取りがある場合は黒枠の内側まで進める
+            if let cut = bestCutIdx {
+                var adv = cut
+                let maxDarkBorder = min(validLen, cut + 8)
+                while adv < maxDarkBorder && cols[adv].darkRatio >= 0.62 && cols[adv].std <= 30.0 {
+                    adv += 1
+                }
+                if adv > cut {
+                    bestCutIdx = adv
+                }
+            }
+
+            // 2. 太い縦黒枠（cardLuma >= 115 の明台紙カードで外周に明るい台紙を伴う均一縦黒バンド）を検出
+            if cardLuma >= 115.0 {
+                let maxDarkBand = max(5, Int(Double(widthBound) * 0.065))
+                var darkRun = 0
+                var darkSumLuma = 0.0
+                var hasOuterCard = outerEdgeHasCard
+                for idx in 0..<validLen {
+                    let st = cols[idx]
+                    if st.bgRatio >= 0.48 {
+                        hasOuterCard = true
+                    }
+                    // 黒枠始まり1列目の抗エイリアス滲みだけ darkRatio >= 0.45 && 次が濃厚黒枠なら開始可
+                    let isStartAntiAlias = darkRun == 0 && idx + 1 < validLen
+                        && st.darkRatio >= 0.45 && cols[idx + 1].darkRatio >= 0.64 && st.std <= 36.0
+                    if (st.darkRatio >= 0.62 && st.std <= 32.0 && st.meanLuma <= 88.0) || isStartAntiAlias {
+                        darkRun += 1
+                        darkSumLuma += st.meanLuma
+                        if darkRun >= 2 && darkRun <= maxDarkBand && (hasOuterCard || idx <= 6) {
+                            let nextIdx = idx + 1
+                            if nextIdx < cols.count {
+                                let darkMean = darkSumLuma / Double(darkRun)
+                                let nextCol = cols[nextIdx]
+                                if nextCol.darkRatio < 0.55
+                                    && (nextCol.meanLuma >= darkMean + 12.0 || nextCol.std >= 12.0) {
+                                    bestCutIdx = max(bestCutIdx ?? 0, nextIdx)
+                                }
+                            }
+                        }
+                    } else {
+                        darkRun = 0
+                        darkSumLuma = 0.0
+                    }
+                }
+            }
+
+            guard let finalSteps = bestCutIdx, finalSteps > 0 else { return nil }
+            return dir > 0 ? (startEdge + finalSteps) : (startEdge - finalSteps + 1)
+        }
+
+        if let newLx0 = scanOuterEdge(startEdge: cLx0, dir: 1, widthBound: cLx1 - cLx0, y0: cLy0, y1: cLy1),
+           newLx0 > cLx0 && cLx1 - newLx0 >= 64 {
+            cLx0 = newLx0
+        }
+
+        if let newRx1 = scanOuterEdge(startEdge: cRx1 - 1, dir: -1, widthBound: cRx1 - cRx0, y0: cRy0, y1: cRy1),
+           newRx1 < cRx1 && newRx1 - cRx0 >= 64 {
+            cRx1 = newRx1
+        }
+
+        // 3. 中央セパレータ（cLx1, cRx0）の半端残りの太黒枠エッジを微調整除去（cardLuma >= 115 のみ）
+        if cardLuma >= 115.0 {
+            let maxCenterTrimL = min(12, max(2, (cLx1 - cLx0) / 32))
+            var trimmedL = cLx1
+            for dx in 0..<maxCenterTrimL {
+                let x = cLx1 - 1 - dx
+                let st = analyzeCol(x: x, y0: cLy0, y1: cLy1)
+                if st.darkRatio >= 0.66 && st.std <= 30.0 && st.meanLuma <= 90.0 {
+                    trimmedL = x
                 } else {
                     break
                 }
             }
-            if newLx0 > cLx0 && cLx1 - newLx0 >= 64 {
-                cLx0 = newLx0
+            if trimmedL < cLx1 && trimmedL - cLx0 >= 64 {
+                cLx1 = trimmedL
             }
-        }
 
-        let rw = cRx1 - cRx0
-        if rw >= 64 {
-            let maxTrimR = max(4, Int(Double(rw) * 0.10))
-            var newRx1 = cRx1
-            for dx in 0..<maxTrimR {
-                let x = cRx1 - 1 - dx
-                if isUniformCardColumn(x: x, y0: cRy0, y1: cRy1) {
-                    newRx1 = x
+            let maxCenterTrimR = min(12, max(2, (cRx1 - cRx0) / 32))
+            var trimmedR = cRx0
+            for dx in 0..<maxCenterTrimR {
+                let x = cRx0 + dx
+                let st = analyzeCol(x: x, y0: cRy0, y1: cRy1)
+                if st.darkRatio >= 0.66 && st.std <= 30.0 && st.meanLuma <= 90.0 {
+                    trimmedR = x + 1
                 } else {
                     break
                 }
             }
-            if newRx1 < cRx1 && newRx1 - cRx0 >= 64 {
-                cRx1 = newRx1
+            if trimmedR > cRx0 && cRx1 - trimmedR >= 64 {
+                cRx0 = trimmedR
             }
         }
     }
@@ -1910,49 +2804,302 @@ final class StereoCardSegmenter: @unchecked Sendable {
         srcH: Int,
         yTop: Int,
         yBot: Int,
+        xLeft: Int? = nil,
+        xRight: Int? = nil,
         fallbackLuma: Double?
     ) -> (r: Double, g: Double, b: Double)? {
         guard srcW >= 32, srcH >= 32, rgb.count >= srcW * srcH * 3 else {
             return fallbackLuma.map { ($0, $0, $0) }
         }
-        var rs: [Double] = []
-        var gs: [Double] = []
-        var bs: [Double] = []
-        rs.reserveCapacity(256); gs.reserveCapacity(256); bs.reserveCapacity(256)
+
+        // 1. 外周 4 辺から均一なスキャナ余白（白・黒バック）を検出し、実カード範囲 [cardX0..<cardX1, cardY0..<cardY1] を特定
+        var cardX0 = 0
+        var cardX1 = srcW
+        var cardY0 = 0
+        var cardY1 = srcH
 
         rgb.withUnsafeBufferPointer { ptr in
             guard let base = ptr.baseAddress else { return }
-            let sx0 = max(0, srcW / 5)
-            let sx1 = min(srcW, srcW * 4 / 5)
-            let xStep = max(1, (sx1 - sx0) / 64)
-            var scanYs: [Int] = []
-            if yTop >= 6 {
-                scanYs.append(contentsOf: max(4, yTop - 16)..<max(4, yTop - 3))
-            }
-            if yBot + 6 < srcH {
-                scanYs.append(contentsOf: min(srcH - 4, yBot + 4)..<min(srcH - 4, yBot + 20))
-            }
-            for y in scanYs where y >= 2 && y < srcH - 2 {
-                var x = sx0
-                while x < sx1 {
+
+            func rowMeanAndStd(_ y: Int, xStart: Int, xEnd: Int) -> (r: Double, g: Double, b: Double, std: Double) {
+                let step = max(1, (xEnd - xStart) / 48)
+                var sr = 0.0, sg = 0.0, sb = 0.0, slSq = 0.0
+                var n = 0
+                var x = xStart
+                while x < xEnd {
                     let i = (y * srcW + x) * 3
-                    let r = Double(base[i])
-                    let g = Double(base[i + 1])
-                    let b = Double(base[i + 2])
-                    let luma = (r + g + b) / 3.0
-                    if luma > 16.0 && luma < 248.0 {
-                        rs.append(r); gs.append(g); bs.append(b)
+                    let r = Double(base[i]), g = Double(base[i + 1]), b = Double(base[i + 2])
+                    sr += r; sg += g; sb += b
+                    let l = (r + g + b) / 3.0
+                    slSq += l * l
+                    n += 1
+                    x += step
+                }
+                guard n > 0 else { return (0, 0, 0, 255) }
+                let mr = sr / Double(n), mg = sg / Double(n), mb = sb / Double(n)
+                let ml = (mr + mg + mb) / 3.0
+                return (mr, mg, mb, sqrt(max(0.0, slSq / Double(n) - ml * ml)))
+            }
+
+            func colMeanAndStd(_ x: Int, yStart: Int, yEnd: Int) -> (r: Double, g: Double, b: Double, std: Double) {
+                let step = max(1, (yEnd - yStart) / 48)
+                var sr = 0.0, sg = 0.0, sb = 0.0, slSq = 0.0
+                var n = 0
+                var y = yStart
+                while y < yEnd {
+                    let i = (y * srcW + x) * 3
+                    let r = Double(base[i]), g = Double(base[i + 1]), b = Double(base[i + 2])
+                    sr += r; sg += g; sb += b
+                    let l = (r + g + b) / 3.0
+                    slSq += l * l
+                    n += 1
+                    y += step
+                }
+                guard n > 0 else { return (0, 0, 0, 255) }
+                let mr = sr / Double(n), mg = sg / Double(n), mb = sb / Double(n)
+                let ml = (mr + mg + mb) / 3.0
+                return (mr, mg, mb, sqrt(max(0.0, slSq / Double(n) - ml * ml)))
+            }
+
+            let maxMarginY = min(srcH / 5, max(8, Int(Double(srcH) * 0.18)))
+            let maxMarginX = min(srcW / 5, max(8, Int(Double(srcW) * 0.18)))
+            let midX0 = srcW / 4, midX1 = srcW * 3 / 4
+            let midY0 = srcH / 4, midY1 = srcH * 3 / 4
+
+            // スキャナのドロップシャドウ勾配を飛び越えてカード本体平坦面へ着地するヘルパー
+            func findStableCardBoundary(
+                limit: Int,
+                ref: (r: Double, g: Double, b: Double, std: Double),
+                measure: (Int) -> (r: Double, g: Double, b: Double, std: Double)
+            ) -> Int? {
+                var jumpIdx: Int? = nil
+                for d in 2..<limit {
+                    let st = measure(d)
+                    let diff = max(abs(st.r - ref.r), max(abs(st.g - ref.g), abs(st.b - ref.b)))
+                    if diff >= 18.0 || st.std > 18.0 {
+                        jumpIdx = d
+                        break
                     }
-                    x += xStep
+                }
+                guard let start = jumpIdx else { return nil }
+                // シャドウの斜面を通過し、隣接2ステップの輝度変化が <= 4.0 かつ標準偏差 <= 16.0 の平坦面に到達した先を選ぶ
+                var prevL = { let s = measure(start); return (s.r + s.g + s.b) / 3.0 }()
+                let searchEnd = min(limit, start + 22)
+                var stableStreak = 0
+                for d in (start + 1)..<searchEnd {
+                    let st = measure(d)
+                    let curL = (st.r + st.g + st.b) / 3.0
+                    let diffFromRef = max(abs(st.r - ref.r), max(abs(st.g - ref.g), abs(st.b - ref.b)))
+                    if abs(curL - prevL) <= 4.0 && st.std <= 16.0 && diffFromRef >= 24.0 {
+                        stableStreak += 1
+                        if stableStreak >= 2 {
+                            return d + 2
+                        }
+                    } else {
+                        stableStreak = 0
+                    }
+                    prevL = curL
+                }
+                return min(limit - 1, start + 8)
+            }
+
+            // 上スキャナ余白
+            let topRef = rowMeanAndStd(1, xStart: midX0, xEnd: midX1)
+            let topRefL = (topRef.r + topRef.g + topRef.b) / 3.0
+            if topRef.std <= 14.0 && (topRefL >= 218.0 || topRefL <= 35.0) {
+                if let y = findStableCardBoundary(limit: maxMarginY, ref: topRef, measure: { rowMeanAndStd($0, xStart: midX0, xEnd: midX1) }) {
+                    cardY0 = min(srcH / 4, y)
+                }
+            }
+            // 下スキャナ余白
+            let botRef = rowMeanAndStd(srcH - 2, xStart: midX0, xEnd: midX1)
+            let botRefL = (botRef.r + botRef.g + botRef.b) / 3.0
+            if botRef.std <= 14.0 && (botRefL >= 218.0 || botRefL <= 35.0) {
+                if let dy = findStableCardBoundary(limit: maxMarginY, ref: botRef, measure: { rowMeanAndStd(srcH - 1 - $0, xStart: midX0, xEnd: midX1) }) {
+                    cardY1 = max(srcH * 3 / 4, srcH - 1 - dy)
+                }
+            }
+            // 左スキャナ余白
+            let leftRef = colMeanAndStd(1, yStart: midY0, yEnd: midY1)
+            let leftRefL = (leftRef.r + leftRef.g + leftRef.b) / 3.0
+            if leftRef.std <= 14.0 && (leftRefL >= 218.0 || leftRefL <= 35.0) {
+                if let x = findStableCardBoundary(limit: maxMarginX, ref: leftRef, measure: { colMeanAndStd($0, yStart: midY0, yEnd: midY1) }) {
+                    cardX0 = min(srcW / 4, x)
+                }
+            }
+            // 右スキャナ余白
+            let rightRef = colMeanAndStd(srcW - 2, yStart: midY0, yEnd: midY1)
+            let rightRefL = (rightRef.r + rightRef.g + rightRef.b) / 3.0
+            if rightRef.std <= 14.0 && (rightRefL >= 218.0 || rightRefL <= 35.0) {
+                if let dx = findStableCardBoundary(limit: maxMarginX, ref: rightRef, measure: { colMeanAndStd(srcW - 1 - $0, yStart: midY0, yEnd: midY1) }) {
+                    cardX1 = max(srcW * 3 / 4, srcW - 1 - dx)
                 }
             }
         }
-        guard rs.count >= 16 else {
+
+        // 2. 実カード枠内側かつ写真窓外側の余白（上・下・左右）から低勾配（平坦領域）の RGB サンプルを収集
+        var samples: [(r: Double, g: Double, b: Double)] = []
+        samples.reserveCapacity(1024)
+
+        rgb.withUnsafeBufferPointer { ptr in
+            guard let base = ptr.baseAddress else { return }
+            let cardW = max(32, cardX1 - cardX0)
+            let cardH = max(32, cardY1 - cardY0)
+            let sx0 = max(cardX0 + 4, cardX0 + cardW / 5)
+            let sx1 = min(cardX1 - 4, cardX1 - cardW / 5)
+            let xStep = max(1, (sx1 - sx0) / 48)
+
+            func collectPoint(_ x: Int, _ y: Int, requireFlat: Bool = true) {
+                guard x >= 2, x < srcW - 2, y >= 2, y < srcH - 2 else { return }
+                let i = (y * srcW + x) * 3
+                let r = Double(base[i]), g = Double(base[i + 1]), b = Double(base[i + 2])
+                let luma = (r + g + b) / 3.0
+                guard luma > 18.0 && luma < 244.0 else { return }
+                if requireFlat {
+                    let iR = (y * srcW + (x + 2)) * 3
+                    let iD = ((y + 2) * srcW + x) * 3
+                    let lR = (Double(base[iR]) + Double(base[iR + 1]) + Double(base[iR + 2])) / 3.0
+                    let lD = (Double(base[iD]) + Double(base[iD + 1]) + Double(base[iD + 2])) / 3.0
+                    if abs(luma - lR) > 7.0 || abs(luma - lD) > 7.0 { return }
+                }
+                samples.append((r, g, b))
+            }
+
+            // 上マージン（カード内 yTop より上）
+            let topLo = max(cardY0, min(yTop - 2, yTop - 22))
+            let topHi = max(topLo, min(srcH - 2, yTop - 2))
+            if topHi > topLo && sx1 > sx0 {
+                let yStep = max(1, (topHi - topLo) / 10)
+                var y = topLo
+                while y < topHi {
+                    var x = sx0
+                    while x < sx1 { collectPoint(x, y); x += xStep }
+                    y += yStep
+                }
+            }
+
+            // 下マージン（カード内 yBot より下）
+            let botLo = min(cardY1 - 1, max(cardY0, yBot + 2))
+            let botHi = min(cardY1 - 1, max(botLo, yBot + 36))
+            if botHi > botLo && sx1 > sx0 {
+                let yStep = max(1, (botHi - botLo) / 12)
+                var y = botLo
+                while y < botHi {
+                    var x = sx0
+                    while x < sx1 { collectPoint(x, y); x += xStep }
+                    y += yStep
+                }
+            }
+
+            // 左右マージン（面積広く安定しているため密にサンプル収集）
+            let my0 = cardY0 + cardH / 5
+            let my1 = cardY1 - cardH / 5
+            let yStep = max(1, (my1 - my0) / 48)
+            if let xL = xLeft, xL > cardX0 + 4 {
+                let lxEnd = max(cardX0 + 2, xL - 2)
+                let lxStep = max(1, (lxEnd - cardX0) / 20)
+                var y = my0
+                while y < my1 {
+                    var x = cardX0
+                    while x < lxEnd { collectPoint(x, y); x += lxStep }
+                    y += yStep
+                }
+            }
+            if let xR = xRight, cardX1 > xR + 4 {
+                let rxStart = min(cardX1 - 2, xR + 2)
+                let rxStep = max(1, (cardX1 - rxStart) / 20)
+                var y = my0
+                while y < my1 {
+                    var x = rxStart
+                    while x < cardX1 { collectPoint(x, y); x += rxStep }
+                    y += yStep
+                }
+            }
+
+            // 第2段フォールバック（02_white_columns 等のカード外枠が写真ボックスに含まれており外側マージンが狭い場合）
+            // ボックス4辺最外周 3.5% 以内の低勾配平坦面から台紙色を直接抽出（無彩色 fallbackLuma 返却を回避）
+            if samples.count < 24 {
+                let fb = fallbackLuma
+                func collectBorderFlat(_ x: Int, _ y: Int) {
+                    guard x >= 2, x < srcW - 2, y >= 2, y < srcH - 2 else { return }
+                    let i = (y * srcW + x) * 3
+                    let r = Double(base[i]), g = Double(base[i + 1]), b = Double(base[i + 2])
+                    let luma = (r + g + b) / 3.0
+                    guard luma > 20.0 && luma < 242.0 else { return }
+                    if let fb, abs(luma - fb) > 42.0 { return }
+                    let iR = (y * srcW + (x + 2)) * 3
+                    let iD = ((y + 2) * srcW + x) * 3
+                    let lR = (Double(base[iR]) + Double(base[iR + 1]) + Double(base[iR + 2])) / 3.0
+                    let lD = (Double(base[iD]) + Double(base[iD + 1]) + Double(base[iD + 2])) / 3.0
+                    if abs(luma - lR) <= 4.0 && abs(luma - lD) <= 4.0 {
+                        samples.append((r, g, b))
+                    }
+                }
+                let bandY = max(6, min(20, (yBot - yTop) / 24))
+                let bandX = max(6, min(24, cardW / 32))
+                for y in max(cardY0, yTop)..<min(cardY1, yTop + bandY) {
+                    var x = sx0
+                    while x < sx1 { collectBorderFlat(x, y); x += xStep }
+                }
+                for y in max(cardY0, yBot - bandY)..<min(cardY1, yBot) {
+                    var x = sx0
+                    while x < sx1 { collectBorderFlat(x, y); x += xStep }
+                }
+                if let xL = xLeft {
+                    for x in max(cardX0, xL)..<min(cardX1, xL + bandX) {
+                        var y = my0
+                        while y < my1 { collectBorderFlat(x, y); y += yStep }
+                    }
+                }
+                if let xR = xRight {
+                    for x in max(cardX0, xR - bandX)..<min(cardX1, xR) {
+                        var y = my0
+                        while y < my1 { collectBorderFlat(x, y); y += yStep }
+                    }
+                }
+            }
+        }
+
+        guard samples.count >= 16 else {
             return fallbackLuma.map { ($0, $0, $0) }
         }
-        rs.sort(); gs.sort(); bs.sort()
-        let mid = rs.count / 2
-        return (rs[mid], gs[mid], bs[mid])
+
+        // 3. 量子化RGBヒストグラムの最頻クラスタ（±1ビン）から代表色を取り、文字インク・黒枠・傷ノイズを排除
+        var counts: [Int: Int] = [:]
+        counts.reserveCapacity(128)
+        for s in samples {
+            let kr = min(31, Int(s.r) / 8)
+            let kg = min(31, Int(s.g) / 8)
+            let kb = min(31, Int(s.b) / 8)
+            let key = (kr << 10) | (kg << 5) | kb
+            counts[key, default: 0] += 1
+        }
+        guard let (peakKey, _) = counts.max(by: { $0.value < $1.value }) else {
+            return fallbackLuma.map { ($0, $0, $0) }
+        }
+        let pr = (peakKey >> 10) & 31
+        let pg = (peakKey >> 5) & 31
+        let pb = peakKey & 31
+
+        var crs: [Double] = []
+        var cgs: [Double] = []
+        var cbs: [Double] = []
+        for s in samples {
+            let kr = min(31, Int(s.r) / 8)
+            let kg = min(31, Int(s.g) / 8)
+            let kb = min(31, Int(s.b) / 8)
+            if abs(kr - pr) <= 1 && abs(kg - pg) <= 1 && abs(kb - pb) <= 1 {
+                crs.append(s.r); cgs.append(s.g); cbs.append(s.b)
+            }
+        }
+        if crs.count < 8 {
+            crs = samples.map(\.r)
+            cgs = samples.map(\.g)
+            cbs = samples.map(\.b)
+        }
+        crs.sort(); cgs.sort(); cbs.sort()
+        let mid = crs.count / 2
+        return (crs[mid], cgs[mid], cbs[mid])
     }
 
     /// パラメトリック角丸アーチ SDF マスクをフル解像度で滑らかに適用（ジャギーゼロ・白フリンジ除去）
@@ -2302,8 +3449,8 @@ final class StereoCardSegmenter: @unchecked Sendable {
             let bw = box.maxX - box.minX + 1
             let bh = box.maxY - box.minY + 1
             guard bw >= 32, bh >= 32 else { return nil }
-            let x0 = box.minX + Int(Double(bw) * 0.15)
-            let x1 = box.maxX - Int(Double(bw) * 0.15)
+            let x0 = box.minX + Int(Double(bw) * 0.20)
+            let x1 = box.maxX - Int(Double(bw) * 0.20)
             guard x1 > x0 + 16 else { return nil }
 
             var points: [(x: Double, y: Double)] = []
@@ -2345,26 +3492,17 @@ final class StereoCardSegmenter: @unchecked Sendable {
         let fitL = lineSlope(mask: maskL, box: boxL)
         let fitR = lineSlope(mask: maskR, box: boxR)
 
-        let slope: Double
-        if let l = fitL, let r = fitR {
-            if abs(l.slope - r.slope) <= 0.035 {
-                slope = (l.slope + r.slope) * 0.5
-            } else if l.confidence > r.confidence {
-                slope = l.slope
-            } else {
-                slope = r.slope
-            }
-        } else if let l = fitL {
-            slope = l.slope
-        } else if let r = fitR {
-            slope = r.slope
-        } else {
+        // 左右両眼の写真下辺が十分な直線性を持ち、かつ互いに傾きが整合一致（差 <= 0.025 ≈ 1.4°）するときのみ傾きを採用
+        guard let l = fitL, let r = fitR,
+              l.confidence >= 0.35, r.confidence >= 0.35,
+              abs(l.slope - r.slope) <= 0.025 else {
             return 0.0
         }
+        let slope = (l.slope + r.slope) * 0.5
 
         let angle = atan(slope)
         let deg = abs(angle * 180.0 / .pi)
-        if deg >= 0.15 && deg <= 12.0 {
+        if deg >= 0.15 && deg <= 3.5 {
             return angle
         }
         return 0.0
@@ -3261,11 +4399,19 @@ enum StereoCardMountRenderer {
         useAIArch: Bool
     ) -> StereoCardSegmenter.ArchShapeParams {
         if useAIArch, let ai = aiArchParams {
-            if ai.topRyRatio >= 0.06 {
+            if ai.topRyRatio < 0.02 {
+                return StereoCardSegmenter.ArchShapeParams(
+                    topRxRatio: 0.0,
+                    topRyRatio: 0.0,
+                    botRxRatio: ai.botRxRatio < 0.02 ? 0.0 : ai.botRxRatio,
+                    botRyRatio: ai.botRyRatio < 0.02 ? 0.0 : ai.botRyRatio
+                )
+            }
+            if ai.topRyRatio >= 0.12 && ai.botRyRatio < 0.02 {
                 // アーチトップの場合は実物規格のドーム曲線（下辺は必ず完全フラット直角 0.0）
                 return StereoCardSegmenter.ArchShapeParams(
-                    topRxRatio: max(0.33, ai.topRxRatio),
-                    topRyRatio: max(0.22, ai.topRyRatio),
+                    topRxRatio: max(0.26, ai.topRxRatio),
+                    topRyRatio: max(0.18, ai.topRyRatio),
                     botRxRatio: 0.0,
                     botRyRatio: 0.0
                 )

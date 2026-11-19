@@ -17,14 +17,13 @@
 		SW0100080000000000000001 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = SW0200060000000000000001 /* Localizable.strings */; };
 		SW0100090000000000000001 /* StereoCardSegmenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = SW0200090000000000000001 /* StereoCardSegmenter.swift */; };
 		SW0100100000000000000001 /* StereoCardSeg.mlmodelc in Resources */ = {isa = PBXBuildFile; fileRef = SW0200100000000000000001 /* StereoCardSeg.mlmodelc */; };
-		SW0100110000000000000001 /* MobileSAMEncoder.mlmodelc in Resources */ = {isa = PBXBuildFile; fileRef = SW0200110000000000000001 /* MobileSAMEncoder.mlmodelc */; };
-		SW0100120000000000000001 /* MobileSAMDecoder.mlmodelc in Resources */ = {isa = PBXBuildFile; fileRef = SW0200120000000000000001 /* MobileSAMDecoder.mlmodelc */; };
 		SW0100130000000000000001 /* SAM2_1TinyImageEncoderFLOAT16.mlmodelc in Resources */ = {isa = PBXBuildFile; fileRef = SW0200130000000000000001 /* SAM2_1TinyImageEncoderFLOAT16.mlmodelc */; };
 		SW0100140000000000000001 /* SAM2_1TinyPromptEncoderFLOAT16.mlmodelc in Resources */ = {isa = PBXBuildFile; fileRef = SW0200140000000000000001 /* SAM2_1TinyPromptEncoderFLOAT16.mlmodelc */; };
 		SW0100150000000000000001 /* SAM2_1TinyMaskDecoderFLOAT16.mlmodelc in Resources */ = {isa = PBXBuildFile; fileRef = SW0200150000000000000001 /* SAM2_1TinyMaskDecoderFLOAT16.mlmodelc */; };
 		SW0100160000000000000001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = SW0200160000000000000001 /* Assets.xcassets */; };
 		SW0100170000000000000001 /* WelcomeIcon.png in Resources */ = {isa = PBXBuildFile; fileRef = SW0200170000000000000001 /* WelcomeIcon.png */; };
 		SW0100180000000000000001 /* NAFNetDeblur.mlmodelc in Resources */ = {isa = PBXBuildFile; fileRef = SW0200180000000000000001 /* NAFNetDeblur.mlmodelc */; };
+		SW0100190000000000000001 /* StereoColorizer.mlmodelc in Resources */ = {isa = PBXBuildFile; fileRef = SW0200190000000000000001 /* StereoColorizer.mlmodelc */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -38,14 +37,13 @@
 		SW0200080000000000000001 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
 		SW0200090000000000000001 /* StereoCardSegmenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StereoCardSegmenter.swift; sourceTree = "<group>"; };
 		SW0200100000000000000001 /* StereoCardSeg.mlmodelc */ = {isa = PBXFileReference; lastKnownFileType = folder; path = StereoCardSeg.mlmodelc; sourceTree = "<group>"; };
-		SW0200110000000000000001 /* MobileSAMEncoder.mlmodelc */ = {isa = PBXFileReference; lastKnownFileType = folder; path = MobileSAMEncoder.mlmodelc; sourceTree = "<group>"; };
-		SW0200120000000000000001 /* MobileSAMDecoder.mlmodelc */ = {isa = PBXFileReference; lastKnownFileType = folder; path = MobileSAMDecoder.mlmodelc; sourceTree = "<group>"; };
 		SW0200130000000000000001 /* SAM2_1TinyImageEncoderFLOAT16.mlmodelc */ = {isa = PBXFileReference; lastKnownFileType = folder; path = SAM2_1TinyImageEncoderFLOAT16.mlmodelc; sourceTree = "<group>"; };
 		SW0200140000000000000001 /* SAM2_1TinyPromptEncoderFLOAT16.mlmodelc */ = {isa = PBXFileReference; lastKnownFileType = folder; path = SAM2_1TinyPromptEncoderFLOAT16.mlmodelc; sourceTree = "<group>"; };
 		SW0200150000000000000001 /* SAM2_1TinyMaskDecoderFLOAT16.mlmodelc */ = {isa = PBXFileReference; lastKnownFileType = folder; path = SAM2_1TinyMaskDecoderFLOAT16.mlmodelc; sourceTree = "<group>"; };
 		SW0200160000000000000001 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		SW0200170000000000000001 /* WelcomeIcon.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = WelcomeIcon.png; sourceTree = "<group>"; };
 		SW0200180000000000000001 /* NAFNetDeblur.mlmodelc */ = {isa = PBXFileReference; lastKnownFileType = folder; path = NAFNetDeblur.mlmodelc; sourceTree = "<group>"; };
+		SW0200190000000000000001 /* StereoColorizer.mlmodelc */ = {isa = PBXFileReference; lastKnownFileType = folder; path = StereoColorizer.mlmodelc; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -120,14 +118,13 @@
 				SW0200050000000000000001 /* help_en.html */,
 				SW0200060000000000000001 /* Localizable.strings */,
 				SW0200100000000000000001 /* StereoCardSeg.mlmodelc */,
-				SW0200110000000000000001 /* MobileSAMEncoder.mlmodelc */,
-				SW0200120000000000000001 /* MobileSAMDecoder.mlmodelc */,
 				SW0200130000000000000001 /* SAM2_1TinyImageEncoderFLOAT16.mlmodelc */,
 				SW0200140000000000000001 /* SAM2_1TinyPromptEncoderFLOAT16.mlmodelc */,
 				SW0200150000000000000001 /* SAM2_1TinyMaskDecoderFLOAT16.mlmodelc */,
 				SW0200160000000000000001 /* Assets.xcassets */,
 				SW0200170000000000000001 /* WelcomeIcon.png */,
 				SW0200180000000000000001 /* NAFNetDeblur.mlmodelc */,
+				SW0200190000000000000001 /* StereoColorizer.mlmodelc */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -198,14 +195,13 @@
 				SW0100050000000000000001 /* help_en.html in Resources */,
 				SW0100080000000000000001 /* Localizable.strings in Resources */,
 				SW0100100000000000000001 /* StereoCardSeg.mlmodelc in Resources */,
-				SW0100110000000000000001 /* MobileSAMEncoder.mlmodelc in Resources */,
-				SW0100120000000000000001 /* MobileSAMDecoder.mlmodelc in Resources */,
 				SW0100130000000000000001 /* SAM2_1TinyImageEncoderFLOAT16.mlmodelc in Resources */,
 				SW0100140000000000000001 /* SAM2_1TinyPromptEncoderFLOAT16.mlmodelc in Resources */,
 				SW0100150000000000000001 /* SAM2_1TinyMaskDecoderFLOAT16.mlmodelc in Resources */,
 				SW0100160000000000000001 /* Assets.xcassets in Resources */,
 				SW0100170000000000000001 /* WelcomeIcon.png in Resources */,
 				SW0100180000000000000001 /* NAFNetDeblur.mlmodelc in Resources */,
+				SW0100190000000000000001 /* StereoColorizer.mlmodelc in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -292,7 +288,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.1.2;
+				MARKETING_VERSION = 0.1.3;
 				PRODUCT_BUNDLE_IDENTIFIER = jp.p-media.ViewStereo;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -315,7 +311,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.1.2;
+				MARKETING_VERSION = 0.1.3;
 				PRODUCT_BUNDLE_IDENTIFIER = jp.p-media.ViewStereo;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

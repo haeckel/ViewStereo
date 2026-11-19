@@ -25,17 +25,154 @@ struct ContentView: View {
                     handleDrop(providers: providers)
                 }
 
-            Divider()
+            if vm.isShowingInspector {
+                Divider()
 
-            // 右サイドバー（Anti-Jitter 4層固定幅インスペクター）
-            inspectorPanel
-                .frame(width: inspectorWidth, alignment: .topLeading)
-                .layoutPriority(2)
-                .clipped()
-                .background(Color(red: 0.11, green: 0.11, blue: 0.13))
+                // 右サイドバー（Anti-Jitter 4層固定幅インスペクター）
+                inspectorPanel
+                    .frame(width: inspectorWidth, alignment: .topLeading)
+                    .layoutPriority(2)
+                    .clipped()
+                    .background(Color(red: 0.11, green: 0.11, blue: 0.13))
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
         }
         .preferredColorScheme(.dark)
         .frame(minWidth: 1024, minHeight: 680)
+        .toolbar {
+            ToolbarItem(placement: .navigation) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        vm.isShowingInspector.toggle()
+                    }
+                } label: {
+                    Label("Sidebar", systemImage: "sidebar.right")
+                }
+                .customTooltip(String(localized: "Toggle Sidebar") + " (⌥⌘0)")
+            }
+
+            ToolbarItem(placement: .principal) {
+                HStack(spacing: 8) {
+                    // Zone 1: ファイル・入力
+                    ControlGroup {
+                        Button {
+                            vm.openImagesPanel()
+                        } label: {
+                            Label("Toolbar Open", systemImage: "photo.on.rectangle.angled")
+                        }
+                        .customTooltip(String(localized: "Open Stereoview Card, L/R or SBS...") + " (⌘O)")
+
+                        Button {
+                            vm.openBatchFolderPanel()
+                        } label: {
+                            Label("Toolbar Folder", systemImage: "folder.badge.gearshape")
+                        }
+                        .customTooltip(String(localized: "Batch Process Folder...") + " (⇧⌘B)")
+                        .disabled(vm.isBatchRunning || vm.isProcessing)
+                    } label: {
+                        Text("Toolbar Open")
+                    }
+                    .controlGroupStyle(.automatic)
+                    .labelStyle(.titleAndIcon)
+
+                    toolbarDivider
+
+                    // Zone 2: 解析・整準
+                    ControlGroup {
+                        Button {
+                            vm.runAutoAlignment()
+                        } label: {
+                            Label("Toolbar Align", systemImage: "wand.and.stars")
+                        }
+                        .customTooltip(String(localized: "Auto Align & Window") + " (⇧⌘A)")
+                        .disabled(!vm.hasLoadedImages || vm.isProcessing)
+                    } label: {
+                        Text("Toolbar Align")
+                    }
+                    .controlGroupStyle(.automatic)
+                    .labelStyle(.titleAndIcon)
+
+                    toolbarDivider
+
+                    // Zone 3: 5タブ インスペクタ連動（色分けアイコン＋ショートラベル）
+                    HStack(spacing: 4) {
+                        toolbarTabButton(
+                            titleKey: "Toolbar Window",
+                            systemImage: "rectangle.inset.filled.and.person.filled",
+                            color: .brightAmber,
+                            isExpanded: vm.isWindowSectionExpanded,
+                            tooltip: String(localized: "Toggle Stereo Window Panel") + " (⌥⌘1)"
+                        ) {
+                            toggleInspectorTab(\.isWindowSectionExpanded)
+                        }
+
+                        toolbarTabButton(
+                            titleKey: "Toolbar Mount",
+                            systemImage: "photo.artframe",
+                            color: .brightBlue,
+                            isExpanded: vm.isCardMountSectionExpanded,
+                            tooltip: String(localized: "Toggle Stereoview Card Mount Panel") + " (⌥⌘2)"
+                        ) {
+                            toggleInspectorTab(\.isCardMountSectionExpanded)
+                        }
+
+                        toolbarTabButton(
+                            titleKey: "Toolbar Restore",
+                            systemImage: "sparkles",
+                            color: .brightPink,
+                            isExpanded: vm.isRestorationSectionExpanded,
+                            tooltip: String(localized: "Toggle Vintage Restoration Panel") + " (⌥⌘3)"
+                        ) {
+                            toggleInspectorTab(\.isRestorationSectionExpanded)
+                        }
+
+                        toolbarTabButton(
+                            titleKey: "Toolbar Colorize",
+                            systemImage: "paintpalette.fill",
+                            color: Color(red: 0.20, green: 0.85, blue: 0.98),
+                            isExpanded: vm.isColorizationSectionExpanded,
+                            tooltip: String(localized: "Toggle Colorization Panel") + " (⌥⌘4)"
+                        ) {
+                            toggleInspectorTab(\.isColorizationSectionExpanded)
+                        }
+
+                        toolbarTabButton(
+                            titleKey: "Toolbar Recipe",
+                            systemImage: "slider.horizontal.3",
+                            color: .brightPurple,
+                            isExpanded: vm.isRecipeSectionExpanded,
+                            tooltip: String(localized: "Toggle Basic Recipe Panel") + " (⌥⌘5)"
+                        ) {
+                            toggleInspectorTab(\.isRecipeSectionExpanded)
+                        }
+
+                        toolbarTabButton(
+                            titleKey: "Toolbar Batch",
+                            systemImage: "square.stack.3d.up",
+                            color: .brightTeal,
+                            isExpanded: vm.isBatchSectionExpanded,
+                            tooltip: String(localized: "Toggle Batch Processing Panel") + " (⌥⌘6)"
+                        ) {
+                            toggleInspectorTab(\.isBatchSectionExpanded)
+                        }
+                    }
+
+                    toolbarDivider
+
+                    // Zone 4: 出力（緑強調）
+                    Button {
+                        vm.exportImage()
+                    } label: {
+                        Label("Toolbar Export", systemImage: "square.and.arrow.up.fill")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.palestineGreen)
+                    .customTooltip(String(localized: "Export Image...") + " (⌘E)")
+                    .disabled(!vm.hasLoadedImages || vm.isProcessing || vm.isBatchRunning)
+                }
+            }
+        }
+        .labelStyle(.titleAndIcon)
         .sheet(isPresented: $isShowingUpdateSheet) {
             StudioUpdateNotificationSheet(manager: updateManager)
         }
@@ -512,7 +649,7 @@ struct ContentView: View {
                         Text("2. AI Card Segmentation & 7-DoF Alignment")
                             .appSystemFont(size: 13, weight: .semibold)
                             .foregroundColor(.white)
-                        Text("Core ML (StereoCardSeg + MobileSAM) + LAPACK dposv_ & Metal Lanczos-3")
+                        Text("Core ML (StereoCardSeg + SAM 2.1 Tiny) + LAPACK dposv_ & Metal Lanczos-3")
                             .appSystemFont(size: 11)
                             .foregroundColor(.secondary)
                     }
@@ -547,9 +684,6 @@ struct ContentView: View {
 
     // MARK: - Anti-Jitter 1-Pane Utility Inspector
 
-    @State private var isWindowExpanded: Bool = false
-    @State private var isRecipeExpanded: Bool = false
-
     private var inspectorPanel: some View {
         let sidePadding: CGFloat = 16
         let contentWidth = inspectorWidth - (sidePadding * 2)
@@ -571,6 +705,7 @@ struct ContentView: View {
                     stereoWindowSection
                     stereoviewCardMountSection
                     vintageRestorationSection
+                    colorizationSection
                     basicRecipeDisclosure
                     batchProcessingDisclosure
                 }
@@ -595,44 +730,39 @@ struct ContentView: View {
         .clipped()
     }
 
-    // MARK: - Inspector Header
+    // MARK: - Inspector Header (Branding Header)
 
     private var inspectorHeader: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 12) {
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .frame(width: 48, height: 48)
+                .cornerRadius(12)
+                .shadow(color: .black.opacity(0.35), radius: 8)
+
             VStack(alignment: .leading, spacing: 2) {
+                Text(vm.currentDisplayTitle)
+                    .appSystemFont(size: vm.hasLoadedImages ? 18 : 24, weight: .black, design: .rounded)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [.blue, Color(red: 0.4, green: 0.7, blue: 1.0)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+
                 if vm.hasLoadedImages {
                     Text(vm.currentSourceName)
-                        .appSystemFont(size: 12, weight: .semibold)
-                        .foregroundColor(.white)
+                        .appSystemFont(size: 13, design: .monospaced)
+                        .foregroundColor(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
-                } else {
-                    Text("ViewStereo Utility")
-                        .appSystemFont(size: 12, weight: .semibold)
-                        .foregroundColor(.white)
-                }
-
-                HStack(spacing: 5) {
-                    Circle()
-                        .fill(statusBadgeColor)
-                        .frame(width: 6, height: 6)
-                    Text(LocalizedStringKey(statusBadgeText))
-                        .appSystemFont(size: 10.5, weight: .medium)
-                        .foregroundColor(.secondary)
                 }
             }
 
-            Spacer()
-
-            Button {
-                vm.openImagesPanel()
-            } label: {
-                Label("Open", systemImage: "folder")
-                    .appSystemFont(size: 11.5, weight: .semibold)
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .customTooltip("画像を開く (⌘O)")
+            Spacer(minLength: 0)
         }
     }
 
@@ -657,8 +787,15 @@ struct ContentView: View {
 
     private var statusSummarySection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
+            HStack(spacing: 6) {
                 sectionHeader(title: "RESTORATION STATUS", color: .brightBlue)
+                Circle()
+                    .fill(statusBadgeColor)
+                    .frame(width: 6, height: 6)
+                Text(LocalizedStringKey(statusBadgeText))
+                    .appSystemFont(size: 10, weight: .medium)
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
                 Spacer()
                 HStack(spacing: 6) {
                     Button {
@@ -715,7 +852,14 @@ struct ContentView: View {
     // MARK: - Section 3: Stereo Window Fine-Tuning (Collapsible)
 
     private var stereoWindowSection: some View {
-        DisclosureGroup(isExpanded: $isWindowExpanded) {
+        InspectorAccordionSection(
+            title: "STEREO WINDOW",
+            accentColor: .brightAmber,
+            shortcutHint: "⌥⌘1",
+            summary: vm.isAligned ? String(format: String(localized: "Auto: %.1f px"), vm.autoOptimalShiftX) : nil,
+            borderColor: Color.brightAmber.opacity(vm.isAligned ? 0.35 : 0.14),
+            isExpanded: $vm.isWindowSectionExpanded
+        ) {
             // 3点セット: スライダー + ResetButton + NumericInput
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
@@ -749,32 +893,22 @@ struct ContentView: View {
                     vm.updateRealtimeDragPreview()
                 }
             }
-            .padding(.top, 10)
-        } label: {
-            HStack {
-                sectionHeader(title: "STEREO WINDOW", color: .brightAmber)
-                Spacer()
-                if vm.isAligned {
-                    Text(String(format: String(localized: "Auto: %.1f px"), vm.autoOptimalShiftX))
-                        .appSystemFont(size: 10.5, weight: .medium, design: .monospaced)
-                        .foregroundColor(.secondary)
-                }
-            }
         }
-        .padding(12)
-        .background(Color.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 10))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(Color.brightAmber.opacity(vm.isAligned ? 0.28 : 0.10), lineWidth: 1)
-        )
-        .opacity(vm.isAligned ? 1.0 : 0.55)
+        .opacity(vm.isAligned ? 1.0 : 0.65)
     }
 
     // MARK: - Section 3.5: Stereoview Card Mount (Collapsible)
 
     private var stereoviewCardMountSection: some View {
         let isCardActive = (vm.displayMode == .stereoviewCard || vm.exportLayout == .stereoviewCard)
-        return DisclosureGroup(isExpanded: $vm.isCardMountSectionExpanded) {
+        return InspectorAccordionSection(
+            title: "STEREOVIEW CARD MOUNT",
+            accentColor: .brightBlue,
+            shortcutHint: "⌥⌘2",
+            summary: !vm.isCardMountSectionExpanded ? String(localized: String.LocalizationValue(vm.cardMountPreset.rawValue)) : nil,
+            borderColor: isCardActive ? Color.brightBlue.opacity(0.42) : Color.white.opacity(0.14),
+            isExpanded: $vm.isCardMountSectionExpanded
+        ) {
             VStack(alignment: .leading, spacing: 10) {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
@@ -785,7 +919,7 @@ struct ContentView: View {
                         if vm.hasOriginalCardMount {
                             Text("Source Card Detected")
                                 .appSystemFont(size: 10, weight: .semibold)
-                                .foregroundColor(.brightAmber)
+                                .foregroundColor(.brightBlue)
                         }
                     }
                     Picker("Mount Style", selection: $vm.cardMountPreset) {
@@ -850,7 +984,7 @@ struct ContentView: View {
                                     .controlSize(.mini)
                                 Text("OCR Reading...")
                                     .appSystemFont(size: 10, weight: .medium)
-                                    .foregroundColor(.brightAmber)
+                                    .foregroundColor(.brightBlue)
                             }
                         }
                     }
@@ -878,7 +1012,7 @@ struct ContentView: View {
                                 .appSystemFont(size: 11)
                                 .toggleStyle(.switch)
                                 .controlSize(.mini)
-                                .tint(.brightAmber)
+                                .tint(.brightBlue)
 
                             HStack(spacing: 6) {
                                 TextField(LocalizedStringKey("Left Margin (Upward)"), text: $vm.cardLeftMarginText)
@@ -893,207 +1027,337 @@ struct ContentView: View {
                     }
                 }
             }
-            .padding(.top, 10)
-        } label: {
-            HStack {
-                sectionHeader(title: "STEREOVIEW CARD MOUNT", color: .brightAmber)
-                Spacer()
-                if !vm.isCardMountSectionExpanded {
-                    Text(LocalizedStringKey(vm.cardMountPreset.rawValue))
-                        .appSystemFont(size: 10.5)
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                }
-            }
         }
-        .padding(12)
-        .background(Color.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 10))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(isCardActive ? Color.brightAmber.opacity(0.35) : Color.white.opacity(0.08), lineWidth: 1)
-        )
     }
 
     // MARK: - Section 3.8: Vintage Photo Restoration (Collapsible)
 
     private var vintageRestorationSummaryText: String {
-        if !vm.hasActiveVintageRestoration {
+        if !vm.isRestorationEnabled {
             return String(localized: "Off")
         }
         if vm.isShowingBeforeRestoration {
             return String(localized: "Before (Original)")
         }
+        let hasToneOrDetail = !vm.makeVintageRestorationOptions(ignorePreviewToggle: true).isIdentity
+            || !vm.makeDetailRestorationOptions(ignorePreviewToggle: true).isIdentity
+        if !hasToneOrDetail {
+            return vm.removeUnilateralNoise ? String(localized: "Remove Unilateral Noise") : String(localized: "Off")
+        }
         return String(localized: String.LocalizationValue(vm.restorationPrintTone.rawValue))
     }
 
     private var vintageRestorationSection: some View {
-        DisclosureGroup(isExpanded: $vm.isRestorationSectionExpanded) {
+        InspectorAccordionSection(
+            title: "VINTAGE PHOTO RESTORATION",
+            accentColor: .brightPink,
+            shortcutHint: "⌥⌘3",
+            summary: !vm.isRestorationSectionExpanded ? vintageRestorationSummaryText : nil,
+            borderColor: (vm.hasActiveVintageRestoration || vm.effectiveRemoveUnilateralNoise) ? Color.brightPink.opacity(0.42) : Color.white.opacity(0.14),
+            isExpanded: $vm.isRestorationSectionExpanded
+        ) {
             VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 8) {
-                    Button {
-                        vm.applyVintage19thCenturyPreset()
-                    } label: {
-                        Label("1860s Albumen Preset", systemImage: "wand.and.stars")
-                            .appSystemFont(size: 11, weight: .semibold)
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                    .tint(.brightPink)
-                    .disabled(!vm.hasLoadedImages || vm.isProcessing)
-
-                    Button {
-                        vm.resetVintageRestoration()
-                    } label: {
-                        Image(systemName: "arrow.counterclockwise")
-                            .font(.system(size: 11))
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .disabled(!vm.hasActiveVintageRestoration || vm.isProcessing)
-                    .customTooltip("退色・階調復元設定をリセット")
-                }
-
-                Toggle("Remove Unilateral Noise & Dust", isOn: $vm.removeUnilateralNoise)
-                    .appSystemFont(size: 11.5)
+                Toggle("Enable Vintage & Noise Restoration", isOn: $vm.isRestorationEnabled)
+                    .appSystemFont(size: 11.5, weight: .semibold)
                     .toggleStyle(.switch)
                     .controlSize(.small)
                     .tint(.brightPink)
-                    .disabled(!vm.hasLoadedImages || vm.isProcessing)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Print Tone")
-                        .appSystemFont(size: 11, weight: .semibold)
-                        .foregroundColor(.secondary)
-                    Picker("Print Tone", selection: $vm.restorationPrintTone) {
-                        ForEach(VintagePrintTone.allCases) { tone in
-                            Text(LocalizedStringKey(tone.rawValue)).tag(tone)
-                        }
-                    }
-                    .labelsHidden()
-                    .disabled(!vm.hasLoadedImages)
-                }
-
-                // 3点セット: Auto-Level (Black & White Point)
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text("Auto-Level (B/W Point %)")
-                            .appSystemFont(size: 11.5, weight: .semibold)
-                        Spacer()
-                        ResetButton(isModified: vm.restorationAutoLevel > 0.05) {
-                            vm.restorationAutoLevel = 0.0
-                        }
-                        .disabled(!vm.hasLoadedImages)
-                        NumericInput(
-                            value: $vm.restorationAutoLevel,
-                            range: 0.0...100.0,
-                            format: "%.0f"
-                        )
-                        .disabled(!vm.hasLoadedImages)
-                    }
-                    Slider(value: $vm.restorationAutoLevel, in: 0.0...100.0)
-                        .tint(.brightPink)
-                        .disabled(!vm.hasLoadedImages)
-                }
-
-                // 3点セット: Local Contrast (CLAHE)
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text("Local Contrast (CLAHE %)")
-                            .appSystemFont(size: 11.5, weight: .semibold)
-                        Spacer()
-                        ResetButton(isModified: vm.restorationLocalContrast > 0.05) {
-                            vm.restorationLocalContrast = 0.0
-                        }
-                        .disabled(!vm.hasLoadedImages)
-                        NumericInput(
-                            value: $vm.restorationLocalContrast,
-                            range: 0.0...100.0,
-                            format: "%.0f"
-                        )
-                        .disabled(!vm.hasLoadedImages)
-                    }
-                    Slider(value: $vm.restorationLocalContrast, in: 0.0...100.0)
-                        .tint(.brightPink)
-                        .disabled(!vm.hasLoadedImages)
-                }
+                    .disabled(vm.isProcessing)
 
                 Divider().opacity(0.3)
 
-                // 3点セット: Optical Deblur (NAFNet / Edge-Aware)
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text("Optical Deblur (%)")
-                            .appSystemFont(size: 11.5, weight: .semibold)
-                        Spacer()
-                        ResetButton(isModified: vm.restorationDeblurStrength > 0.05) {
-                            vm.restorationDeblurStrength = 0.0
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 6) {
+                        Button {
+                            vm.applyVintage19thCenturyPreset()
+                        } label: {
+                            Label("1860s Albumen", systemImage: "wand.and.stars")
+                                .appSystemFont(size: 10.5, weight: .semibold)
+                                .frame(maxWidth: .infinity)
                         }
-                        .disabled(!vm.hasLoadedImages)
-                        NumericInput(
-                            value: $vm.restorationDeblurStrength,
-                            range: 0.0...100.0,
-                            format: "%.0f"
-                        )
-                        .disabled(!vm.hasLoadedImages)
-                    }
-                    Slider(value: $vm.restorationDeblurStrength, in: 0.0...100.0)
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
                         .tint(.brightPink)
-                        .disabled(!vm.hasLoadedImages)
-                    Text(vm.isCoreMLDeblurAvailable ? LocalizedStringKey("Core ML: NAFNet-GoPro Active") : LocalizedStringKey("Edge-Aware Fallback (Add NAFNetDeblur.mlmodelc for AI Deblur)"))
-                        .appSystemFont(size: 9.5)
+                        .disabled(vm.isProcessing)
+                        .customTooltip("1860年代 鶏卵紙プリセットを適用")
+
+                        Button {
+                            vm.apply1890sHandTintedPreset()
+                        } label: {
+                            Label("1890s Hand-Tint", systemImage: "paintbrush.pointed")
+                                .appSystemFont(size: 10.5, weight: .semibold)
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .tint(.brightAmber)
+                        .disabled(vm.isProcessing)
+                        .customTooltip("1890年代 明治手彩色風プリセットを適用")
+
+                        Button {
+                            vm.resetVintageRestoration()
+                        } label: {
+                            Image(systemName: "arrow.counterclockwise")
+                                .font(.system(size: 11))
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled((!vm.hasActiveVintageRestoration && !vm.isRestorationEnabled) || vm.isProcessing)
+                        .customTooltip("退色・階調復元設定をリセット")
+                    }
+
+                    Toggle("Remove Unilateral Noise & Dust", isOn: $vm.removeUnilateralNoise)
+                        .appSystemFont(size: 11.5)
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                        .tint(.brightPink)
+                        .disabled(vm.isProcessing)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Print Tone")
+                            .appSystemFont(size: 11, weight: .semibold)
+                            .foregroundColor(.secondary)
+                        Picker("Print Tone", selection: $vm.restorationPrintTone) {
+                            ForEach(VintagePrintTone.allCases) { tone in
+                                Text(LocalizedStringKey(tone.rawValue)).tag(tone)
+                            }
+                        }
+                        .labelsHidden()
+                        .disabled(vm.isProcessing)
+                    }
+
+                    // 3点セット: Auto-Level (Black & White Point)
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("Auto-Level (B/W Point %)")
+                                .appSystemFont(size: 11.5, weight: .semibold)
+                            Spacer()
+                            ResetButton(isModified: vm.restorationAutoLevel > 0.05) {
+                                vm.restorationAutoLevel = 0.0
+                            }
+                            .disabled(vm.isProcessing)
+                            NumericInput(
+                                value: $vm.restorationAutoLevel,
+                                range: 0.0...100.0,
+                                format: "%.0f"
+                            )
+                            .disabled(vm.isProcessing)
+                        }
+                        Slider(value: $vm.restorationAutoLevel, in: 0.0...100.0)
+                            .tint(.brightPink)
+                            .disabled(vm.isProcessing)
+                    }
+
+                    // 3点セット: Local Contrast (CLAHE)
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("Local Contrast (CLAHE %)")
+                                .appSystemFont(size: 11.5, weight: .semibold)
+                            Spacer()
+                            ResetButton(isModified: vm.restorationLocalContrast > 0.05) {
+                                vm.restorationLocalContrast = 0.0
+                            }
+                            .disabled(vm.isProcessing)
+                            NumericInput(
+                                value: $vm.restorationLocalContrast,
+                                range: 0.0...100.0,
+                                format: "%.0f"
+                            )
+                            .disabled(vm.isProcessing)
+                        }
+                        Slider(value: $vm.restorationLocalContrast, in: 0.0...100.0)
+                            .tint(.brightPink)
+                            .disabled(vm.isProcessing)
+                    }
+
+                    Divider().opacity(0.3)
+
+                    // 3点セット: Optical Deblur (NAFNet / Edge-Aware)
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("Optical Deblur (%)")
+                                .appSystemFont(size: 11.5, weight: .semibold)
+                            Spacer()
+                            ResetButton(isModified: vm.restorationDeblurStrength > 0.05) {
+                                vm.restorationDeblurStrength = 0.0
+                            }
+                            .disabled(vm.isProcessing)
+                            NumericInput(
+                                value: $vm.restorationDeblurStrength,
+                                range: 0.0...100.0,
+                                format: "%.0f"
+                            )
+                            .disabled(vm.isProcessing)
+                        }
+                        Slider(value: $vm.restorationDeblurStrength, in: 0.0...100.0)
+                            .tint(.brightPink)
+                            .disabled(vm.isProcessing)
+                        Text(vm.isCoreMLDeblurAvailable ? LocalizedStringKey("Core ML: NAFNet-GoPro Active") : LocalizedStringKey("Edge-Aware Fallback (Add NAFNetDeblur.mlmodelc for AI Deblur)"))
+                            .appSystemFont(size: 9.5)
+                            .foregroundColor(.secondary)
+                    }
+
+                    // 3点セット: Foliage / Texture Protection
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("Foliage / Texture Protection (%)")
+                                .appSystemFont(size: 11.5, weight: .semibold)
+                            Spacer()
+                            ResetButton(isModified: abs(vm.restorationTextureProtection - 60.0) > 0.5) {
+                                vm.restorationTextureProtection = 60.0
+                            }
+                            .disabled(vm.restorationDeblurStrength <= 0.05 || vm.isProcessing)
+                            NumericInput(
+                                value: $vm.restorationTextureProtection,
+                                range: 0.0...100.0,
+                                format: "%.0f"
+                            )
+                            .disabled(vm.restorationDeblurStrength <= 0.05 || vm.isProcessing)
+                        }
+                        Slider(value: $vm.restorationTextureProtection, in: 0.0...100.0)
+                            .tint(.brightPink)
+                            .disabled(vm.restorationDeblurStrength <= 0.05 || vm.isProcessing)
+                    }
+                    .opacity(vm.restorationDeblurStrength > 0.05 ? 1.0 : 0.45)
+
+                    HStack(spacing: 8) {
+                        Button {
+                            vm.applyVintageRestoration()
+                        } label: {
+                            Label("Apply Restoration", systemImage: "wand.and.stars")
+                                .appSystemFont(size: 11.5, weight: .semibold)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 3)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.brightPink)
+                        .disabled(!vm.hasLoadedImages || vm.isProcessing)
+                    }
+
+                    Toggle("Show Original (Before Restore)", isOn: $vm.isShowingBeforeRestoration)
+                        .appSystemFont(size: 11.5)
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                        .tint(.brightPink)
+                        .disabled(!vm.hasLoadedImages || !vm.hasActiveVintageRestoration)
+                }
+            }
+        }
+    }
+
+    // MARK: - Section 3.9: Hand-Tinted & AI Colorization (Collapsible)
+
+    private var colorizationSection: some View {
+        let accent = Color(red: 0.20, green: 0.85, blue: 0.98)
+        return InspectorAccordionSection(
+            title: "COLORIZATION & HAND-TINT",
+            accentColor: accent,
+            shortcutHint: "⌥⌘4",
+            summary: !vm.isColorizationSectionExpanded
+                ? String(localized: String.LocalizationValue(vm.restorationColorizationMode.rawValue))
+                : nil,
+            borderColor: vm.hasActiveColorization ? accent.opacity(0.42) : Color.white.opacity(0.14),
+            isExpanded: $vm.isColorizationSectionExpanded
+        ) {
+            VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Hand-Tinted & AI Colorization")
+                        .appSystemFont(size: 11, weight: .semibold)
                         .foregroundColor(.secondary)
+                    Picker("Colorization Mode", selection: $vm.restorationColorizationMode) {
+                        ForEach(StereoColorizationMode.allCases) { mode in
+                            Text(LocalizedStringKey(mode.rawValue)).tag(mode)
+                        }
+                    }
+                    .labelsHidden()
+                    .disabled(vm.isProcessing)
+                    if vm.restorationColorizationMode == .handTinted1890s || vm.restorationColorizationMode == .naturalAI {
+                        Text(vm.isCoreMLColorizerAvailable ? LocalizedStringKey("Core ML: StereoColorizer Active") : LocalizedStringKey("Hand-Tint Fallback (Add StereoColorizer.mlmodelc for AI Color)"))
+                            .appSystemFont(size: 9.5)
+                            .foregroundColor(.secondary)
+                    }
                 }
 
-                // 3点セット: Foliage / Texture Protection
+                // 3点セット: Color Intensity (%)
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
-                        Text("Foliage / Texture Protection (%)")
+                        Text("Color Intensity (%)")
                             .appSystemFont(size: 11.5, weight: .semibold)
                         Spacer()
-                        ResetButton(isModified: abs(vm.restorationTextureProtection - 60.0) > 0.5) {
-                            vm.restorationTextureProtection = 60.0
+                        ResetButton(isModified: abs(vm.restorationColorStrength - 20.0) > 0.5) {
+                            vm.restorationColorStrength = 20.0
                         }
-                        .disabled(!vm.hasLoadedImages || vm.restorationDeblurStrength <= 0.05)
+                        .disabled(vm.isProcessing)
                         NumericInput(
-                            value: $vm.restorationTextureProtection,
+                            value: $vm.restorationColorStrength,
                             range: 0.0...100.0,
                             format: "%.0f"
                         )
-                        .disabled(!vm.hasLoadedImages || vm.restorationDeblurStrength <= 0.05)
+                        .disabled(vm.isProcessing)
                     }
-                    Slider(value: $vm.restorationTextureProtection, in: 0.0...100.0)
-                        .tint(.brightPink)
-                        .disabled(!vm.hasLoadedImages || vm.restorationDeblurStrength <= 0.05)
+                    Slider(value: $vm.restorationColorStrength, in: 0.0...100.0)
+                        .tint(accent)
+                        .disabled(vm.isProcessing)
                 }
-                .opacity(vm.restorationDeblurStrength > 0.05 ? 1.0 : 0.45)
+
+                // 3点セット: Tint Warmth (%)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Tint Warmth (%)")
+                            .appSystemFont(size: 11.5, weight: .semibold)
+                        Spacer()
+                        ResetButton(isModified: abs(vm.restorationPaperWarmth - 30.0) > 0.5) {
+                            vm.restorationPaperWarmth = 30.0
+                        }
+                        .disabled(vm.isProcessing)
+                        NumericInput(
+                            value: $vm.restorationPaperWarmth,
+                            range: 0.0...100.0,
+                            format: "%.0f"
+                        )
+                        .disabled(vm.isProcessing)
+                    }
+                    Slider(value: $vm.restorationPaperWarmth, in: 0.0...100.0)
+                        .tint(accent)
+                        .disabled(vm.isProcessing)
+                }
+
+                HStack(spacing: 8) {
+                    Button {
+                        vm.applyColorization()
+                    } label: {
+                        Label(
+                            vm.restorationColorizationMode == .off && vm.hasActiveColorization ? LocalizedStringKey("Clear Colorization") : LocalizedStringKey("Apply Colorization"),
+                            systemImage: "paintpalette.fill"
+                        )
+                        .appSystemFont(size: 11.5, weight: .semibold)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 3)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(accent)
+                    .disabled(!vm.hasLoadedImages || vm.isProcessing)
+
+                    Button {
+                        vm.resetColorization()
+                    } label: {
+                        Image(systemName: "arrow.counterclockwise")
+                            .font(.system(size: 11))
+                            .padding(.vertical, 3)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled((!vm.hasActiveColorization && vm.restorationColorizationMode == .off) || vm.isProcessing)
+                    .customTooltip("カラー化設定をリセット")
+                }
 
                 Toggle("Show Original (Before Restore)", isOn: $vm.isShowingBeforeRestoration)
                     .appSystemFont(size: 11.5)
                     .toggleStyle(.switch)
                     .controlSize(.small)
-                    .tint(.brightPink)
+                    .tint(accent)
                     .disabled(!vm.hasLoadedImages || !vm.hasActiveVintageRestoration)
             }
-            .padding(.top, 10)
-        } label: {
-            HStack {
-                sectionHeader(title: "VINTAGE PHOTO RESTORATION", color: .brightPink)
-                Spacer()
-                if !vm.isRestorationSectionExpanded {
-                    Text(vintageRestorationSummaryText)
-                        .appSystemFont(size: 10.5)
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                }
-            }
         }
-        .padding(12)
-        .background(Color.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 10))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(vm.hasActiveVintageRestoration ? Color.brightPink.opacity(0.35) : Color.white.opacity(0.08), lineWidth: 1)
-        )
     }
 
     // MARK: - Section 4: Basic Recipe (Collapsible Default Settings)
@@ -1116,7 +1380,14 @@ struct ContentView: View {
     }
 
     private var basicRecipeDisclosure: some View {
-        DisclosureGroup(isExpanded: $isRecipeExpanded) {
+        InspectorAccordionSection(
+            title: "BASIC RECIPE",
+            accentColor: .brightPurple,
+            shortcutHint: "⌥⌘5",
+            summary: !vm.isRecipeSectionExpanded ? recipeSummaryText : nil,
+            borderColor: Color.white.opacity(0.14),
+            isExpanded: $vm.isRecipeSectionExpanded
+        ) {
             VStack(alignment: .leading, spacing: 14) {
                 // Card Detection
                 VStack(alignment: .leading, spacing: 8) {
@@ -1135,21 +1406,6 @@ struct ContentView: View {
                         .toggleStyle(.switch)
                         .tint(.brightPurple)
                         .disabled(vm.stereoCardMode == .off)
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Segmentation Refiner")
-                            .appSystemFont(size: 11, weight: .semibold)
-                            .foregroundColor(.secondary)
-                        Picker("Refiner", selection: $vm.coreMLRefinerModel) {
-                            ForEach(CoreMLRefinerModel.allCases) { model in
-                                Text(model.rawValue).tag(model)
-                            }
-                        }
-                        .pickerStyle(.segmented)
-                        .labelsHidden()
-                    }
-                    .disabled(!vm.useCoreMLCardSegmentation || vm.stereoCardMode == .off)
-                    .opacity(vm.useCoreMLCardSegmentation && vm.stereoCardMode != .off ? 1.0 : 0.45)
 
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Card Frame")
@@ -1230,31 +1486,20 @@ struct ContentView: View {
                     }
                 }
             }
-            .padding(.top, 10)
-        } label: {
-            HStack {
-                sectionHeader(title: "BASIC RECIPE", color: .brightPurple)
-                Spacer()
-                if !isRecipeExpanded {
-                    Text(recipeSummaryText)
-                        .appSystemFont(size: 10.5)
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                }
-            }
         }
-        .padding(12)
-        .background(Color.white.opacity(0.03), in: RoundedRectangle(cornerRadius: 10))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
-        )
     }
 
     // MARK: - Section 4: Batch Processing (Collapsible)
 
     private var batchProcessingDisclosure: some View {
-        DisclosureGroup(isExpanded: $vm.isBatchSectionExpanded) {
+        InspectorAccordionSection(
+            title: "BATCH PROCESSING",
+            accentColor: .brightTeal,
+            shortcutHint: "⌥⌘6",
+            summary: vm.isBatchRunning ? "\(vm.batchCompletedCount)/\(vm.batchTotalCount)" : nil,
+            borderColor: vm.isBatchRunning ? Color.brightTeal.opacity(0.45) : Color.white.opacity(0.14),
+            isExpanded: $vm.isBatchSectionExpanded
+        ) {
             VStack(alignment: .leading, spacing: 10) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Input Pairing")
@@ -1346,24 +1591,7 @@ struct ContentView: View {
                 }
                 .opacity(vm.isBatchRunning || vm.batchTotalCount > 0 ? 1.0 : 0.45)
             }
-            .padding(.top, 10)
-        } label: {
-            HStack {
-                sectionHeader(title: "BATCH PROCESSING", color: .brightTeal)
-                Spacer()
-                if vm.isBatchRunning {
-                    Text("\(vm.batchCompletedCount)/\(vm.batchTotalCount)")
-                        .appSystemFont(size: 10.5, weight: .semibold, design: .monospaced)
-                        .foregroundColor(.brightTeal)
-                }
-            }
         }
-        .padding(12)
-        .background(Color.white.opacity(0.03), in: RoundedRectangle(cornerRadius: 10))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
-        )
     }
 
     // MARK: - Fixed Footer: Export
@@ -1498,6 +1726,42 @@ struct ContentView: View {
         }
     }
 
+    private var toolbarDivider: some View {
+        Rectangle()
+            .fill(Color.white.opacity(0.35))
+            .frame(width: 1, height: 22)
+    }
+
+    private func toolbarTabButton(
+        titleKey: String,
+        systemImage: String,
+        color: Color,
+        isExpanded: Bool,
+        tooltip: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Label(LocalizedStringKey(titleKey), systemImage: systemImage)
+        }
+        .foregroundStyle(color)
+        .background(
+            (isExpanded && vm.isShowingInspector) ? color.opacity(0.18) : Color.clear,
+            in: RoundedRectangle(cornerRadius: 6)
+        )
+        .customTooltip(tooltip)
+    }
+
+    private func toggleInspectorTab(_ keyPath: ReferenceWritableKeyPath<ViewStereoViewModel, Bool>) {
+        withAnimation(.easeInOut(duration: 0.18)) {
+            if !vm.isShowingInspector {
+                vm.isShowingInspector = true
+                vm[keyPath: keyPath] = true
+            } else {
+                vm[keyPath: keyPath].toggle()
+            }
+        }
+    }
+
     private func handleDrop(providers: [NSItemProvider]) -> Bool {
         var urls: [URL] = []
         let group = DispatchGroup()
@@ -1512,5 +1776,89 @@ struct ContentView: View {
             vm.handleDroppedURLs(urls)
         }
         return true
+    }
+}
+
+private struct InspectorAccordionSection<Content: View>: View {
+    let title: String
+    let accentColor: Color
+    let shortcutHint: String
+    let summary: String?
+    let borderColor: Color
+    @Binding var isExpanded: Bool
+    @ViewBuilder let content: () -> Content
+
+    @State private var isHovered: Bool = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    isExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(accentColor)
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                        .frame(width: 12, height: 12)
+
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(accentColor)
+                        .frame(width: 4, height: 16)
+
+                    Text(LocalizedStringKey(title))
+                        .appSystemFont(size: 12.5, weight: .bold)
+                        .foregroundColor(.white)
+                        .tracking(0.3)
+                        .lineLimit(1)
+
+                    Spacer(minLength: 6)
+
+                    if let summary, !summary.isEmpty {
+                        Text(summary)
+                            .appSystemFont(size: 10.5, weight: .medium)
+                            .foregroundColor(.white.opacity(0.68))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+
+                    Text(shortcutHint)
+                        .appSystemFont(size: 9.5, weight: .semibold, design: .monospaced)
+                        .foregroundColor(.white.opacity(0.55))
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 4))
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    accentColor.opacity(
+                        isExpanded ? (isHovered ? 0.20 : 0.14) : (isHovered ? 0.11 : 0.05)
+                    )
+                )
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .onHover { hovering in
+                isHovered = hovering
+            }
+
+            if isExpanded {
+                Divider()
+                    .background(accentColor.opacity(0.28))
+
+                content()
+                    .padding(12)
+            }
+        }
+        .background(Color.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 10))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(borderColor, lineWidth: 1)
+        )
     }
 }

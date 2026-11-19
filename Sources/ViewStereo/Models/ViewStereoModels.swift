@@ -216,6 +216,10 @@ final class ViewStereoViewModel: ObservableObject {
     @Published var restorationProgressMessage: String = ""
 
     // プレビュー・UI状態
+    @Published var isShowingInspector: Bool = true
+    @Published var isWindowSectionExpanded: Bool = false
+    @Published var isColorizationSectionExpanded: Bool = false
+    @Published var isRecipeSectionExpanded: Bool = false
     @Published var isBatchSectionExpanded: Bool = true
     @Published var isSwapped: Bool = false {
         didSet {
@@ -367,9 +371,6 @@ final class ViewStereoViewModel: ObservableObject {
     @Published var removeUnilateralNoise: Bool = true {
         didSet {
             UserDefaults.standard.set(removeUnilateralNoise, forKey: "VS.removeUnilateralNoise")
-            if oldValue != removeUnilateralNoise {
-                applyUnilateralNoiseToggle()
-            }
         }
     }
     @Published var stereoCardMode: StereoCardMode = .cropInner {
@@ -384,12 +385,6 @@ final class ViewStereoViewModel: ObservableObject {
             if oldValue != useCoreMLCardSegmentation { reloadCurrentSBSIfNeeded() }
         }
     }
-    @Published var coreMLRefinerModel: CoreMLRefinerModel = .mobileSAM {
-        didSet {
-            UserDefaults.standard.set(coreMLRefinerModel.rawValue, forKey: "VS.coreMLRefinerModel")
-            if oldValue != coreMLRefinerModel { reloadCurrentSBSIfNeeded() }
-        }
-    }
     @Published var frameStyle: StereoFrameStyle = .off {
         didSet {
             UserDefaults.standard.set(frameStyle.rawValue, forKey: "VS.frameStyle")
@@ -399,32 +394,32 @@ final class ViewStereoViewModel: ObservableObject {
 
     // 19世紀古写真・退色＆階調復元設定（画像ごとにリセットされる非破壊ポストプロセス）
     @Published var isRestorationSectionExpanded: Bool = true
+    @Published var isRestorationEnabled: Bool = true {
+        didSet {
+            UserDefaults.standard.set(isRestorationEnabled, forKey: "VS.isRestorationEnabled")
+            if oldValue != isRestorationEnabled && !isApplyingRestorationBatch {
+                applyUnilateralNoiseToggle()
+                renderDisplayPreview()
+            }
+        }
+    }
+    var effectiveRemoveUnilateralNoise: Bool {
+        isRestorationEnabled && removeUnilateralNoise
+    }
     private var isApplyingRestorationBatch: Bool = false
-    @Published var restorationPrintTone: VintagePrintTone = .original {
-        didSet {
-            if !isApplyingRestorationBatch { renderDisplayPreview() }
-        }
-    }
-    @Published var restorationAutoLevel: Double = 0.0 {
-        didSet {
-            if !isApplyingRestorationBatch { renderDisplayPreview() }
-        }
-    }
-    @Published var restorationLocalContrast: Double = 0.0 {
-        didSet {
-            if !isApplyingRestorationBatch { renderDisplayPreview() }
-        }
-    }
-    @Published var restorationDeblurStrength: Double = 0.0 {
-        didSet {
-            if !isApplyingRestorationBatch { renderDisplayPreview() }
-        }
-    }
-    @Published var restorationTextureProtection: Double = 60.0 {
-        didSet {
-            if !isApplyingRestorationBatch { renderDisplayPreview() }
-        }
-    }
+    @Published var restorationPrintTone: VintagePrintTone = .original
+    @Published var restorationAutoLevel: Double = 0.0
+    @Published var restorationLocalContrast: Double = 0.0
+    @Published var restorationDeblurStrength: Double = 0.0
+    @Published var restorationTextureProtection: Double = 60.0
+    @Published var restorationColorizationMode: StereoColorizationMode = .off
+    @Published var restorationColorStrength: Double = 20.0
+    @Published var restorationPaperWarmth: Double = 30.0
+
+    @Published private(set) var appliedRestorationOptions: VintageRestorationOptions = VintageRestorationOptions()
+    @Published private(set) var appliedDetailOptions: StereoDetailRestorationOptions = StereoDetailRestorationOptions(deblurStrength: 0.0, textureProtection: 0.60)
+    @Published private(set) var appliedColorizationOptions: StereoColorizationOptions = StereoColorizationOptions()
+
     @Published var isShowingBeforeRestoration: Bool = false {
         didSet {
             if oldValue != isShowingBeforeRestoration && !isApplyingRestorationBatch {
@@ -437,30 +432,81 @@ final class ViewStereoViewModel: ObservableObject {
         Self.resolveDeblurModelURL() != nil
     }
 
-    var hasActiveVintageRestoration: Bool {
-        !makeVintageRestorationOptions(ignorePreviewToggle: true).isIdentity
-            || !makeDetailRestorationOptions(ignorePreviewToggle: true).isIdentity
+    var isCoreMLColorizerAvailable: Bool {
+        Self.resolveColorizerModelURL() != nil
     }
 
-    func makeVintageRestorationOptions(ignorePreviewToggle: Bool = false) -> VintageRestorationOptions {
-        if !ignorePreviewToggle && isShowingBeforeRestoration {
-            return VintageRestorationOptions()
-        }
-        return VintageRestorationOptions(
+    var hasActiveColorization: Bool {
+        !appliedColorizationOptions.isIdentity
+    }
+
+    var hasActiveVintageRestoration: Bool {
+        let restorationActive = isRestorationEnabled && (
+            !appliedRestorationOptions.isIdentity
+            || !appliedDetailOptions.isIdentity
+        )
+        return restorationActive || hasActiveColorization
+    }
+
+    private func buildPendingVintageRestorationOptions() -> VintageRestorationOptions {
+        VintageRestorationOptions(
             autoLevelStrength: min(1.0, max(0.0, restorationAutoLevel / 100.0)),
             localContrastStrength: min(1.0, max(0.0, restorationLocalContrast / 100.0)),
             printTone: restorationPrintTone
         )
     }
 
-    func makeDetailRestorationOptions(ignorePreviewToggle: Bool = false) -> StereoDetailRestorationOptions {
-        if !ignorePreviewToggle && isShowingBeforeRestoration {
-            return StereoDetailRestorationOptions(deblurStrength: 0.0, textureProtection: restorationTextureProtection / 100.0)
-        }
-        return StereoDetailRestorationOptions(
+    private func buildPendingDetailRestorationOptions() -> StereoDetailRestorationOptions {
+        StereoDetailRestorationOptions(
             deblurStrength: min(1.0, max(0.0, restorationDeblurStrength / 100.0)),
             textureProtection: min(1.0, max(0.0, restorationTextureProtection / 100.0))
         )
+    }
+
+    private func buildPendingColorizationOptions() -> StereoColorizationOptions {
+        StereoColorizationOptions(
+            mode: restorationColorizationMode,
+            colorStrength: min(1.0, max(0.0, restorationColorStrength / 100.0)),
+            paperWarmth: min(1.0, max(0.0, restorationPaperWarmth / 100.0))
+        )
+    }
+
+    var hasPendingRestorationChanges: Bool {
+        let pendingRest = buildPendingVintageRestorationOptions()
+        let pendingDetail = buildPendingDetailRestorationOptions()
+        return abs(pendingRest.autoLevelStrength - appliedRestorationOptions.autoLevelStrength) > 0.001
+            || abs(pendingRest.localContrastStrength - appliedRestorationOptions.localContrastStrength) > 0.001
+            || pendingRest.printTone != appliedRestorationOptions.printTone
+            || abs(pendingDetail.deblurStrength - appliedDetailOptions.deblurStrength) > 0.001
+            || abs(pendingDetail.textureProtection - appliedDetailOptions.textureProtection) > 0.001
+    }
+
+    var hasPendingColorizationChanges: Bool {
+        let pending = buildPendingColorizationOptions()
+        return pending.mode != appliedColorizationOptions.mode
+            || abs(pending.colorStrength - appliedColorizationOptions.colorStrength) > 0.001
+            || abs(pending.paperWarmth - appliedColorizationOptions.paperWarmth) > 0.001
+    }
+
+    func makeVintageRestorationOptions(ignorePreviewToggle: Bool = false) -> VintageRestorationOptions {
+        if !isRestorationEnabled || (!ignorePreviewToggle && isShowingBeforeRestoration) {
+            return VintageRestorationOptions()
+        }
+        return appliedRestorationOptions
+    }
+
+    func makeDetailRestorationOptions(ignorePreviewToggle: Bool = false) -> StereoDetailRestorationOptions {
+        if !isRestorationEnabled || (!ignorePreviewToggle && isShowingBeforeRestoration) {
+            return StereoDetailRestorationOptions(deblurStrength: 0.0, textureProtection: appliedDetailOptions.textureProtection)
+        }
+        return appliedDetailOptions
+    }
+
+    func makeColorizationOptions(ignorePreviewToggle: Bool = false) -> StereoColorizationOptions {
+        if !ignorePreviewToggle && isShowingBeforeRestoration {
+            return StereoColorizationOptions()
+        }
+        return appliedColorizationOptions
     }
 
     nonisolated private static func resolveDeblurModelURL() -> URL? {
@@ -473,6 +519,16 @@ final class ViewStereoViewModel: ObservableObject {
         return nil
     }
 
+    nonisolated private static func resolveColorizerModelURL() -> URL? {
+        if let u = Bundle.main.url(forResource: "StereoColorizer", withExtension: "mlmodelc") { return u }
+        if let u = Bundle.main.url(forResource: "StereoColorizer", withExtension: "mlpackage") { return u }
+        #if SWIFT_PACKAGE
+        if let u = Bundle.module.url(forResource: "StereoColorizer", withExtension: "mlmodelc") { return u }
+        if let u = Bundle.module.url(forResource: "StereoColorizer", withExtension: "mlpackage") { return u }
+        #endif
+        return nil
+    }
+
     nonisolated private static func applyVintagePipeline(
         left: [UInt8],
         right: [UInt8],
@@ -480,10 +536,14 @@ final class ViewStereoViewModel: ObservableObject {
         height: Int,
         toneOptions: VintageRestorationOptions,
         detailOptions: StereoDetailRestorationOptions,
+        colorOptions: StereoColorizationOptions = StereoColorizationOptions(),
         progress: (@Sendable (Double) -> Void)? = nil
     ) -> (left: [UInt8], right: [UInt8]) {
         var curL = left
         var curR = right
+        let hasColor = !colorOptions.isIdentity
+        let detailWeight = (toneOptions.isIdentity && !hasColor) ? 1.0 : (hasColor ? 0.55 : 0.85)
+
         if !detailOptions.isIdentity {
             let detailed = StereoDetailRestorer.restorePair(
                 leftRGB: curL,
@@ -493,32 +553,92 @@ final class ViewStereoViewModel: ObservableObject {
                 options: detailOptions,
                 modelURL: resolveDeblurModelURL(),
                 progress: { p in
-                    progress?(toneOptions.isIdentity ? p : p * 0.85)
+                    progress?(p * detailWeight)
                 }
             )
             curL = detailed.left
             curR = detailed.right
         }
-        if !toneOptions.isIdentity {
-            let toned = VintageToneRestorer.restorePair(leftRGB: curL, rightRGB: curR, width: width, height: height, options: toneOptions)
+        // カラー化が有効な場合は、先に Auto-Level / CLAHE で輝度階調を正規化し、プリントトーンによる上書きは抑止する
+        var effectiveTone = toneOptions
+        if hasColor {
+            effectiveTone.printTone = .original
+        }
+        if !effectiveTone.isIdentity {
+            let toned = VintageToneRestorer.restorePair(leftRGB: curL, rightRGB: curR, width: width, height: height, options: effectiveTone)
             curL = toned.left
             curR = toned.right
+            if !hasColor {
+                progress?(1.0)
+            }
+        }
+        if hasColor {
+            let baseProg = detailOptions.isIdentity ? 0.15 : 0.60
+            let colored = StereoColorizer.colorizePair(
+                leftRGB: curL,
+                rightRGB: curR,
+                width: width,
+                height: height,
+                options: colorOptions,
+                modelURL: resolveColorizerModelURL(),
+                progress: { p in
+                    progress?(baseProg + p * (1.0 - baseProg))
+                }
+            )
+            curL = colored.left
+            curR = colored.right
             progress?(1.0)
         }
         return (curL, curR)
     }
 
-    func applyVintage19thCenturyPreset() {
+    func applyVintageRestoration() {
+        isApplyingRestorationBatch = true
+        isRestorationEnabled = true
+        isShowingBeforeRestoration = false
+        appliedRestorationOptions = buildPendingVintageRestorationOptions()
+        appliedDetailOptions = buildPendingDetailRestorationOptions()
+        isApplyingRestorationBatch = false
+        applyUnilateralNoiseToggle()
+        statusMessage = "Applied vintage restoration."
+        renderDisplayPreview()
+    }
+
+    func applyColorization() {
         isApplyingRestorationBatch = true
         isShowingBeforeRestoration = false
+        if restorationColorizationMode == .off && !hasActiveColorization {
+            restorationColorizationMode = .handTinted1890s
+        }
+        appliedColorizationOptions = buildPendingColorizationOptions()
+        isApplyingRestorationBatch = false
+        statusMessage = restorationColorizationMode == .off ? "Cleared colorization." : "Applied colorization."
+        renderDisplayPreview()
+    }
+
+    func applyVintage19thCenturyPreset() {
+        isApplyingRestorationBatch = true
         restorationPrintTone = .albumenSepia
         restorationAutoLevel = 80.0
         restorationLocalContrast = 45.0
         restorationDeblurStrength = 35.0
         restorationTextureProtection = 65.0
         isApplyingRestorationBatch = false
-        statusMessage = "Applied 19th-Century Albumen preset."
-        renderDisplayPreview()
+        statusMessage = "Loaded 1860s Albumen preset. Click Apply Restoration to run."
+    }
+
+    func apply1890sHandTintedPreset() {
+        isApplyingRestorationBatch = true
+        restorationPrintTone = .original
+        restorationAutoLevel = 70.0
+        restorationLocalContrast = 35.0
+        restorationDeblurStrength = 25.0
+        restorationTextureProtection = 65.0
+        restorationColorizationMode = .handTinted1890s
+        restorationColorStrength = 20.0
+        restorationPaperWarmth = 30.0
+        isApplyingRestorationBatch = false
+        statusMessage = "Loaded 1890s Hand-Tinted preset."
     }
 
     func resetVintageRestoration(renderPreview: Bool = true) {
@@ -529,9 +649,24 @@ final class ViewStereoViewModel: ObservableObject {
         restorationLocalContrast = 0.0
         restorationDeblurStrength = 0.0
         restorationTextureProtection = 60.0
+        appliedRestorationOptions = VintageRestorationOptions()
+        appliedDetailOptions = StereoDetailRestorationOptions(deblurStrength: 0.0, textureProtection: 0.60)
         isApplyingRestorationBatch = false
         if renderPreview {
             statusMessage = "Reset vintage restoration settings."
+            renderDisplayPreview()
+        }
+    }
+
+    func resetColorization(renderPreview: Bool = true) {
+        isApplyingRestorationBatch = true
+        restorationColorizationMode = .off
+        restorationColorStrength = 20.0
+        restorationPaperWarmth = 30.0
+        appliedColorizationOptions = StereoColorizationOptions()
+        isApplyingRestorationBatch = false
+        if renderPreview {
+            statusMessage = "Reset colorization settings."
             renderDisplayPreview()
         }
     }
@@ -648,14 +783,14 @@ final class ViewStereoViewModel: ObservableObject {
         if ud.object(forKey: "VS.removeUnilateralNoise") != nil {
             self.removeUnilateralNoise = ud.bool(forKey: "VS.removeUnilateralNoise")
         }
+        if ud.object(forKey: "VS.isRestorationEnabled") != nil {
+            self.isRestorationEnabled = ud.bool(forKey: "VS.isRestorationEnabled")
+        }
         if let cm = ud.string(forKey: "VS.stereoCardMode"), let cardMode = StereoCardMode(rawValue: cm) {
             self.stereoCardMode = cardMode
         }
         if ud.object(forKey: "VS.useCoreMLCardSegmentation") != nil {
             self.useCoreMLCardSegmentation = ud.bool(forKey: "VS.useCoreMLCardSegmentation")
-        }
-        if let rm = ud.string(forKey: "VS.coreMLRefinerModel"), let refiner = CoreMLRefinerModel(rawValue: rm) {
-            self.coreMLRefinerModel = refiner
         }
         if let fs = ud.string(forKey: "VS.frameStyle"), let style = StereoFrameStyle(rawValue: fs) {
             self.frameStyle = style
@@ -730,6 +865,18 @@ final class ViewStereoViewModel: ObservableObject {
         return ""
     }
 
+    var currentDisplayTitle: String {
+        if let l = leftURL {
+            let leftStem = l.deletingPathExtension().lastPathComponent
+            if let r = rightURL, r != l {
+                let rightStem = r.deletingPathExtension().lastPathComponent
+                return "\(leftStem) + \(rightStem)"
+            }
+            return leftStem
+        }
+        return String(localized: "New Stereoview")
+    }
+
     var hasLoadedImages: Bool {
         rawLeftRGB != nil && rawRightRGB != nil
     }
@@ -791,6 +938,7 @@ final class ViewStereoViewModel: ObservableObject {
         batchCompletionSummary = nil
         if resetRestoration {
             resetVintageRestoration(renderPreview: false)
+        resetColorization(renderPreview: false)
         }
         if cardTextMode != .manualTypeset {
             clearCardMountTexts()
@@ -801,7 +949,6 @@ final class ViewStereoViewModel: ObservableObject {
         isProcessing = true
         let cardMode = stereoCardMode
         let useCoreML = useCoreMLCardSegmentation
-        let refiner = coreMLRefinerModel
         statusMessage = "Loading image..."
 
         Task {
@@ -825,7 +972,7 @@ final class ViewStereoViewModel: ObservableObject {
                 var mountCtx: StereoCardSegmenter.OriginalCardMountContext? = nil
                 let extMode: StereoCardCropper.ExtractionMode = (cardMode == .keepArchBlack) ? .keepArchBlack : .cropInner
                 if cardMode != .off,
-                   let card = (useCoreML ? StereoCardSegmenter.shared.extractPhotoPair(from: rgb, width: fw, height: fh, mode: extMode, refiner: refiner) : nil)
+                   let card = (useCoreML ? StereoCardSegmenter.shared.extractPhotoPair(from: rgb, width: fw, height: fh, mode: extMode) : nil)
                            ?? StereoCardCropper.extractPhotoPair(from: rgb, width: fw, height: fh, mode: extMode) {
                     l = card.leftRGB
                     r = card.rightRGB
@@ -906,6 +1053,7 @@ final class ViewStereoViewModel: ObservableObject {
     func loadSeparateImages(left: URL, right: URL) {
         batchCompletionSummary = nil
         resetVintageRestoration(renderPreview: false)
+        resetColorization(renderPreview: false)
         if cardTextMode != .manualTypeset {
             clearCardMountTexts()
         }
@@ -1047,7 +1195,7 @@ final class ViewStereoViewModel: ObservableObject {
         let useSaliency = useAttentionSaliency
         let keepAR = keepOriginalAspectRatio
         let colorMode = autoColorMode
-        let removeNoise = removeUnilateralNoise
+        let removeNoise = effectiveRemoveUnilateralNoise
         let preserveArch = hasPreservedArch
         let renderer = metalRenderer
 
@@ -1118,7 +1266,7 @@ final class ViewStereoViewModel: ObservableObject {
         autoOptimalShiftX = out.windowDecision.optimalShiftX
         windowShiftX = out.windowDecision.optimalShiftX
         lastFullResShiftX = out.windowDecision.optimalShiftX
-        lastFullResRemoveNoise = removeUnilateralNoise
+        lastFullResRemoveNoise = effectiveRemoveUnilateralNoise
         hasWindowViolationRisk = out.windowDecision.hasWindowViolationRisk
         requiresFloatingWindow = out.windowDecision.requiresFloatingWindow
         maxDisparityPercent = out.dispRangePct
@@ -1698,8 +1846,9 @@ final class ViewStereoViewModel: ObservableObject {
         let mountCtx = currentMountContext
         let restOpts = makeVintageRestorationOptions()
         let detailOpts = makeDetailRestorationOptions()
+        let colorOpts = makeColorizationOptions()
         let colorMode = autoColorMode
-        let removeNoise = removeUnilateralNoise
+        let removeNoise = effectiveRemoveUnilateralNoise
 
         isPreviewWarping = true
         needsAnotherPreviewWarp = false
@@ -1822,12 +1971,19 @@ final class ViewStereoViewModel: ObservableObject {
 
                 var dispL = warpedPL
                 var dispR = warpedPR
-                if !restOpts.isIdentity || !detailOpts.isIdentity {
+                if !restOpts.isIdentity || !detailOpts.isIdentity || !colorOpts.isIdentity {
                     if !detailOpts.isIdentity {
                         await MainActor.run {
                             if self.previewRenderGeneration == gen {
                                 self.restorationProgress = 0.35
                                 self.restorationProgressMessage = String(localized: "Applying AI optical deblur (NAFNet)...")
+                            }
+                        }
+                    } else if !colorOpts.isIdentity {
+                        await MainActor.run {
+                            if self.previewRenderGeneration == gen {
+                                self.restorationProgress = 0.35
+                                self.restorationProgressMessage = String(localized: "Colorizing stereo pair...")
                             }
                         }
                     }
@@ -1838,6 +1994,7 @@ final class ViewStereoViewModel: ObservableObject {
                         height: prevCH,
                         toneOptions: restOpts,
                         detailOptions: detailOpts,
+                        colorOptions: colorOpts,
                         progress: { p in
                             Task { @MainActor in
                                 if self.previewRenderGeneration == gen {
@@ -1903,7 +2060,7 @@ final class ViewStereoViewModel: ObservableObject {
     /// 現在の windowShiftX と removeUnilateralNoise でフル解像度バッファを同期する（Export / Color Match 用）
     private func ensureFullResAlignedSynced() async -> Bool {
         guard isAligned else { return hasLoadedImages }
-        let removeNoise = removeUnilateralNoise
+        let removeNoise = effectiveRemoveUnilateralNoise
         let colorMode = autoColorMode
         if abs(windowShiftX - lastFullResShiftX) <= 1e-4,
            lastFullResRemoveNoise == removeNoise,
@@ -2116,20 +2273,23 @@ final class ViewStereoViewModel: ObservableObject {
         let mountCtx = currentMountContext
         let restOpts = makeVintageRestorationOptions()
         let detailOpts = makeDetailRestorationOptions()
+        let colorOpts = makeColorizationOptions()
         previewRenderGeneration += 1
         let gen = previewRenderGeneration
-        let showHeavyProgress = !detailOpts.isIdentity
+        let showHeavyProgress = !detailOpts.isIdentity || !colorOpts.isIdentity
         if showHeavyProgress {
             isRestoringPreview = true
             restorationProgress = 0.06
-            restorationProgressMessage = String(localized: "Applying AI optical deblur (NAFNet)...")
+            restorationProgressMessage = !detailOpts.isIdentity
+                ? String(localized: "Applying AI optical deblur (NAFNet)...")
+                : String(localized: "Colorizing stereo pair...")
         }
 
         Task {
             let image = await Task.detached(priority: .userInitiated) { () -> NSImage? in
                 var dispL = l
                 var dispR = r
-                if !restOpts.isIdentity || !detailOpts.isIdentity {
+                if !restOpts.isIdentity || !detailOpts.isIdentity || !colorOpts.isIdentity {
                     let restored = Self.applyVintagePipeline(
                         left: dispL,
                         right: dispR,
@@ -2137,6 +2297,7 @@ final class ViewStereoViewModel: ObservableObject {
                         height: h,
                         toneOptions: restOpts,
                         detailOptions: detailOpts,
+                        colorOptions: colorOpts,
                         progress: { p in
                             Task { @MainActor in
                                 if self.previewRenderGeneration == gen {
@@ -2179,6 +2340,7 @@ final class ViewStereoViewModel: ObservableObject {
         let mountCtx = currentMountContext
         let restOpts = makeVintageRestorationOptions(ignorePreviewToggle: true)
         let detailOpts = makeDetailRestorationOptions(ignorePreviewToggle: true)
+        let colorOpts = makeColorizationOptions(ignorePreviewToggle: true)
         let ext = imgFormat.fileExtension
 
         if layout == .separateLR {
@@ -2211,6 +2373,7 @@ final class ViewStereoViewModel: ObservableObject {
                             style: style, imageFormat: imgFormat,
                             restorationOptions: restOpts,
                             detailOptions: detailOpts,
+                            colorOptions: colorOpts,
                             outL: outL, outR: outR
                         )
                     }.value
@@ -2284,6 +2447,7 @@ final class ViewStereoViewModel: ObservableObject {
                         cardConfig: cardCfg, mountContext: mountCtx,
                         restorationOptions: restOpts,
                         detailOptions: detailOpts,
+                        colorOptions: colorOpts,
                         to: url
                     )
                 }.value
@@ -2388,10 +2552,9 @@ final class ViewStereoViewModel: ObservableObject {
         let useSaliency = useAttentionSaliency
         let keepAR = keepOriginalAspectRatio
         let colorMode = autoColorMode
-        let removeNoise = removeUnilateralNoise
+        let removeNoise = effectiveRemoveUnilateralNoise
         let cardMode = stereoCardMode
         let useCoreML = useCoreMLCardSegmentation
-        let refiner = coreMLRefinerModel
         let style = frameStyle
         let layout = exportLayout
         let imgFormat = exportImageFormat
@@ -2399,6 +2562,7 @@ final class ViewStereoViewModel: ObservableObject {
         let saveReport = batchSaveReport
         let restOpts = makeVintageRestorationOptions(ignorePreviewToggle: true)
         let detailOpts = makeDetailRestorationOptions(ignorePreviewToggle: true)
+        let colorOpts = makeColorizationOptions(ignorePreviewToggle: true)
         if cardTextMode != .manualTypeset {
             clearCardMountTexts()
         }
@@ -2432,7 +2596,7 @@ final class ViewStereoViewModel: ObservableObject {
                 statusMessage = "Batch [\(idx + 1)/\(items.count)]: \(item.displayLabel)"
 
                 let stepResult = await Task.detached(priority: .userInitiated) { () -> Result<(AlignmentPipelineOutput, Int, Int, Bool, StereoCardSegmenter.OriginalCardMountContext?, StereoCardMountConfig), AlignmentPipelineError>? in
-                    guard let (lRGB, rRGB, w, h, preservedArch, mountCtx) = Self.loadBatchPair(item: item, cardMode: cardMode, useCoreML: useCoreML, refiner: refiner) else {
+                    guard let (lRGB, rRGB, w, h, preservedArch, mountCtx) = Self.loadBatchPair(item: item, cardMode: cardMode, useCoreML: useCoreML) else {
                         return nil
                     }
                     let res = Self.executeAlignmentPipeline(
@@ -2476,6 +2640,7 @@ final class ViewStereoViewModel: ObservableObject {
                             mountContext: mountCtx,
                             restorationOptions: restOpts,
                             detailOptions: detailOpts,
+                            colorOptions: colorOpts,
                             saveReport: saveReport
                         )
                         return savedOK ? .success((out, w, h, preservedArch, mountCtx, itemCardCfg)) : nil
@@ -2624,7 +2789,7 @@ final class ViewStereoViewModel: ObservableObject {
         }
     }
 
-    nonisolated private static func loadBatchPair(item: StereoBatchItem, cardMode: StereoCardMode, useCoreML: Bool, refiner: CoreMLRefinerModel = .mobileSAM) -> ([UInt8], [UInt8], Int, Int, Bool, StereoCardSegmenter.OriginalCardMountContext?)? {
+    nonisolated private static func loadBatchPair(item: StereoBatchItem, cardMode: StereoCardMode, useCoreML: Bool) -> ([UInt8], [UInt8], Int, Int, Bool, StereoCardSegmenter.OriginalCardMountContext?)? {
         if let rURL = item.rightURL {
             guard let (lRGB, lw, lh) = loadNormalizedRGB(url: item.leftURL),
                   let (rRGBRaw, rw, rh) = loadNormalizedRGB(url: rURL) else {
@@ -2641,7 +2806,7 @@ final class ViewStereoViewModel: ObservableObject {
             }
             let extMode: StereoCardCropper.ExtractionMode = (cardMode == .keepArchBlack) ? .keepArchBlack : .cropInner
             if cardMode != .off,
-               let card = (useCoreML ? StereoCardSegmenter.shared.extractPhotoPair(from: rgb, width: fw, height: fh, mode: extMode, refiner: refiner) : nil)
+               let card = (useCoreML ? StereoCardSegmenter.shared.extractPhotoPair(from: rgb, width: fw, height: fh, mode: extMode) : nil)
                        ?? StereoCardCropper.extractPhotoPair(from: rgb, width: fw, height: fh, mode: extMode) {
                 let mountCtx = StereoCardSegmenter.shared.currentMountContext
                 return (card.leftRGB, card.rightRGB, card.width, card.height, card.preservedArch, mountCtx)
@@ -2668,13 +2833,14 @@ final class ViewStereoViewModel: ObservableObject {
         imageFormat: StereoExportImageFormat,
         restorationOptions: VintageRestorationOptions = VintageRestorationOptions(),
         detailOptions: StereoDetailRestorationOptions = StereoDetailRestorationOptions(),
+        colorOptions: StereoColorizationOptions = StereoColorizationOptions(),
         outL: URL,
         outR: URL
     ) -> Bool {
         var l = left
         var r = right
-        if !restorationOptions.isIdentity || !detailOptions.isIdentity {
-            let restored = applyVintagePipeline(left: l, right: r, width: width, height: height, toneOptions: restorationOptions, detailOptions: detailOptions)
+        if !restorationOptions.isIdentity || !detailOptions.isIdentity || !colorOptions.isIdentity {
+            let restored = applyVintagePipeline(left: l, right: r, width: width, height: height, toneOptions: restorationOptions, detailOptions: detailOptions, colorOptions: colorOptions)
             l = restored.left
             r = restored.right
         }
@@ -2706,12 +2872,13 @@ final class ViewStereoViewModel: ObservableObject {
         mountContext: StereoCardSegmenter.OriginalCardMountContext? = nil,
         restorationOptions: VintageRestorationOptions = VintageRestorationOptions(),
         detailOptions: StereoDetailRestorationOptions = StereoDetailRestorationOptions(),
+        colorOptions: StereoColorizationOptions = StereoColorizationOptions(),
         to url: URL
     ) -> Bool {
         var l = left
         var r = right
-        if !restorationOptions.isIdentity || !detailOptions.isIdentity {
-            let restored = applyVintagePipeline(left: l, right: r, width: width, height: height, toneOptions: restorationOptions, detailOptions: detailOptions)
+        if !restorationOptions.isIdentity || !detailOptions.isIdentity || !colorOptions.isIdentity {
+            let restored = applyVintagePipeline(left: l, right: r, width: width, height: height, toneOptions: restorationOptions, detailOptions: detailOptions, colorOptions: colorOptions)
             l = restored.left
             r = restored.right
         }
@@ -2813,14 +2980,15 @@ final class ViewStereoViewModel: ObservableObject {
         mountContext: StereoCardSegmenter.OriginalCardMountContext? = nil,
         restorationOptions: VintageRestorationOptions = VintageRestorationOptions(),
         detailOptions: StereoDetailRestorationOptions = StereoDetailRestorationOptions(),
+        colorOptions: StereoColorizationOptions = StereoColorizationOptions(),
         saveReport: Bool
     ) -> Bool {
         let base = item.baseName
         let w = out.cw, h = out.ch
         let ext = imageFormat.fileExtension
-        let restored = (restorationOptions.isIdentity && detailOptions.isIdentity)
+        let restored = (restorationOptions.isIdentity && detailOptions.isIdentity && colorOptions.isIdentity)
             ? (left: out.warpedL, right: out.warpedR)
-            : applyVintagePipeline(left: out.warpedL, right: out.warpedR, width: w, height: h, toneOptions: restorationOptions, detailOptions: detailOptions)
+            : applyVintagePipeline(left: out.warpedL, right: out.warpedR, width: w, height: h, toneOptions: restorationOptions, detailOptions: detailOptions, colorOptions: colorOptions)
         let wL = restored.left
         let wR = restored.right
         let ok: Bool

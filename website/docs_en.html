@@ -3,9 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ViewStereo Help - Official Manual (v0.1.2)</title>
-    <link rel="icon" type="image/png" href="favicon.png?v=0.1.2">
-    <link rel="apple-touch-icon" href="apple-touch-icon.png?v=0.1.2">
+    <title>ViewStereo Help - Official Manual (v0.1.3)</title>
+    <link rel="icon" type="image/png" href="favicon.png?v=0.1.3">
+    <link rel="apple-touch-icon" href="apple-touch-icon.png?v=0.1.3">
     <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;600;700;800;900&display=swap');
 
@@ -253,7 +253,7 @@ footer {
     <div class="mac-banner"> ViewStereo is exclusively designed for macOS (macOS 14.0+ / Apple Silicon Recommended)</div>
 
     <header>
-        <div class="header-badge">ViewStereo Official Manual — v0.1.2</div>
+        <div class="header-badge">ViewStereo Official Manual — v0.1.3</div>
         <h1>ViewStereo Online Manual</h1>
         <p>Complete guide to Core ML stereoview card segmentation, 7-DoF symmetric homography alignment, intelligent stereo window calibration, and digital remounting.</p>
         <div class="header-nav">
@@ -284,7 +284,7 @@ footer {
                 <h2>1. Overview</h2>
                 <p><strong>ViewStereo</strong> is a native macOS studio application for automatically detecting, rectifying, and restoring 19th-century historical stereoview cards (stereographs) as well as modern stereo photographs into Apple Vision Pro Spatial Photos (MV-HEVC), Side-by-Side (SBS), Anaglyph, MPO, and digitally remounted cards.</p>
                 <div class="callout">
-                    <strong>Early Development Notice:</strong> ViewStereo (v0.1.2) is currently in active early development. All Core ML models are bundled directly inside the app and run 100% offline on your Mac.
+                    <strong>Early Development Notice:</strong> ViewStereo (v0.1.3) is currently in active early development. All Core ML models are bundled directly inside the app and run 100% offline on your Mac.
                 </div>
             </section>
 
@@ -356,6 +356,7 @@ footer {
                     <li><strong>Remove Unilateral Noise &amp; Dust</strong>: Suppresses dust specks and scratches that appear in only one eye’s view with instant non-destructive preview updates.</li>
                     <li><strong>Vintage Photo Restoration</strong>: Restore faded archival tone non-destructively with print tone presets (<code>1860s Albumen Sepia</code>, <code>1890s Warm Silver</code>, <code>Pure Monochrome</code>, <code>Original</code>), <code>Auto-Level (B/W Point %)</code>, <code>Local Contrast (CLAHE %)</code>, and a real-time <code>Compare Before</code> toggle.</li>
                     <li><strong>AI Optical Deblur (Core ML NAFNet-GoPro)</strong>: Bundled <code>NAFNetDeblur</code> restores optical softness and edge detail 100% offline, paired with <code>Foliage / Texture Protection (%)</code> to prevent stereoscopic retinal rivalry.</li>
+                    <li><strong>Hand-Tinted &amp; AI Colorization (Core ML StereoColorizer)</strong>: Bundled <code>StereoColorizer</code> provides 100% offline <code>1890s Hand-Tinted (Watercolor)</code>, <code>Natural Full Color (AI)</code>, and <code>Harmonize Existing Hand-Tint</code> modes with intensity and warmth controls.</li>
                 </ul>
             </section>
 

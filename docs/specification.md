@@ -1,4 +1,4 @@
-# ViewStereo Technical Specification (v0.1.2)
+# ViewStereo Technical Specification (v0.1.3)
 
 ## 1. System Overview
 **ViewStereo** is a native macOS 14.0+ (SwiftUI / AppKit) application designed for automated archival stereoview restoration, geometric rectification, stereo window optimization, and modern spatial media export. It builds upon `StereoStudioCore` and `StereoCore` (`stalign_src`) and leverages Apple Silicon Neural Engine (Core ML), Vision, and Accelerate (LAPACK).
@@ -20,7 +20,6 @@ When `StereoCardMode` is `.cropInner` or `.keepArchBlack`:
    - U-Net architecture operating at `512 × 256` input resolution.
    - Outputs left/right print probability masks, bounding boxes, arch-top curvature parameters (`ArchShapeParams`: `topRxRatio`, `topRyRatio`, `botRxRatio`, `botRyRatio`), card skew angle, and sampled mount RGB luminance.
 2. **Mask Refinement (Selectable)**:
-   - **MobileSAM** (`MobileSAMEncoder.mlmodelc` + `MobileSAMDecoder.mlmodelc`, `1024 × 1024` encoder, `256 × 256` mask decoder)
    - **SAM 2.1 Tiny** (`SAM2_1TinyImageEncoderFLOAT16.mlmodelc` + `PromptEncoder` + `MaskDecoder`)
    - **U-Net Only**: Skips transformer refinement for maximum throughput.
 3. **Original Card Mount Context (`OriginalCardMountContext`)**:
@@ -46,6 +45,7 @@ When `StereoCardMode` is `.cropInner` or `.keepArchBlack`:
   - `removeUnilateralNoise`: Detects and attenuates single-view dust, scratches, and emulsion defects with instant non-destructive preview updates.
   - **Vintage Photo Restoration (`VintageRestorationOptions` / `StereoDetailRestorationOptions`)**: Non-destructive print tone presets (`Original`, `Albumen Sepia (1860s)`, `Warm Silver (1890s)`, `Pure Monochrome`), Auto-Level (B/W Point %), Local Contrast (CLAHE %), and a real-time **Compare Before** toggle.
   - **Core ML Optical Deblur (`NAFNetDeblur.mlmodelc`)**: Bundled on-device NAFNet-GoPro model for optical deblurring and edge sharpness recovery, paired with `Foliage / Texture Protection (%)` to prevent stereoscopic retinal rivalry.
+  - **Core ML AI Colorization & Hand-Tint (`StereoColorizer.mlmodelc`)**: Bundled on-device colorization model supporting `1890s Hand-Tinted (Watercolor)`, `Natural Full Color (AI)`, and `Harmonize Existing Hand-Tint` with `Color Intensity (%)` and `Tint Warmth (%)` controls.
 
 ### Stage 5: Digital Remount & Letterpress OCR Engine
 - **Era-Authentic Mount Presets (`StereoCardMountPreset`)**:

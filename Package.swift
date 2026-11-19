@@ -33,12 +33,11 @@ let package = Package(
                 .process("Resources/ja.lproj"),
                 .process("Resources/en.lproj"),
                 .copy("Resources/StereoCardSeg.mlmodelc"),
-                .copy("Resources/MobileSAMEncoder.mlmodelc"),
-                .copy("Resources/MobileSAMDecoder.mlmodelc"),
                 .copy("Resources/SAM2_1TinyImageEncoderFLOAT16.mlmodelc"),
                 .copy("Resources/SAM2_1TinyPromptEncoderFLOAT16.mlmodelc"),
                 .copy("Resources/SAM2_1TinyMaskDecoderFLOAT16.mlmodelc"),
-                .copy("Resources/NAFNetDeblur.mlmodelc")
+                .copy("Resources/NAFNetDeblur.mlmodelc"),
+                .copy("Resources/StereoColorizer.mlmodelc")
             ],
             cSettings: [
                 .define("ACCELERATE_NEW_LAPACK", to: "1"),

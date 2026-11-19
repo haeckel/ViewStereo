@@ -42,3 +42,8 @@ ViewStereo_Output/
 test/
 test_assets/
 .vscode/
+
+# Large Core ML Models (>100MB GitHub limit) & Colorizer Dataset
+Sources/ViewStereo/Resources/StereoColorizer.mlmodelc/
+tools/StereoColorizer.mlpackage/
+tools/colorizer_dataset/
