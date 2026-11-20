@@ -6,6 +6,7 @@ document.addEventListener('DOMContentLoaded', () => {
             'title': 'ViewStereo | 歴史的ステレオカード復元 & インテリジェント・ステレオウィンドウスタジオ',
             'mac-exclusive': ' ViewStereo は macOS 専用アプリケーションです。',
             'nav-features': '機能',
+            'nav-stereoview': '歴史と魅力',
             'nav-tech': 'テクノロジー',
             'nav-download': 'ダウンロード',
             'btn-get-beta': '無料ダウンロード',
@@ -14,6 +15,21 @@ document.addEventListener('DOMContentLoaded', () => {
             'dev-status-badge': '開発初期・現在開発中',
             'hero-subtitle': 'ViewStereo は、19世紀の歴史的ステレオカード（Stereoview / Stereograph）や現代のステレオ写真を、Core ML自動検出・7自由度対称ホモグラフィ整準・ステレオウィンドウ最適化によって高品位な空間写真やデジタル・リマウントカードへ復元する macOS 専用アプリケーションです。',
             'about-desc': 'ViewStereo は、StereoCardSeg (U-Net) と MobileSAM / SAM 2.1 Tiny による精密なカード領域抽出と、Accelerate LAPACK (dposv_ + IRLS) を用いた7自由度対称ホモグラフィ整準を統合。19世紀ステレオカードの傾き・歪み・垂直視差・経年退色を自動で補正し、Apple Vision Pro 空間写真（MV-HEVC）や時代別デジタル・リマウントカードとして現代に蘇らせます。',
+            'heritage-badge': 'Historical Heritage · 19th Century Media Revolution',
+            'heritage-title': '<span>Stereoview &amp; Stereograph</span><br><span>19世紀の「没入体験」と空間メディアの原点</span>',
+            'heritage-subtitle': '100年以上前、ヴィクトリア朝の人々は「ステレオスコープ」という魔法の双眼鏡を覗き込み、世界を立体で体験していました。それは現代のVRゴーグルやApple Vision Proを先取りした、人類最初の空間メディア革命でした。',
+            'story-essay-title': '19世紀の「没入体験」！？ステレオ写真が映し出した「世界」と私たちの欲望',
+            'story-essay-desc': '雨降るロンドンやパリの夕暮れ、ガス灯が灯る暖かいリビングで家族が覗き込んだ魔法の双眼鏡。中産階級のステータス、両眼視差が生んだ圧倒的なリアリティ、そして安全な居間からエジプトや日本を立体で旅する欲望——。現代のGoogleストリートビューやAIワールドモデルの物理的プロトタイプとなった19世紀ステレオ写真の大隆盛と、視覚メディアの本質を解き明かす開発者エッセイ。',
+            'story-btn-text': 'note でエッセイを読む',
+            'pillar-1-tag': 'Status &amp; Science',
+            'pillar-1-title': '魔法の双眼鏡と「科学的真実」',
+            'pillar-1-desc': '産業革命で台頭したブルジョワジーにとって、ステレオスコープは知的な家庭の必須教養でした。「写真こそが真実を写す」と信じられた19世紀、両眼視差を利用した立体写真は絵画より科学的に正しい視覚メディアとされ、まるで「そこに実体がある」と錯覚するほどの熱狂を生みました。',
+            'pillar-2-tag': 'Virtual Travel',
+            'pillar-2-title': '最初の「ワールドモデル」構築',
+            'pillar-2-desc': 'ピラミッドや開国直後の日本など、危険な異国を居間から訪れる「安全な旅行」。Underwood &amp; Underwoodなどの巨大企業が体系的なカードセットと販売網を築き、世界を立体でアーカイブした試みは、現代のGoogleストリートビューやAIワールドモデルの直接の原型でした。',
+            'pillar-3-tag': 'Modern Revival',
+            'pillar-3-title': '100年の封印を解き、空間写真へ',
+            'pillar-3-desc': '手貼りによる傾きや経年退色を抱えたヴィンテージ・ステレオカード。ViewStereo は Core ML セグメンテーションと7自由度対称ホモグラフィ整準により、幾何歪みと垂直視差を完全除去。Apple Vision Pro の Spatial Photo や高精細SBSとして現代に解放します。',
             'btn-try-free': '今すぐ無料ダウンロード',
             'btn-view-features': '機能を見る',
             'feat-header-title': '研ぎ澄まされた機能',
@@ -62,6 +78,7 @@ document.addEventListener('DOMContentLoaded', () => {
             'title': 'ViewStereo | Historical Stereoview Restoration & Intelligent Stereo Window Studio',
             'mac-exclusive': ' ViewStereo is exclusively designed for macOS.',
             'nav-features': 'Features',
+            'nav-stereoview': 'Stereoview Heritage',
             'nav-tech': 'Technology',
             'nav-download': 'Download',
             'btn-get-beta': 'Free Download',
@@ -70,6 +87,21 @@ document.addEventListener('DOMContentLoaded', () => {
             'dev-status-badge': 'Early Development',
             'hero-subtitle': 'ViewStereo is a native macOS studio app that transforms 19th-century historical stereoview cards and modern stereo photos into pristine Apple Vision Pro Spatial Photos, SBS, and digitally remounted cards using Core ML segmentation and 7-DoF homography alignment.',
             'about-desc': 'ViewStereo combines StereoCardSeg (U-Net) and MobileSAM / SAM 2.1 Tiny mask refinement with Accelerate LAPACK (dposv_ + IRLS) 7-DoF symmetric homography alignment. It automatically eliminates vertical disparity, keystone distortion, and color aging—preserving heritage stereoviews for modern spatial displays.',
+            'heritage-badge': 'Historical Heritage · 19th Century Media Revolution',
+            'heritage-title': '<span>Stereoview &amp; Stereograph</span><br><span>The 19th-Century Virtual Reality &amp; The Dawn of Spatial Media</span>',
+            'heritage-subtitle': 'Over a century ago, Victorian parlors gathered around a magical binocular device known as the stereoscope. Far from a mere novelty, it was mankind’s first spatial media revolution—foreshadowing today’s VR headsets and Apple Vision Pro.',
+            'story-essay-title': '19th-Century "Immersive Experience"!? The World and Desires Mirrored in Stereoscopic Photography',
+            'story-essay-desc': 'On a rainy London evening by warm gaslight, families gathered around the stereoscope. From bourgeois status and the visceral truth of binocular disparity, to the desire to travel to Egypt and feudal Japan from the safety of home—this essay explores how 19th-century stereographs served as the world’s first physical world model, and what it reveals about our modern spatial desires.',
+            'story-btn-text': 'Read Essay on note',
+            'pillar-1-tag': 'Status &amp; Science',
+            'pillar-1-title': 'The Magic Viewer &amp; Scientific Truth',
+            'pillar-1-desc': 'For the rising Victorian bourgeoisie, owning a stereoscope was an indispensable mark of culture. In an era captivated by scientific positivism, stereoscopic depth—derived from human binocular disparity—was revered as more objectively true than flat art, delivering unprecedented visceral presence.',
+            'pillar-2-tag': 'Virtual Travel',
+            'pillar-2-title': 'The First Physical World Model',
+            'pillar-2-desc': 'Armchair travelers journeyed to Egyptian pyramids and newly-opened Meiji Japan in 3D. Publishing titans like Underwood &amp; Underwood built global sales networks of boxed sets, creating a massive physical prototype of today’s Google Street View and AI world models.',
+            'pillar-3-tag': 'Modern Revival',
+            'pillar-3-title': 'From Antique Mounts to Spatial Photos',
+            'pillar-3-desc': 'Vintage cards suffered from manual mounting tilts, structural aging, and keystone disparities. ViewStereo leverages Core ML card segmentation and 7-DoF homography rectification to eliminate disparities—reviving historical memories as pristine Apple Vision Pro Spatial Photos.',
             'btn-try-free': 'Download for Free',
             'btn-view-features': 'Explore Features',
             'feat-header-title': 'Refined Features',
@@ -152,6 +184,13 @@ document.addEventListener('DOMContentLoaded', () => {
         document.querySelectorAll('[data-i18n="foot-doc"]').forEach(link => {
             link.href = lang === 'ja' ? 'docs.html' : 'docs_en.html';
         });
+
+        const noteBtn = document.getElementById('btn-note-essay');
+        if (noteBtn) {
+            noteBtn.href = lang === 'ja'
+                ? 'https://note.com/haeckel/n/n31372cc17f94?magazine_key=m24d5931d3b7e'
+                : 'https://note.com/haeckel/n/n31372cc17f94?magazine_key=m24d5931d3b7e&hl=en';
+        }
 
         const langToggle = document.getElementById('lang-toggle');
         if (langToggle) {
