@@ -176,6 +176,8 @@
 "New Stereoview" = "新規ステレオビュー";
 "Sidebar" = "サイドバー";
 "Toggle Sidebar" = "サイドバーを表示/非表示";
+"Toolbar New" = "新規";
+"New Session" = "新規（初期状態にリセット）";
 "Toolbar Open" = "開く";
 "Toolbar Folder" = "一括";
 "Toolbar Align" = "自動整準";
@@ -290,3 +292,15 @@
 "update_error_download" = "ダウンロードに失敗しました";
 "update_check_error_title" = "アップデート確認エラー";
 "update_already_latest" = "お使いの ViewStereo は最新です";
+
+/* Batch Queue & Deferred Execution */
+"Apply Card Mount" = "台紙設定を適用";
+"Apply Recipe & Re-align" = "基本設定で再整準";
+"Pending" = "未適用";
+"Select Folder for Batch..." = "バッチフォルダを選択...";
+"Execute Batch (%lld files)" = "バッチ処理を実行 (%lld件)";
+"Close Queue" = "キューを閉じる";
+"Current Recipe:" = "適用レシピ:";
+"Adjust settings in inspector, then click Execute Batch." = "右パレットで各種設定を行い、準備ができたらバッチ実行をクリック";
+"No stereo images found in this folder." = "このフォルダに対象のステレオ画像が見つかりませんでした。";
+"%lld items" = "%lld 件";

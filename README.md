@@ -1,6 +1,6 @@
 # ViewStereo 🎞️✨
 
-[![Version](https://img.shields.io/badge/version-0.1.3-brightgreen.svg)](https://viewstereo.p-media.jp/)
+[![Version](https://img.shields.io/badge/version-0.1.4-brightgreen.svg)](https://viewstereo.p-media.jp/)
 [![Status](https://img.shields.io/badge/status-Early%20Development-amber.svg)](#development-status)
 [![Platform](https://img.shields.io/badge/platform-macOS%2014.0+-lightgrey.svg)](https://apple.co/macos)
 [![Technology](https://img.shields.io/badge/tech-Card%20Segmentation%20%7C%207--DoF%20Homography%20%7C%20Stereo%20Window%20%7C%20Digital%20Remount-orange.svg)](https://viewstereo.p-media.jp/)
@@ -17,7 +17,13 @@ Designed as the archival restoration and geometric alignment companion to **Spla
 
 ## 🚀 Key Features
 
-### 🎨 v0.1.3 New: AI Colorization & Hand-Tint Harmonization (`StereoColorizer`)
+### 🎛️ v0.1.4 New: Workflow Palette Architecture & Corner Segmentation Engine
+- **Optimized Right Inspector Hierarchy**: Placed **Basic Settings (Auto Recipe)** at the very top of the inspector panel. By default on startup / standby drop mode, only Basic Settings is expanded while downstream adjustment panels remain collapsed, establishing a clean, logical workflow order.
+- **Top-Down Shortcut & Toolbar Alignment**: Keyboard shortcuts (⌥⌘1: Recipe, ⌥⌘2: Window, ⌥⌘3: Mount, ⌥⌘4: Restore, ⌥⌘5: Colorize, ⌥⌘6: Batch) and toolbar icons now strictly mirror the vertical palette structure.
+- **Multi-Corner Independent Geometric Measurement**: Upgraded `StereoCardSegmenter` to independently measure and determine square, rounded, and arched corners from background corner samples (supporting white/black backings), with full-healing protection for notch numbering and historic imprints.
+- **Integrated Standby Hero Background**: Integrated high-resolution archival sample hero artwork for initial drop guidance.
+
+### 🎨 v0.1.3: AI Colorization & Hand-Tint Harmonization (`StereoColorizer`)
 - **On-Device AI & Hand-Tint Colorization**: Bundled `StereoColorizer.mlmodelc` transforms monochrome stereoviews into **Natural Full Color (AI)** or **1890s Hand-Tinted (Watercolor)** prints, or **Harmonizes Existing Hand-Tint** across left and right views.
 - **Streamlined Toolbar & SAM 2.1 Tiny Pipeline**: Added dedicated toolbar toggles for Restore, Colorize, Window, Mount, Recipe, and Batch panels, and standardized segmentation on `StereoCardSeg + SAM 2.1 Tiny`.
 

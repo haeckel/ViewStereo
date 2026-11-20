@@ -9,7 +9,7 @@ extension AboutBrandInfo {
         badgeLetter: "V",
         subtitleKey: nil,
         engineTagline: "19th Century Stereoview Restoration & Intelligent Stereo Window Studio",
-        fallbackVersion: "0.1.3",
+        fallbackVersion: "0.1.4",
         fallbackBuild: "1",
         websiteURL: URL(string: "https://viewstereo.p-media.jp/"),
         websiteLabel: "viewstereo.p-media.jp",
@@ -58,6 +58,12 @@ struct ViewStereoApp: App {
                 }
             }
             CommandGroup(replacing: .newItem) {
+                Button("New Session") {
+                    vm.resetToInitialState()
+                }
+                .keyboardShortcut("n", modifiers: .command)
+                .disabled((!vm.hasLoadedImages && vm.batchCompletionSummary == nil) || vm.isProcessing || vm.isBatchRunning)
+
                 Button("Open Stereoview Card, L/R or SBS...") {
                     vm.openImagesPanel()
                 }
@@ -119,13 +125,21 @@ struct ViewStereoApp: App {
 
                 Divider()
 
+                Button("Toggle Basic Recipe Panel") {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        if !vm.isShowingInspector { vm.isShowingInspector = true }
+                        vm.isRecipeSectionExpanded.toggle()
+                    }
+                }
+                .keyboardShortcut("1", modifiers: [.option, .command])
+
                 Button("Toggle Stereo Window Panel") {
                     withAnimation(.easeInOut(duration: 0.18)) {
                         if !vm.isShowingInspector { vm.isShowingInspector = true }
                         vm.isWindowSectionExpanded.toggle()
                     }
                 }
-                .keyboardShortcut("1", modifiers: [.option, .command])
+                .keyboardShortcut("2", modifiers: [.option, .command])
 
                 Button("Toggle Stereoview Card Mount Panel") {
                     withAnimation(.easeInOut(duration: 0.18)) {
@@ -133,7 +147,7 @@ struct ViewStereoApp: App {
                         vm.isCardMountSectionExpanded.toggle()
                     }
                 }
-                .keyboardShortcut("2", modifiers: [.option, .command])
+                .keyboardShortcut("3", modifiers: [.option, .command])
 
                 Button("Toggle Vintage Restoration Panel") {
                     withAnimation(.easeInOut(duration: 0.18)) {
@@ -141,20 +155,12 @@ struct ViewStereoApp: App {
                         vm.isRestorationSectionExpanded.toggle()
                     }
                 }
-                .keyboardShortcut("3", modifiers: [.option, .command])
+                .keyboardShortcut("4", modifiers: [.option, .command])
 
                 Button("Toggle Colorization Panel") {
                     withAnimation(.easeInOut(duration: 0.18)) {
                         if !vm.isShowingInspector { vm.isShowingInspector = true }
                         vm.isColorizationSectionExpanded.toggle()
-                    }
-                }
-                .keyboardShortcut("4", modifiers: [.option, .command])
-
-                Button("Toggle Basic Recipe Panel") {
-                    withAnimation(.easeInOut(duration: 0.18)) {
-                        if !vm.isShowingInspector { vm.isShowingInspector = true }
-                        vm.isRecipeSectionExpanded.toggle()
                     }
                 }
                 .keyboardShortcut("5", modifiers: [.option, .command])

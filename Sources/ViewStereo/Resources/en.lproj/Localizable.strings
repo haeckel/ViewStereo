@@ -169,6 +169,8 @@
 "New Stereoview" = "New Stereoview";
 "Sidebar" = "Sidebar";
 "Toggle Sidebar" = "Toggle Sidebar";
+"Toolbar New" = "New";
+"New Session" = "New (Reset to Initial State)";
 "Toolbar Open" = "Open";
 "Toolbar Folder" = "Batch";
 "Toolbar Align" = "Align";
@@ -283,3 +285,15 @@
 "update_error_download" = "Download failed";
 "update_check_error_title" = "Update Check Error";
 "update_already_latest" = "ViewStereo is up to date";
+
+/* Batch Queue & Deferred Execution */
+"Apply Card Mount" = "Apply Card Mount";
+"Apply Recipe & Re-align" = "Apply Recipe & Re-align";
+"Pending" = "Pending";
+"Select Folder for Batch..." = "Select Folder for Batch...";
+"Execute Batch (%lld files)" = "Execute Batch (%lld files)";
+"Close Queue" = "Close Queue";
+"Current Recipe:" = "Current Recipe:";
+"Adjust settings in inspector, then click Execute Batch." = "Adjust settings in inspector, then click Execute Batch.";
+"No stereo images found in this folder." = "No stereo images found in this folder.";
+"%lld items" = "%lld items";

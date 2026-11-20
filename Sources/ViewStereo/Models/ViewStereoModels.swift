@@ -184,7 +184,8 @@ struct BatchCompletionSummary: Equatable {
 }
 
 /// バッチ処理対象アイテム
-struct StereoBatchItem: Sendable {
+struct StereoBatchItem: Identifiable, Sendable {
+    var id: String { leftURL.path + (rightURL?.path ?? "") }
     let baseName: String
     let displayLabel: String
     let leftURL: URL
@@ -217,10 +218,12 @@ final class ViewStereoViewModel: ObservableObject {
 
     // プレビュー・UI状態
     @Published var isShowingInspector: Bool = true
+    @Published var isRecipeSectionExpanded: Bool = true
     @Published var isWindowSectionExpanded: Bool = false
+    @Published var isCardMountSectionExpanded: Bool = false
+    @Published var isRestorationSectionExpanded: Bool = false
     @Published var isColorizationSectionExpanded: Bool = false
-    @Published var isRecipeSectionExpanded: Bool = false
-    @Published var isBatchSectionExpanded: Bool = true
+    @Published var isBatchSectionExpanded: Bool = false
     @Published var isSwapped: Bool = false {
         didSet {
             if oldValue != isSwapped {
@@ -231,9 +234,6 @@ final class ViewStereoViewModel: ObservableObject {
     private var isSyncingLayoutAndMode = false
     @Published var displayMode: StereoDisplayMode = .stereoviewCard {
         didSet {
-            if displayMode == .stereoviewCard {
-                isCardMountSectionExpanded = true
-            }
             if !isSyncingLayoutAndMode, let layout = displayMode.correspondingExportLayout, exportLayout != layout {
                 isSyncingLayoutAndMode = true
                 exportLayout = layout
@@ -244,29 +244,24 @@ final class ViewStereoViewModel: ObservableObject {
     }
 
     // ステレオカード（台紙）再構築・書き出し設定
-    @Published var isCardMountSectionExpanded: Bool = true
     @Published var cardMountPreset: StereoCardMountPreset = .originalRemount {
         didSet {
             UserDefaults.standard.set(cardMountPreset.rawValue, forKey: "VS.cardMountPreset")
-            renderDisplayPreview()
         }
     }
     @Published var cardSizeSpec: StereoCardSizeSpec = .standard {
         didSet {
             UserDefaults.standard.set(cardSizeSpec.rawValue, forKey: "VS.cardSizeSpec")
-            renderDisplayPreview()
         }
     }
     @Published var cardPrintCutStyle: StereoCardPrintCutStyle = .autoFromPreset {
         didSet {
             UserDefaults.standard.set(cardPrintCutStyle.rawValue, forKey: "VS.cardPrintCutStyle")
-            renderDisplayPreview()
         }
     }
     @Published var cardCenterGapStyle: StereoCardCenterGapStyle = .autoFromPreset {
         didSet {
             UserDefaults.standard.set(cardCenterGapStyle.rawValue, forKey: "VS.cardCenterGapStyle")
-            renderDisplayPreview()
         }
     }
     @Published var cardTextMode: StereoCardTextMode = .ocrAuto {
@@ -275,30 +270,33 @@ final class ViewStereoViewModel: ObservableObject {
             if cardTextMode == .ocrAuto, oldValue != .ocrAuto, currentMountContext != nil {
                 extractTextsFromOriginalCardMount()
             }
-            renderDisplayPreview()
         }
     }
-    @Published var cardBottomCaption: String = "" {
-        didSet { renderDisplayPreview() }
-    }
-    @Published var cardTopCenterText: String = "" {
-        didSet { renderDisplayPreview() }
-    }
-    @Published var cardLeftMarginText: String = "" {
-        didSet { renderDisplayPreview() }
-    }
-    @Published var cardRightMarginText: String = "" {
-        didSet { renderDisplayPreview() }
-    }
+    @Published var cardBottomCaption: String = ""
+    @Published var cardTopCenterText: String = ""
+    @Published var cardLeftMarginText: String = ""
+    @Published var cardRightMarginText: String = ""
     @Published var cardUseFilenameAsCaption: Bool = false {
         didSet {
             UserDefaults.standard.set(cardUseFilenameAsCaption, forKey: "VS.cardUseFilenameAsCaption")
-            renderDisplayPreview()
         }
     }
     @Published var isRunningCardOCR: Bool = false
     @Published var currentMountContext: StereoCardSegmenter.OriginalCardMountContext? = nil
     private var ocrGeneration: Int = 0
+
+    @Published private(set) var appliedCardMountConfig: StereoCardMountConfig = StereoCardMountConfig()
+
+    var hasPendingCardMountChanges: Bool {
+        guard hasLoadedImages else { return false }
+        return makeCardMountConfig() != appliedCardMountConfig
+    }
+
+    func applyCardMountConfig() {
+        appliedCardMountConfig = makeCardMountConfig()
+        renderDisplayPreview()
+        statusMessage = "Applied stereoview card mount settings."
+    }
 
     var hasOriginalCardMount: Bool {
         currentMountContext != nil
@@ -348,11 +346,25 @@ final class ViewStereoViewModel: ObservableObject {
             statusMessage = foundCount > 0
                 ? "OCR extracted \(foundCount) text zone(s) from card mount."
                 : "No readable text detected on card mount."
+            appliedCardMountConfig = makeCardMountConfig()
             renderDisplayPreview()
         }
     }
 
-    // 位置合わせ・基本設定（自動実行 & 永続化）
+    /// 自動処理基本レシピの設定一式
+    struct StereoRecipeConfig: Equatable, Sendable {
+        var stereoCardMode: StereoCardMode = .cropInner
+        var useCoreMLCardSegmentation: Bool = true
+        var frameStyle: StereoFrameStyle = .off
+        var autoAlignOnLoad: Bool = true
+        var autoColorMode: StereoAutoColorMode = .left
+        var keepOriginalAspectRatio: Bool = false
+        var usePersonMotionMask: Bool = true
+        var useAttentionSaliency: Bool = true
+        var removeUnilateralNoise: Bool = true
+    }
+
+    // 位置合わせ・基本設定（手動適用 & 永続化）
     @Published var autoAlignOnLoad: Bool = true {
         didSet { UserDefaults.standard.set(autoAlignOnLoad, forKey: "VS.autoAlignOnLoad") }
     }
@@ -376,24 +388,57 @@ final class ViewStereoViewModel: ObservableObject {
     @Published var stereoCardMode: StereoCardMode = .cropInner {
         didSet {
             UserDefaults.standard.set(stereoCardMode.rawValue, forKey: "VS.stereoCardMode")
-            if oldValue != stereoCardMode { reloadCurrentSBSIfNeeded() }
         }
     }
     @Published var useCoreMLCardSegmentation: Bool = true {
         didSet {
             UserDefaults.standard.set(useCoreMLCardSegmentation, forKey: "VS.useCoreMLCardSegmentation")
-            if oldValue != useCoreMLCardSegmentation { reloadCurrentSBSIfNeeded() }
         }
     }
     @Published var frameStyle: StereoFrameStyle = .off {
         didSet {
             UserDefaults.standard.set(frameStyle.rawValue, forKey: "VS.frameStyle")
-            renderDisplayPreview()
         }
     }
 
+    @Published private(set) var appliedRecipeConfig: StereoRecipeConfig = StereoRecipeConfig()
+
+    var currentRecipeConfig: StereoRecipeConfig {
+        StereoRecipeConfig(
+            stereoCardMode: stereoCardMode,
+            useCoreMLCardSegmentation: useCoreMLCardSegmentation,
+            frameStyle: frameStyle,
+            autoAlignOnLoad: autoAlignOnLoad,
+            autoColorMode: autoColorMode,
+            keepOriginalAspectRatio: keepOriginalAspectRatio,
+            usePersonMotionMask: usePersonMotionMask,
+            useAttentionSaliency: useAttentionSaliency,
+            removeUnilateralNoise: removeUnilateralNoise
+        )
+    }
+
+    var hasPendingRecipeChanges: Bool {
+        guard hasLoadedImages else { return false }
+        return currentRecipeConfig != appliedRecipeConfig
+    }
+
+    func applyRecipeAndRealign() {
+        guard hasLoadedImages, !isProcessing else { return }
+        let prev = appliedRecipeConfig
+        let next = currentRecipeConfig
+        appliedRecipeConfig = next
+
+        if isSingleSBSInput && (prev.stereoCardMode != next.stereoCardMode || prev.useCoreMLCardSegmentation != next.useCoreMLCardSegmentation) {
+            reloadCurrentSBSIfNeeded()
+        } else if prev.frameStyle != next.frameStyle && prev.autoAlignOnLoad == next.autoAlignOnLoad && prev.keepOriginalAspectRatio == next.keepOriginalAspectRatio && prev.usePersonMotionMask == next.usePersonMotionMask && prev.autoColorMode == next.autoColorMode && prev.removeUnilateralNoise == next.removeUnilateralNoise {
+            renderDisplayPreview()
+        } else {
+            runAutoAlignment()
+        }
+        statusMessage = "Applied basic recipe & realigned stereo pair."
+    }
+
     // 19世紀古写真・退色＆階調復元設定（画像ごとにリセットされる非破壊ポストプロセス）
-    @Published var isRestorationSectionExpanded: Bool = true
     @Published var isRestorationEnabled: Bool = true {
         didSet {
             UserDefaults.standard.set(isRestorationEnabled, forKey: "VS.isRestorationEnabled")
@@ -472,6 +517,7 @@ final class ViewStereoViewModel: ObservableObject {
     }
 
     var hasPendingRestorationChanges: Bool {
+        guard hasLoadedImages else { return false }
         let pendingRest = buildPendingVintageRestorationOptions()
         let pendingDetail = buildPendingDetailRestorationOptions()
         return abs(pendingRest.autoLevelStrength - appliedRestorationOptions.autoLevelStrength) > 0.001
@@ -482,6 +528,7 @@ final class ViewStereoViewModel: ObservableObject {
     }
 
     var hasPendingColorizationChanges: Bool {
+        guard hasLoadedImages else { return false }
         let pending = buildPendingColorizationOptions()
         return pending.mode != appliedColorizationOptions.mode
             || abs(pending.colorStrength - appliedColorizationOptions.colorStrength) > 0.001
@@ -671,6 +718,79 @@ final class ViewStereoViewModel: ObservableObject {
         }
     }
 
+    /// アプリ起動時の初期状態（ランディング画面）へリセットする
+    func resetToInitialState() {
+        guard !isProcessing && !isBatchRunning else { return }
+        previewRenderGeneration += 1
+
+        rawLeftRGB = nil
+        rawRightRGB = nil
+        alignedLeftRGB = nil
+        alignedRightRGB = nil
+        previewRawLeftRGB = nil
+        previewRawRightRGB = nil
+        previewAlignedLeftRGB = nil
+        previewAlignedRightRGB = nil
+        rectifiedPreviewLeftRGB = nil
+        rectifiedPreviewRightRGB = nil
+
+        leftURL = nil
+        rightURL = nil
+        isSingleSBSInput = false
+        hasPreservedArch = false
+        currentMountContext = nil
+        clearCardMountTexts()
+        isRunningCardOCR = false
+
+        imageWidth = 0
+        imageHeight = 0
+        croppedWidth = 0
+        croppedHeight = 0
+        previewWidth = 0
+        previewHeight = 0
+        previewCroppedWidth = 0
+        previewCroppedHeight = 0
+        rectifiedPreviewWidth = 0
+        rectifiedPreviewHeight = 0
+
+        isAligned = false
+        processingTimeMs = 0.0
+        verticalRMSE = 0.0
+        matchCount = 0
+        inlierCount = 0
+        lastMatches = []
+        lastRectResult = nil
+        lastCommonPolygon = []
+        lastDisparitySamples = []
+        lastRawSaliencyMap = nil
+
+        windowShiftX = 0.0
+        autoOptimalShiftX = 0.0
+        hasWindowViolationRisk = false
+        requiresFloatingWindow = false
+        maxDisparityPercent = 0.0
+        lastFullResShiftX = 0.0
+
+        isSwapped = false
+        resetVintageRestoration(renderPreview: false)
+        resetColorization(renderPreview: false)
+
+        batchCompletionSummary = nil
+        batchProgress = 0.0
+        batchTotalCount = 0
+        batchCompletedCount = 0
+        batchFailedCount = 0
+        batchCurrentFile = ""
+        batchQueueItems = []
+        isBatchQueueActive = false
+
+        isRestoringPreview = false
+        restorationProgress = 0.0
+        restorationProgressMessage = ""
+        statusMessage = ""
+        displayImage = nil
+    }
+
     // ステレオウィンドウ設定（px単位）
     @Published var windowShiftX: Double = 0.0
     @Published var autoOptimalShiftX: Double = 0.0
@@ -707,7 +827,14 @@ final class ViewStereoViewModel: ObservableObject {
     // バッチ処理状態
     @Published var batchInputFolder: URL? = nil
     @Published var batchOutputFolder: URL? = nil
-    @Published var batchPairingMode: StereoBatchPairingMode = .auto
+    @Published var batchPairingMode: StereoBatchPairingMode = .auto {
+        didSet {
+            UserDefaults.standard.set(batchPairingMode.rawValue, forKey: "VS.batchPairingMode")
+            if isBatchQueueActive, let dir = batchInputFolder {
+                batchQueueItems = Self.discoverBatchItems(in: dir, mode: batchPairingMode)
+            }
+        }
+    }
     @Published var batchSaveReport: Bool = false
     @Published var isBatchRunning: Bool = false
     @Published var batchProgress: Double = 0.0
@@ -716,7 +843,23 @@ final class ViewStereoViewModel: ObservableObject {
     @Published var batchFailedCount: Int = 0
     @Published var batchCurrentFile: String = ""
     @Published var batchCompletionSummary: BatchCompletionSummary? = nil
+    @Published var batchQueueItems: [StereoBatchItem] = []
+    @Published var isBatchQueueActive: Bool = false
     private var batchTask: Task<Void, Never>? = nil
+
+    func prepareBatchQueue(folder: URL) {
+        batchInputFolder = folder
+        batchOutputFolder = folder.appendingPathComponent("ViewStereo_Output", isDirectory: true)
+        batchQueueItems = Self.discoverBatchItems(in: folder, mode: batchPairingMode)
+        isBatchQueueActive = true
+        batchCompletionSummary = nil
+        isBatchSectionExpanded = true
+        statusMessage = "Batch queue: \(batchQueueItems.count) image(s) found in \(folder.lastPathComponent)."
+    }
+
+    func dismissBatchQueue() {
+        isBatchQueueActive = false
+    }
 
     // 内部バッファ（元画像・補正後画像）
     private var rawLeftRGB: [UInt8]? = nil
@@ -850,9 +993,6 @@ final class ViewStereoViewModel: ObservableObject {
         if ud.object(forKey: "VS.cardUseFilenameAsCaption") != nil {
             self.cardUseFilenameAsCaption = ud.bool(forKey: "VS.cardUseFilenameAsCaption")
         }
-        if self.displayMode != .stereoviewCard {
-            self.isCardMountSectionExpanded = false
-        }
     }
 
     var currentSourceName: String {
@@ -915,10 +1055,7 @@ final class ViewStereoViewModel: ObservableObject {
 
     func handleDroppedURLs(_ urls: [URL]) {
         if let dir = urls.first(where: { $0.hasDirectoryPath }) {
-            batchInputFolder = dir
-            batchOutputFolder = dir.appendingPathComponent("ViewStereo_Output", isDirectory: true)
-            isBatchSectionExpanded = true
-            startBatchProcessing(inputDir: dir)
+            prepareBatchQueue(folder: dir)
             return
         }
         let filtered = urls.filter { Self.supportedImageExtensions.contains($0.pathExtension.lowercased()) }
@@ -935,6 +1072,7 @@ final class ViewStereoViewModel: ObservableObject {
     }
 
     func loadSingleSBSImage(url: URL, resetRestoration: Bool = true) {
+        isBatchQueueActive = false
         batchCompletionSummary = nil
         if resetRestoration {
             resetVintageRestoration(renderPreview: false)
@@ -1039,6 +1177,8 @@ final class ViewStereoViewModel: ObservableObject {
             lastFullResShiftX = 0
             isProcessing = false
             statusMessage = isContainerStereo ? "Loaded Stereo Container (\(w)×\(fh))" : "Loaded SBS (\(w)×\(fh))"
+            appliedCardMountConfig = makeCardMountConfig()
+            appliedRecipeConfig = currentRecipeConfig
             if cardTextMode == .ocrAuto, mountCtx != nil {
                 extractTextsFromOriginalCardMount()
             }
@@ -1114,6 +1254,8 @@ final class ViewStereoViewModel: ObservableObject {
             lastFullResShiftX = 0
             isProcessing = false
             statusMessage = "Loaded L/R (\(lw)×\(lh))"
+            appliedCardMountConfig = makeCardMountConfig()
+            appliedRecipeConfig = currentRecipeConfig
             if autoAlignOnLoad {
                 runAutoAlignment()
             } else {
@@ -1701,7 +1843,7 @@ final class ViewStereoViewModel: ObservableObject {
         let mode = displayMode
         let style = frameStyle
         let swapped = isSwapped
-        let cardCfg = makeCardMountConfig()
+        let cardCfg = appliedCardMountConfig
         let mountCtx = currentMountContext
         let restOpts = makeVintageRestorationOptions()
 
@@ -1842,7 +1984,7 @@ final class ViewStereoViewModel: ObservableObject {
         let mode = displayMode
         let style = frameStyle
         let swapped = isSwapped
-        let cardCfg = makeCardMountConfig()
+        let cardCfg = appliedCardMountConfig
         let mountCtx = currentMountContext
         let restOpts = makeVintageRestorationOptions()
         let detailOpts = makeDetailRestorationOptions()
@@ -2269,7 +2411,7 @@ final class ViewStereoViewModel: ObservableObject {
         let mode = displayMode
         let style = frameStyle
         let swapped = isSwapped
-        let cardCfg = makeCardMountConfig()
+        let cardCfg = appliedCardMountConfig
         let mountCtx = currentMountContext
         let restOpts = makeVintageRestorationOptions()
         let detailOpts = makeDetailRestorationOptions()
@@ -2336,7 +2478,7 @@ final class ViewStereoViewModel: ObservableObject {
         let imgFormat = exportImageFormat
         let style = frameStyle
         let swapped = isSwapped
-        let cardCfg = makeCardMountConfig()
+        let cardCfg = appliedCardMountConfig
         let mountCtx = currentMountContext
         let restOpts = makeVintageRestorationOptions(ignorePreviewToggle: true)
         let detailOpts = makeDetailRestorationOptions(ignorePreviewToggle: true)
@@ -2492,12 +2634,9 @@ final class ViewStereoViewModel: ObservableObject {
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
-        panel.prompt = "Select Folder for Batch Auto-Align"
+        panel.prompt = "Select Folder for Batch"
         if panel.runModal() == .OK, let dir = panel.url {
-            batchInputFolder = dir
-            batchOutputFolder = dir.appendingPathComponent("ViewStereo_Output", isDirectory: true)
-            isBatchSectionExpanded = true
-            startBatchProcessing(inputDir: dir)
+            prepareBatchQueue(folder: dir)
         }
     }
 
@@ -2542,7 +2681,7 @@ final class ViewStereoViewModel: ObservableObject {
         batchOutputFolder = outDir
 
         let pairingMode = batchPairingMode
-        let items = Self.discoverBatchItems(in: targetDir, mode: pairingMode)
+        let items = (!batchQueueItems.isEmpty && (inputDir == nil || inputDir == batchInputFolder)) ? batchQueueItems : Self.discoverBatchItems(in: targetDir, mode: pairingMode)
         guard !items.isEmpty else {
             statusMessage = "No stereo images found in \(targetDir.lastPathComponent)."
             return

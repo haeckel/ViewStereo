@@ -9,6 +9,7 @@ struct ContentView: View {
     @ObservedObject private var updateManager = StudioUpdateManager.shared
     @State private var isDropTargeted = false
     @State private var isShowingUpdateSheet = false
+    @State private var isHoveringWelcomeIcon = false
 
     private var inspectorWidth: CGFloat {
         settings.useLargeTextMode ? 450 : 400
@@ -56,6 +57,14 @@ struct ContentView: View {
                     // Zone 1: ファイル・入力
                     ControlGroup {
                         Button {
+                            vm.resetToInitialState()
+                        } label: {
+                            Label("Toolbar New", systemImage: "plus.square.dashed")
+                        }
+                        .customTooltip(String(localized: "New Session") + " (⌘N)")
+                        .disabled((!vm.hasLoadedImages && vm.batchCompletionSummary == nil) || vm.isProcessing || vm.isBatchRunning)
+
+                        Button {
                             vm.openImagesPanel()
                         } label: {
                             Label("Toolbar Open", systemImage: "photo.on.rectangle.angled")
@@ -94,14 +103,24 @@ struct ContentView: View {
 
                     toolbarDivider
 
-                    // Zone 3: 5タブ インスペクタ連動（色分けアイコン＋ショートラベル）
+                    // Zone 3: 6タブ インスペクタ連動（色分けアイコン＋ショートラベル）
                     HStack(spacing: 4) {
+                        toolbarTabButton(
+                            titleKey: "Toolbar Recipe",
+                            systemImage: "slider.horizontal.3",
+                            color: .brightPurple,
+                            isExpanded: vm.isRecipeSectionExpanded,
+                            tooltip: String(localized: "Toggle Basic Recipe Panel") + " (⌥⌘1)"
+                        ) {
+                            toggleInspectorTab(\.isRecipeSectionExpanded)
+                        }
+
                         toolbarTabButton(
                             titleKey: "Toolbar Window",
                             systemImage: "rectangle.inset.filled.and.person.filled",
                             color: .brightAmber,
                             isExpanded: vm.isWindowSectionExpanded,
-                            tooltip: String(localized: "Toggle Stereo Window Panel") + " (⌥⌘1)"
+                            tooltip: String(localized: "Toggle Stereo Window Panel") + " (⌥⌘2)"
                         ) {
                             toggleInspectorTab(\.isWindowSectionExpanded)
                         }
@@ -111,7 +130,7 @@ struct ContentView: View {
                             systemImage: "photo.artframe",
                             color: .brightBlue,
                             isExpanded: vm.isCardMountSectionExpanded,
-                            tooltip: String(localized: "Toggle Stereoview Card Mount Panel") + " (⌥⌘2)"
+                            tooltip: String(localized: "Toggle Stereoview Card Mount Panel") + " (⌥⌘3)"
                         ) {
                             toggleInspectorTab(\.isCardMountSectionExpanded)
                         }
@@ -121,7 +140,7 @@ struct ContentView: View {
                             systemImage: "sparkles",
                             color: .brightPink,
                             isExpanded: vm.isRestorationSectionExpanded,
-                            tooltip: String(localized: "Toggle Vintage Restoration Panel") + " (⌥⌘3)"
+                            tooltip: String(localized: "Toggle Vintage Restoration Panel") + " (⌥⌘4)"
                         ) {
                             toggleInspectorTab(\.isRestorationSectionExpanded)
                         }
@@ -131,19 +150,9 @@ struct ContentView: View {
                             systemImage: "paintpalette.fill",
                             color: Color(red: 0.20, green: 0.85, blue: 0.98),
                             isExpanded: vm.isColorizationSectionExpanded,
-                            tooltip: String(localized: "Toggle Colorization Panel") + " (⌥⌘4)"
+                            tooltip: String(localized: "Toggle Colorization Panel") + " (⌥⌘5)"
                         ) {
                             toggleInspectorTab(\.isColorizationSectionExpanded)
-                        }
-
-                        toolbarTabButton(
-                            titleKey: "Toolbar Recipe",
-                            systemImage: "slider.horizontal.3",
-                            color: .brightPurple,
-                            isExpanded: vm.isRecipeSectionExpanded,
-                            tooltip: String(localized: "Toggle Basic Recipe Panel") + " (⌥⌘5)"
-                        ) {
-                            toggleInspectorTab(\.isRecipeSectionExpanded)
                         }
 
                         toolbarTabButton(
@@ -159,14 +168,13 @@ struct ContentView: View {
 
                     toolbarDivider
 
-                    // Zone 4: 出力（緑強調）
+                    // Zone 4: 出力
                     Button {
                         vm.exportImage()
                     } label: {
                         Label("Toolbar Export", systemImage: "square.and.arrow.up.fill")
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.palestineGreen)
+                    .foregroundStyle(Color.brightTeal)
                     .customTooltip(String(localized: "Export Image...") + " (⌘E)")
                     .disabled(!vm.hasLoadedImages || vm.isProcessing || vm.isBatchRunning)
                 }
@@ -216,9 +224,11 @@ struct ContentView: View {
                 // 上部ツールストリップ（常時表示：立体視方式切替 + 左右スワップ + ステータス）
                 topToolbarStrip
 
-                // 画像キャンバス または ランディング案内
+                // 画像キャンバス または バッチキュー または ランディング案内
                 ZStack(alignment: .topTrailing) {
-                    if let img = vm.displayImage {
+                    if vm.isBatchQueueActive {
+                        batchQueueCanvasView
+                    } else if let img = vm.displayImage {
                         GeometryReader { _ in
                             Image(nsImage: img)
                                 .interpolation(.high)
@@ -540,7 +550,24 @@ struct ContentView: View {
         }
     }
 
-    private var appIconImage: NSImage? {
+    private var heroBackgroundImage: Image {
+        #if SWIFT_PACKAGE
+        if let url = Bundle.module.url(forResource: "HeroBackground", withExtension: "jpg"),
+           let nsImg = NSImage(contentsOf: url) {
+            return Image(nsImage: nsImg)
+        }
+        if let url = Bundle.module.url(forResource: "hero_card", withExtension: "jpg"),
+           let nsImg = NSImage(contentsOf: url) {
+            return Image(nsImage: nsImg)
+        }
+        #endif
+        if NSImage(named: "HeroBackground") != nil {
+            return Image("HeroBackground")
+        }
+        return Image("HeroBackground")
+    }
+
+    private var welcomeIconImage: NSImage? {
         #if SWIFT_PACKAGE
         if let url = Bundle.module.url(forResource: "WelcomeIcon", withExtension: "png"),
            let img = NSImage(contentsOf: url) {
@@ -556,130 +583,470 @@ struct ContentView: View {
         return NSApp.applicationIconImage
     }
 
+    // MARK: - Batch Queue Canvas View
+
+    private var batchQueueCanvasView: some View {
+        VStack(spacing: 0) {
+            // 上部ヘッダー（フォルダ情報・アクションボタン）
+            VStack(spacing: 12) {
+                HStack(spacing: 14) {
+                    Image(systemName: "folder.fill.badge.gearshape")
+                        .font(.system(size: 26))
+                        .foregroundColor(.brightTeal)
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 8) {
+                            Text(vm.batchInputFolder?.lastPathComponent ?? "Batch Folder")
+                                .appSystemFont(size: 15, weight: .bold)
+                                .foregroundColor(.white)
+
+                            Text(String(format: NSLocalizedString("%lld items", comment: ""), Int64(vm.batchQueueItems.count)))
+                                .appSystemFont(size: 11, weight: .semibold)
+                                .foregroundColor(.brightTeal)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 2)
+                                .background(Color.brightTeal.opacity(0.16), in: Capsule())
+                        }
+
+                        if let path = vm.batchInputFolder?.path {
+                            Text(path)
+                                .appSystemFont(size: 10.5, design: .monospaced)
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                    }
+
+                    Spacer(minLength: 16)
+
+                    if vm.isBatchRunning {
+                        Button {
+                            vm.cancelBatchProcessing()
+                        } label: {
+                            Label("Cancel Batch", systemImage: "xmark.circle")
+                                .appSystemFont(size: 12, weight: .bold)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 5)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.palestineRed)
+                    } else {
+                        HStack(spacing: 10) {
+                            Button {
+                                vm.dismissBatchQueue()
+                            } label: {
+                                Text(LocalizedStringKey("Close Queue"))
+                                    .appSystemFont(size: 12)
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.regular)
+
+                            Button {
+                                vm.startBatchProcessing()
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "play.fill")
+                                    Text(String(format: NSLocalizedString("Execute Batch (%lld files)", comment: ""), Int64(vm.batchQueueItems.count)))
+                                }
+                            }
+                            .buttonStyle(InspectorActionButtonStyle(accentColor: .brightTeal, isPending: false, fullWidth: false))
+                            .disabled(vm.batchQueueItems.isEmpty)
+                        }
+                    }
+                }
+
+                Divider().opacity(0.25)
+
+                // 設定サマリーストリップ
+                HStack(spacing: 8) {
+                    Text(LocalizedStringKey("Current Recipe:"))
+                        .appSystemFont(size: 11, weight: .semibold)
+                        .foregroundColor(.secondary)
+
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            recipeBadge(icon: "photo.artframe", label: String(localized: String.LocalizationValue(vm.cardMountPreset.rawValue)), color: .brightBlue)
+                            recipeBadge(icon: "square.and.arrow.up", label: "\(String(localized: String.LocalizationValue(vm.exportLayout.rawValue))) (\(vm.exportImageFormat.rawValue.uppercased()))", color: .brightTeal)
+                            recipeBadge(
+                                icon: "wand.and.stars",
+                                label: vm.isRestorationEnabled ? String(localized: String.LocalizationValue(vm.restorationPrintTone.rawValue)) : String(localized: "Off"),
+                                color: .brightPink
+                            )
+                            recipeBadge(
+                                icon: "paintpalette.fill",
+                                label: String(localized: String.LocalizationValue(vm.restorationColorizationMode.rawValue)),
+                                color: Color(red: 0.20, green: 0.85, blue: 0.98)
+                            )
+                            recipeBadge(icon: "gearshape.2.fill", label: String(localized: String.LocalizationValue(vm.stereoCardMode.rawValue)), color: .brightPurple)
+                        }
+                    }
+
+                    Spacer(minLength: 8)
+
+                    Text(LocalizedStringKey("Adjust settings in inspector, then click Execute Batch."))
+                        .appSystemFont(size: 10.5)
+                        .foregroundColor(.white.opacity(0.6))
+                }
+            }
+            .padding(16)
+            .background(Color.white.opacity(0.04))
+            .overlay(
+                Rectangle()
+                    .frame(height: 1)
+                    .foregroundColor(Color.white.opacity(0.10)),
+                alignment: .bottom
+            )
+
+            // バッチ実行中のプログレスバー
+            if vm.isBatchRunning {
+                VStack(spacing: 6) {
+                    ProgressView(value: vm.batchProgress)
+                        .tint(.brightTeal)
+                    HStack {
+                        Text("\(vm.batchCompletedCount) / \(vm.batchTotalCount) completed")
+                            .appSystemFont(size: 11, design: .monospaced)
+                            .foregroundColor(.secondary)
+                        if vm.batchFailedCount > 0 {
+                            Text("(\(vm.batchFailedCount) failed)")
+                                .appSystemFont(size: 11, design: .monospaced)
+                                .foregroundColor(.brightAmber)
+                        }
+                        Spacer()
+                        if !vm.batchCurrentFile.isEmpty {
+                            Text(vm.batchCurrentFile)
+                                .appSystemFont(size: 11, design: .monospaced)
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(Color.brightTeal.opacity(0.08))
+            }
+
+            // ファイルリスト
+            if vm.batchQueueItems.isEmpty {
+                VStack(spacing: 12) {
+                    Spacer()
+                    Image(systemName: "photo.on.rectangle.angled")
+                        .font(.system(size: 40))
+                        .foregroundColor(.secondary.opacity(0.5))
+                    Text(LocalizedStringKey("No stereo images found in this folder."))
+                        .appSystemFont(size: 13, weight: .medium)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 2) {
+                        ForEach(Array(vm.batchQueueItems.enumerated()), id: \.element.id) { idx, item in
+                            HStack(spacing: 10) {
+                                Text("\(idx + 1)")
+                                    .appSystemFont(size: 11, design: .monospaced)
+                                    .foregroundColor(.secondary.opacity(0.7))
+                                    .frame(width: 28, alignment: .trailing)
+
+                                Image(systemName: item.rightURL == nil ? "rectangle.split.2x1.fill" : "square.split.2x1.fill")
+                                    .font(.system(size: 13))
+                                    .foregroundColor(.brightTeal.opacity(0.85))
+                                    .frame(width: 20)
+
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(item.displayLabel)
+                                        .appSystemFont(size: 12, weight: .medium)
+                                        .foregroundColor(.white)
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
+
+                                    if let right = item.rightURL {
+                                        Text("L: \(item.leftURL.lastPathComponent)  |  R: \(right.lastPathComponent)")
+                                            .appSystemFont(size: 10, design: .monospaced)
+                                            .foregroundColor(.secondary)
+                                            .lineLimit(1)
+                                    }
+                                }
+
+                                Spacer()
+
+                                Text(item.rightURL == nil ? "SBS" : "L/R Pair")
+                                    .appSystemFont(size: 10, weight: .semibold, design: .monospaced)
+                                    .foregroundColor(.white.opacity(0.7))
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 4))
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(
+                                idx % 2 == 0 ? Color.white.opacity(0.02) : Color.clear
+                            )
+                        }
+                    }
+                    .padding(.vertical, 6)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(white: 0.10))
+    }
+
+    private func recipeBadge(icon: String, label: String, color: Color) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.system(size: 9.5))
+            Text(label)
+                .appSystemFont(size: 10, weight: .medium)
+        }
+        .foregroundColor(color)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2.5)
+        .background(color.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
+        .overlay(
+            RoundedRectangle(cornerRadius: 4)
+                .stroke(color.opacity(0.25), lineWidth: 0.5)
+        )
+    }
+
+    private var chevronSpacer: some View {
+        Image(systemName: "chevron.right")
+            .font(.system(size: 12, weight: .black))
+            .foregroundColor(.secondary.opacity(0.3))
+            .padding(.top, 22)
+            .padding(.horizontal, 8)
+    }
+
     private var landingView: some View {
-        VStack(spacing: 22) {
+        VStack(spacing: 38) {
+            // Background visual (Ambient Aura & Welcome Icon)
             ZStack {
+                // Outer ambient glow (アンバー ＆ ブルーの光彩)
                 Circle()
                     .fill(
-                        RadialGradient(
-                            colors: [Color.brightAmber.opacity(0.20), Color.clear],
-                            center: .center,
-                            startRadius: 20,
-                            endRadius: 84
+                        LinearGradient(
+                            colors: [Color.brightAmber.opacity(0.35), Color.brightBlue.opacity(0.12)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
                         )
                     )
-                    .frame(width: 150, height: 150)
+                    .frame(width: 380, height: 380)
+                    .blur(radius: 70)
 
-                if let icon = appIconImage {
-                    Image(nsImage: icon)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: 104, height: 104)
-                        .shadow(color: Color.black.opacity(0.50), radius: 18, x: 0, y: 8)
-                } else {
-                    RoundedRectangle(cornerRadius: 24)
-                        .fill(
-                            LinearGradient(
-                                colors: [.darkAmber, .brightAmber],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 84, height: 84)
-                        .shadow(color: Color.brightAmber.opacity(0.45), radius: 14)
-                        .overlay(
-                            Text(verbatim: "V")
-                                .font(.system(size: 42, weight: .bold, design: .rounded))
-                                .foregroundColor(.white)
-                        )
-                }
-            }
+                // Inner core glow
+                Circle()
+                    .fill(Color.brightAmber.opacity(0.20))
+                    .frame(width: 250, height: 250)
+                    .blur(radius: 35)
 
-            VStack(spacing: 6) {
-                HStack(spacing: 0) {
-                    Text(verbatim: "View")
-                        .font(.system(size: 28, weight: .bold, design: .rounded))
-                        .foregroundColor(.white)
-                    Text(verbatim: "Stereo")
-                        .font(.system(size: 28, weight: .bold, design: .rounded))
-                        .foregroundColor(.brightAmber)
-                }
-                Text("19th Century Stereoview Restoration & Intelligent Stereo Window Studio")
-                    .appSystemFont(size: 12, weight: .medium)
-                    .foregroundColor(.secondary)
-            }
-
-            VStack(alignment: .leading, spacing: 10) {
+                // Welcome Icon
                 Button {
                     vm.openImagesPanel()
                 } label: {
-                    HStack(spacing: 12) {
-                        Image(systemName: "photo.on.rectangle.angled")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(.brightAmber)
-                            .frame(width: 28)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("1. Open Stereoview Card, L/R Pair, or Folder")
-                                .appSystemFont(size: 13, weight: .semibold)
-                                .foregroundColor(.white)
-                            Text("Drop vintage stereo cards or modern stereo photos for auto-segmentation & alignment")
-                                .appSystemFont(size: 11)
-                                .foregroundColor(.secondary)
-                        }
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .foregroundColor(.secondary)
+                    if let icon = welcomeIconImage {
+                        Image(nsImage: icon)
+                            .resizable()
+                            .interpolation(.high)
+                            .antialiased(true)
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: 270, height: 270)
+                            .clipShape(RoundedRectangle(cornerRadius: 62))
+                            .shadow(color: .black.opacity(0.40), radius: 28, x: 0, y: 16)
+                            .scaleEffect(isHoveringWelcomeIcon ? 1.02 : 1.0)
+                            .animation(.spring(response: 0.3, dampingFraction: 0.6), value: isHoveringWelcomeIcon)
+                    } else {
+                        RoundedRectangle(cornerRadius: 62)
+                            .fill(LinearGradient(colors: [.darkAmber, .brightAmber], startPoint: .topLeading, endPoint: .bottomTrailing))
+                            .frame(width: 270, height: 270)
+                            .shadow(color: Color.brightAmber.opacity(0.45), radius: 28)
+                            .overlay(
+                                Text(verbatim: "V")
+                                    .font(.system(size: 96, weight: .bold, design: .rounded))
+                                    .foregroundColor(.white)
+                            )
+                            .scaleEffect(isHoveringWelcomeIcon ? 1.02 : 1.0)
+                            .animation(.spring(response: 0.3, dampingFraction: 0.6), value: isHoveringWelcomeIcon)
                     }
-                    .padding(12)
-                    .frame(width: 390)
-                    .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10)
-                            .stroke(Color.white.opacity(0.12), lineWidth: 1)
-                    )
                 }
                 .buttonStyle(.plain)
+                .onHover { isHoveringWelcomeIcon = $0 }
+                .customTooltip(String(localized: "Open Stereo Photo...") + " (⌘O)", offsetY: 150)
+            }
+            .padding(.top, 16)
 
-                HStack(spacing: 12) {
-                    Image(systemName: "wand.and.stars")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(.brightBlue)
-                        .frame(width: 28)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("2. AI Card Segmentation & 7-DoF Alignment")
-                            .appSystemFont(size: 13, weight: .semibold)
-                            .foregroundColor(.white)
-                        Text("Core ML (StereoCardSeg + SAM 2.1 Tiny) + LAPACK dposv_ & Metal Lanczos-3")
-                            .appSystemFont(size: 11)
-                            .foregroundColor(.secondary)
-                    }
-                    Spacer()
-                }
-                .padding(12)
-                .frame(width: 390)
-                .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
+            VStack(spacing: 34) {
+                // サブタイトル
+                Text(LocalizedStringKey("AIによる19世紀ステレオ写真復元・空間レンダリング"))
+                    .font(.system(size: 18, weight: .medium, design: .rounded))
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [.white, .white.opacity(0.65)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 60)
 
-                HStack(spacing: 12) {
-                    Image(systemName: "visionpro")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(.palestineGreen)
-                        .frame(width: 28)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("3. Intelligent Stereo Window & Spatial Photo")
-                            .appSystemFont(size: 13, weight: .semibold)
-                            .foregroundColor(.white)
-                        Text("Optimized zero-parallax window with Vision Pro Spatial Photo & VR export")
-                            .appSystemFont(size: 11)
-                            .foregroundColor(.secondary)
+                // クイックスタートガイドカード (Glass Recovery Card)
+                HStack(alignment: .top, spacing: 0) {
+                    GuideItemButton(
+                        icon: "photo.stack",
+                        title: "ステレオ画像を開く",
+                        desc: "SBS・LR・カードを読み込み",
+                        color: .brightBlue
+                    ) {
+                        vm.openImagesPanel()
                     }
-                    Spacer()
+
+                    chevronSpacer
+
+                    GuideItemButton(
+                        icon: "sparkles",
+                        title: "AI 空間・自動整準",
+                        desc: "7自由度整準・退色階調復元",
+                        color: .brightPink
+                    ) {
+                        vm.isRecipeSectionExpanded = true
+                        vm.isRestorationSectionExpanded = true
+                    }
+
+                    chevronSpacer
+
+                    GuideItemButton(
+                        icon: "paintpalette.fill",
+                        title: "手彩色風・台紙設定",
+                        desc: "明治手彩色風・カード台紙",
+                        color: Color(red: 0.20, green: 0.85, blue: 0.98)
+                    ) {
+                        vm.isCardMountSectionExpanded = true
+                        vm.isColorizationSectionExpanded = true
+                    }
+
+                    chevronSpacer
+
+                    GuideItemButton(
+                        icon: "square.and.arrow.up.fill",
+                        title: "空間写真・書き出し",
+                        desc: "Apple空間写真・3Dカード",
+                        color: .brightTeal
+                    ) {
+                        vm.exportImage()
+                    }
                 }
-                .padding(12)
-                .frame(width: 390)
-                .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
+                .padding(.vertical, 28)
+                .padding(.horizontal, 24)
+                .background(
+                    ZStack {
+                        // Glass background
+                        RoundedRectangle(cornerRadius: 24)
+                            .fill(.ultraThinMaterial)
+                            .opacity(0.85)
+
+                        // Subtle Metallic Border
+                        RoundedRectangle(cornerRadius: 24)
+                            .stroke(
+                                LinearGradient(
+                                    colors: [
+                                        .white.opacity(0.45),
+                                        Color.brightBlue.opacity(0.25),
+                                        .white.opacity(0.10),
+                                        Color.brightBlue.opacity(0.35)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 1.5
+                            )
+                    }
+                )
+                .shadow(color: .black.opacity(0.30), radius: 30, x: 0, y: 20)
+            }
+            .padding(.horizontal, 40)
+
+            // 下部ステータス / サポート形式
+            VStack(spacing: 6) {
+                Text(verbatim: "Supports SBS, L/R Pairs, Apple Spatial (HEIC), MPO, Stereoview Cards")
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundColor(.secondary.opacity(0.8))
+
+                HStack(spacing: 8) {
+                    Circle().fill(Color.palestineGreen).frame(width: 6, height: 6)
+                    Text(verbatim: "READY FOR STEREO RESTORATION")
+                        .font(.system(size: 11.5, weight: .bold, design: .monospaced))
+                        .foregroundColor(.secondary.opacity(0.7))
+                        .kerning(1.0)
+                }
             }
         }
-        .padding(32)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(
+            ZStack {
+                heroBackgroundImage
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .ignoresSafeArea()
+
+                // Darkening overlay for contrast
+                Color.black.opacity(0.42)
+                    .ignoresSafeArea()
+            }
+        )
+    }
+
+    // MARK: - Guide Item Button Component (SplatStereo Inheritance)
+
+    private struct GuideItemButton: View {
+        let icon: String
+        let title: String
+        let desc: String
+        let color: Color
+        let action: () -> Void
+
+        @State private var isHovered = false
+
+        var body: some View {
+            Button(action: action) {
+                VStack(spacing: 14) {
+                    ZStack {
+                        Circle()
+                            .fill(color.opacity(isHovered ? 0.22 : 0.12))
+                            .frame(width: 52, height: 52)
+                            .scaleEffect(isHovered ? 1.08 : 1.0)
+                            .animation(.spring(response: 0.3, dampingFraction: 0.6), value: isHovered)
+
+                        Image(systemName: icon)
+                            .font(.system(size: 24, weight: .medium))
+                            .foregroundColor(color)
+                            .shadow(color: color.opacity(isHovered ? 0.55 : 0.25), radius: isHovered ? 12 : 8, x: 0, y: isHovered ? 6 : 4)
+                            .scaleEffect(isHovered ? 1.08 : 1.0)
+                            .animation(.spring(response: 0.3, dampingFraction: 0.6), value: isHovered)
+                    }
+
+                    VStack(spacing: 6) {
+                        Text(LocalizedStringKey(title))
+                            .font(.system(size: 13.5, weight: .bold, design: .rounded))
+                            .foregroundColor(.white)
+
+                        Text(LocalizedStringKey(desc))
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(isHovered ? .white : .secondary)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(height: 32)
+                            .animation(.easeInOut(duration: 0.2), value: isHovered)
+                    }
+                }
+                .frame(width: 140)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .onHover { hovering in
+                isHovered = hovering
+            }
+        }
     }
 
     // MARK: - Anti-Jitter 1-Pane Utility Inspector
@@ -698,15 +1065,15 @@ struct ContentView: View {
 
             Divider().opacity(0.35)
 
-            // 中央スクロール領域（ステータス / ウィンドウ微調整 / カード台紙設定 / 基本設定折りたたみ / バッチ折りたたみ）
+            // 中央スクロール領域（ステータス / 基本設定折りたたみ / ウィンドウ微調整 / カード台紙設定 / 復元 / 彩色 / バッチ折りたたみ）
             ScrollView([.vertical], showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 14) {
                     statusSummarySection
+                    basicRecipeDisclosure
                     stereoWindowSection
                     stereoviewCardMountSection
                     vintageRestorationSection
                     colorizationSection
-                    basicRecipeDisclosure
                     batchProcessingDisclosure
                 }
                 .frame(width: contentWidth, alignment: .topLeading)
@@ -855,7 +1222,7 @@ struct ContentView: View {
         InspectorAccordionSection(
             title: "STEREO WINDOW",
             accentColor: .brightAmber,
-            shortcutHint: "⌥⌘1",
+            shortcutHint: "⌥⌘2",
             summary: vm.isAligned ? String(format: String(localized: "Auto: %.1f px"), vm.autoOptimalShiftX) : nil,
             borderColor: Color.brightAmber.opacity(vm.isAligned ? 0.35 : 0.14),
             isExpanded: $vm.isWindowSectionExpanded
@@ -904,9 +1271,10 @@ struct ContentView: View {
         return InspectorAccordionSection(
             title: "STEREOVIEW CARD MOUNT",
             accentColor: .brightBlue,
-            shortcutHint: "⌥⌘2",
+            shortcutHint: "⌥⌘3",
             summary: !vm.isCardMountSectionExpanded ? String(localized: String.LocalizationValue(vm.cardMountPreset.rawValue)) : nil,
             borderColor: isCardActive ? Color.brightBlue.opacity(0.42) : Color.white.opacity(0.14),
+            hasPendingChanges: vm.hasPendingCardMountChanges,
             isExpanded: $vm.isCardMountSectionExpanded
         ) {
             VStack(alignment: .leading, spacing: 10) {
@@ -1026,6 +1394,19 @@ struct ContentView: View {
                         .padding(.top, 2)
                     }
                 }
+
+                Divider().opacity(0.3)
+
+                Button {
+                    vm.applyCardMountConfig()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "checkmark.circle.fill")
+                        Text(LocalizedStringKey("Apply Card Mount"))
+                    }
+                }
+                .buttonStyle(InspectorActionButtonStyle(accentColor: .brightBlue, isPending: vm.hasPendingCardMountChanges))
+                .disabled(!vm.hasLoadedImages || vm.isProcessing)
             }
         }
     }
@@ -1051,9 +1432,10 @@ struct ContentView: View {
         InspectorAccordionSection(
             title: "VINTAGE PHOTO RESTORATION",
             accentColor: .brightPink,
-            shortcutHint: "⌥⌘3",
+            shortcutHint: "⌥⌘4",
             summary: !vm.isRestorationSectionExpanded ? vintageRestorationSummaryText : nil,
             borderColor: (vm.hasActiveVintageRestoration || vm.effectiveRemoveUnilateralNoise) ? Color.brightPink.opacity(0.42) : Color.white.opacity(0.14),
+            hasPendingChanges: vm.hasPendingRestorationChanges,
             isExpanded: $vm.isRestorationSectionExpanded
         ) {
             VStack(alignment: .leading, spacing: 12) {
@@ -1225,12 +1607,8 @@ struct ContentView: View {
                             vm.applyVintageRestoration()
                         } label: {
                             Label("Apply Restoration", systemImage: "wand.and.stars")
-                                .appSystemFont(size: 11.5, weight: .semibold)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 3)
                         }
-                        .buttonStyle(.borderedProminent)
-                        .tint(.brightPink)
+                        .buttonStyle(InspectorActionButtonStyle(accentColor: .brightPink, isPending: vm.hasPendingRestorationChanges))
                         .disabled(!vm.hasLoadedImages || vm.isProcessing)
                     }
 
@@ -1252,11 +1630,12 @@ struct ContentView: View {
         return InspectorAccordionSection(
             title: "COLORIZATION & HAND-TINT",
             accentColor: accent,
-            shortcutHint: "⌥⌘4",
+            shortcutHint: "⌥⌘5",
             summary: !vm.isColorizationSectionExpanded
                 ? String(localized: String.LocalizationValue(vm.restorationColorizationMode.rawValue))
                 : nil,
             borderColor: vm.hasActiveColorization ? accent.opacity(0.42) : Color.white.opacity(0.14),
+            hasPendingChanges: vm.hasPendingColorizationChanges,
             isExpanded: $vm.isColorizationSectionExpanded
         ) {
             VStack(alignment: .leading, spacing: 12) {
@@ -1330,12 +1709,8 @@ struct ContentView: View {
                             vm.restorationColorizationMode == .off && vm.hasActiveColorization ? LocalizedStringKey("Clear Colorization") : LocalizedStringKey("Apply Colorization"),
                             systemImage: "paintpalette.fill"
                         )
-                        .appSystemFont(size: 11.5, weight: .semibold)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 3)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(accent)
+                    .buttonStyle(InspectorActionButtonStyle(accentColor: accent, isPending: vm.hasPendingColorizationChanges))
                     .disabled(!vm.hasLoadedImages || vm.isProcessing)
 
                     Button {
@@ -1383,9 +1758,10 @@ struct ContentView: View {
         InspectorAccordionSection(
             title: "BASIC RECIPE",
             accentColor: .brightPurple,
-            shortcutHint: "⌥⌘5",
+            shortcutHint: "⌥⌘1",
             summary: !vm.isRecipeSectionExpanded ? recipeSummaryText : nil,
             borderColor: Color.white.opacity(0.14),
+            hasPendingChanges: vm.hasPendingRecipeChanges,
             isExpanded: $vm.isRecipeSectionExpanded
         ) {
             VStack(alignment: .leading, spacing: 14) {
@@ -1485,6 +1861,19 @@ struct ContentView: View {
                         .disabled(!vm.hasLoadedImages || vm.isProcessing)
                     }
                 }
+
+                Divider().opacity(0.3)
+
+                Button {
+                    vm.applyRecipeAndRealign()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.triangle.2.circlepath.camera.fill")
+                        Text(LocalizedStringKey("Apply Recipe & Re-align"))
+                    }
+                }
+                .buttonStyle(InspectorActionButtonStyle(accentColor: .brightPurple, isPending: vm.hasPendingRecipeChanges))
+                .disabled(!vm.hasLoadedImages || vm.isProcessing)
             }
         }
     }
@@ -1554,16 +1943,29 @@ struct ContentView: View {
                     .buttonStyle(.borderedProminent)
                     .tint(.palestineRed)
                 } else {
-                    Button {
-                        vm.openBatchFolderPanel()
-                    } label: {
-                        Label("Select Folder & Run Batch", systemImage: "folder.badge.gearshape")
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 6)
+                    VStack(spacing: 6) {
+                        Button {
+                            vm.openBatchFolderPanel()
+                        } label: {
+                            Label("Select Folder for Batch...", systemImage: "folder.badge.gearshape")
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 6)
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(vm.isProcessing)
+
+                        if vm.isBatchQueueActive && !vm.batchQueueItems.isEmpty {
+                            Button {
+                                vm.startBatchProcessing()
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "play.fill")
+                                    Text(String(format: NSLocalizedString("Execute Batch (%lld files)", comment: ""), Int64(vm.batchQueueItems.count)))
+                                }
+                            }
+                            .buttonStyle(InspectorActionButtonStyle(accentColor: .brightTeal, isPending: false))
+                        }
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.palestineGreen)
-                    .disabled(vm.isProcessing)
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
@@ -1779,12 +2181,57 @@ struct ContentView: View {
     }
 }
 
+/// インスペクタ専用の高コントラスト・アクションボタンスタイル
+/// パステルのベタ塗りによる白文字の埋没を完全に防止し、
+/// ダーク背景（濃い透過トーン）＋アクセント枠線（1px）＋クッキリとした白太字で抜群の視認性を確保する
+private struct InspectorActionButtonStyle: ButtonStyle {
+    let accentColor: Color
+    var isPending: Bool = false
+    var fullWidth: Bool = true
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        let activeColor = isPending ? Color.brightAmber : accentColor
+        configuration.label
+            .appSystemFont(size: 12, weight: .bold)
+            .foregroundColor(
+                isEnabled
+                    ? (isPending ? Color.brightAmber : Color.white)
+                    : Color.white.opacity(0.35)
+            )
+            .frame(maxWidth: fullWidth ? .infinity : nil)
+            .padding(.horizontal, fullWidth ? 12 : 14)
+            .padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(
+                        isEnabled
+                            ? (configuration.isPressed
+                                ? activeColor.opacity(0.28)
+                                : (isPending ? activeColor.opacity(0.20) : activeColor.opacity(0.14)))
+                            : Color.white.opacity(0.04)
+                    )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(
+                        isEnabled
+                            ? (isPending ? activeColor : activeColor.opacity(0.85))
+                            : Color.white.opacity(0.12),
+                        lineWidth: isPending ? 1.5 : 1.0
+                    )
+            )
+            .contentShape(Rectangle())
+    }
+}
+
 private struct InspectorAccordionSection<Content: View>: View {
     let title: String
     let accentColor: Color
     let shortcutHint: String
     let summary: String?
     let borderColor: Color
+    var hasPendingChanges: Bool = false
     @Binding var isExpanded: Bool
     @ViewBuilder let content: () -> Content
 
@@ -1813,6 +2260,20 @@ private struct InspectorAccordionSection<Content: View>: View {
                         .foregroundColor(.white)
                         .tracking(0.3)
                         .lineLimit(1)
+
+                    if hasPendingChanges {
+                        HStack(spacing: 3) {
+                            Circle()
+                                .fill(Color.brightAmber)
+                                .frame(width: 6, height: 6)
+                            Text(LocalizedStringKey("Pending"))
+                                .appSystemFont(size: 9.5, weight: .bold)
+                                .foregroundColor(Color.brightAmber)
+                        }
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(Color.brightAmber.opacity(0.18), in: Capsule())
+                    }
 
                     Spacer(minLength: 6)
 
