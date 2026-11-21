@@ -40,7 +40,9 @@ scratch_*.png
 ViewStereo_Output/
 学習用データ/
 test/
+test2/
 test_assets/
+ViewStereo.app/
 .vscode/
 
 # Large Core ML Models (>100MB GitHub limit) & Colorizer Dataset

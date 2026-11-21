@@ -174,6 +174,61 @@ enum StereoFrameStyle: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+/// 片側画像選択 (Left / Right)
+public enum StereoSingleEyeSide: String, CaseIterable, Identifiable, Sendable {
+    case left = "Left"
+    case right = "Right"
+
+    public var id: String { rawValue }
+}
+
+/// ステレオ構築モード
+public enum StereoReconstructionMode: Equatable, Sendable {
+    case trueStereo
+    case singleEyeDepth(StereoSingleEyeSide)
+
+    public var isSingleEyeDepth: Bool {
+        switch self {
+        case .trueStereo: return false
+        case .singleEyeDepth: return true
+        }
+    }
+
+    public var activeSide: StereoSingleEyeSide? {
+        switch self {
+        case .trueStereo: return nil
+        case .singleEyeDepth(let s): return s
+        }
+    }
+}
+
+/// ステレオペアの3大異常診断サマリー（ユーザー判断支援用）
+public struct StereoSalvageAdvisory: Sendable, Equatable {
+    public let isMismatchSuspected: Bool          // ① 貼り間違い・別テイク・特徴点不足
+    public let mismatchReasonText: String?
+
+    public let isUnilateralDamageSuspected: Bool  // ② 片側の大面積損傷・劣化
+    public let damagedSide: StereoSingleEyeSide?  // 損傷が検出された側
+    public let leftDefectPercent: Double          // 左画像の推定欠損率 (%)
+    public let rightDefectPercent: Double         // 右画像の推定欠損率 (%)
+    public let leftSharpnessScore: Double         // 左画像の鮮鋭度スコア (0..100)
+    public let rightSharpnessScore: Double        // 右画像の鮮鋭度スコア (0..100)
+
+    public let isExcessiveDisparity: Bool         // ③ ステレオベース過大 (maxDisparityPercent > 6.5%)
+    public let disparityPercent: Double
+
+    public var shouldShowSalvagePrompt: Bool {
+        isMismatchSuspected || isUnilateralDamageSuspected || isExcessiveDisparity
+    }
+
+    public var suggestedSide: StereoSingleEyeSide {
+        if let damaged = damagedSide {
+            return damaged == .left ? .right : .left
+        }
+        return leftSharpnessScore >= rightSharpnessScore ? .left : .right
+    }
+}
+
 /// バッチ処理完了サマリー
 struct BatchCompletionSummary: Equatable {
     let succeeded: Int
@@ -238,6 +293,43 @@ final class ViewStereoViewModel: ObservableObject {
         }
     }
     @Published var isPseudoscopicSuspected: Bool = false
+    @Published var isStereoMismatchSuspected: Bool = false
+    @Published var stereoQualityWarning: String? = nil
+    @Published var stereoReportText: String = "Normal"
+    @Published var salvageAdvisory: StereoSalvageAdvisory? = nil
+    @Published var stereoReconstructionMode: StereoReconstructionMode = .trueStereo
+    @Published var virtualDepthBasePercent: Double = 3.0 {
+        didSet {
+            if stereoReconstructionMode.isSingleEyeDepth, oldValue != virtualDepthBasePercent {
+                reapplyDepthSynthesis()
+            }
+        }
+    }
+    @Published var depthGamma: Double = 1.0 {
+        didSet {
+            if stereoReconstructionMode.isSingleEyeDepth, oldValue != depthGamma {
+                reapplyDepthSynthesis()
+            }
+        }
+    }
+
+    // バックアップ用（元ペアに戻せるように保存）
+    private var originalTrueStereoAlignedL: [UInt8]? = nil
+    private var originalTrueStereoAlignedR: [UInt8]? = nil
+    private var originalTrueStereoCW: Int = 0
+    private var originalTrueStereoCH: Int = 0
+    private var originalTrueStereoPrevWarpedL: [UInt8]? = nil
+    private var originalTrueStereoPrevWarpedR: [UInt8]? = nil
+    private var originalTrueStereoPrevCW: Int = 0
+    private var originalTrueStereoPrevCH: Int = 0
+    private var originalTrueStereoWindowShiftX: Double = 0.0
+    private var originalTrueStereoMaxDisparityPercent: Double = 0.0
+    private var cachedBaseSideRGB: [UInt8]? = nil
+    private var cachedBaseW: Int = 0
+    private var cachedBaseH: Int = 0
+    private var cachedDisparityMap: [Float]? = nil
+    private var cachedDepthW: Int = 0
+    private var cachedDepthH: Int = 0
     private var isSyncingLayoutAndMode = false
     @Published var displayMode: StereoDisplayMode = .stereoviewCard {
         didSet {
@@ -251,7 +343,7 @@ final class ViewStereoViewModel: ObservableObject {
     }
 
     // ステレオカード（台紙）再構築・書き出し設定
-    @Published var cardMountPreset: StereoCardMountPreset = .originalRemount {
+    @Published var cardMountPreset: StereoCardMountPreset = .autoSampleColor {
         didSet {
             UserDefaults.standard.set(cardMountPreset.rawValue, forKey: "VS.cardMountPreset")
         }
@@ -778,6 +870,14 @@ final class ViewStereoViewModel: ObservableObject {
         maxDisparityPercent = 0.0
         lastFullResShiftX = 0.0
         isPseudoscopicSuspected = false
+        isStereoMismatchSuspected = false
+        stereoQualityWarning = nil
+        stereoReportText = "Normal"
+        salvageAdvisory = nil
+        stereoReconstructionMode = .trueStereo
+        originalTrueStereoAlignedL = nil
+        originalTrueStereoAlignedR = nil
+        cachedDisparityMap = nil
 
         isSwapped = false
         resetVintageRestoration(renderPreview: false)
@@ -1304,6 +1404,14 @@ final class ViewStereoViewModel: ObservableObject {
         verticalRMSE = 0
         inlierCount = 0
         isPseudoscopicSuspected = false
+        isStereoMismatchSuspected = false
+        stereoQualityWarning = nil
+        stereoReportText = "Normal"
+        salvageAdvisory = nil
+        stereoReconstructionMode = .trueStereo
+        originalTrueStereoAlignedL = nil
+        originalTrueStereoAlignedR = nil
+        cachedDisparityMap = nil
         statusMessage = "Reset to original images."
         renderDisplayPreview()
     }
@@ -1332,6 +1440,10 @@ final class ViewStereoViewModel: ObservableObject {
         let elapsedMs: Double
         let dispRangePct: Double
         let isPseudoscopicSuspected: Bool
+        let isStereoMismatchSuspected: Bool
+        let stereoQualityWarning: String?
+        let stereoReportText: String
+        let salvageAdvisory: StereoSalvageAdvisory
     }
 
     private enum AlignmentPipelineError: Error {
@@ -1425,11 +1537,20 @@ final class ViewStereoViewModel: ObservableObject {
         requiresFloatingWindow = out.windowDecision.requiresFloatingWindow
         maxDisparityPercent = out.dispRangePct
         isPseudoscopicSuspected = out.isPseudoscopicSuspected
+        isStereoMismatchSuspected = out.isStereoMismatchSuspected
+        stereoQualityWarning = out.stereoQualityWarning
+        stereoReportText = out.stereoReportText
+        salvageAdvisory = out.salvageAdvisory
+        stereoReconstructionMode = .trueStereo
         if out.isPseudoscopicSuspected && ViewStereoSettings.shared.autoSwapPseudoscopic {
             isSwapped = true
         }
         isProcessing = false
-        statusMessage = String(format: "Aligned in %.1f ms | vRMSE: %.3f px", out.elapsedMs, out.rectRes.verticalRMSEPixels)
+        if let warn = out.stereoQualityWarning {
+            statusMessage = String(format: "Aligned in %.1f ms | vRMSE: %.3f px  %@", out.elapsedMs, out.rectRes.verticalRMSEPixels, warn)
+        } else {
+            statusMessage = String(format: "Aligned in %.1f ms | vRMSE: %.3f px", out.elapsedMs, out.rectRes.verticalRMSEPixels)
+        }
         renderDisplayPreview()
     }
 
@@ -1776,6 +1897,36 @@ final class ViewStereoViewModel: ObservableObject {
             rectPrevL = HistogramColorMatcher.matchHistogram(referenceRGB: rectPrevR, targetRGB: rectPrevL, pixelCount: rCount)
         }
 
+        let stereoQuality = evaluateStereoQuality(
+            matches: matches,
+            samples: samples,
+            width: Double(w),
+            height: Double(h),
+            isPseudoscopic: isPseudoscopicSuspected,
+            isSwapped: willAutoSwap
+        )
+
+        let damageEval = evaluateUnilateralDamage(
+            leftRGB: warpedL,
+            rightRGB: warpedR,
+            width: cw,
+            height: ch
+        )
+
+        let isExcessive = dispRangePct > 6.5
+        let advisory = StereoSalvageAdvisory(
+            isMismatchSuspected: stereoQuality.isMismatch,
+            mismatchReasonText: stereoQuality.warningText,
+            isUnilateralDamageSuspected: damageEval.isDamaged,
+            damagedSide: damageEval.damagedSide,
+            leftDefectPercent: damageEval.leftDefect,
+            rightDefectPercent: damageEval.rightDefect,
+            leftSharpnessScore: damageEval.leftSharp,
+            rightSharpnessScore: damageEval.rightSharp,
+            isExcessiveDisparity: isExcessive,
+            disparityPercent: dispRangePct
+        )
+
         return .success(AlignmentPipelineOutput(
             warpedL: warpedL,
             warpedR: warpedR,
@@ -1797,8 +1948,95 @@ final class ViewStereoViewModel: ObservableObject {
             windowDecision: windowDecision,
             elapsedMs: elapsedMs,
             dispRangePct: max(0, dispRangePct),
-            isPseudoscopicSuspected: isPseudoscopicSuspected
+            isPseudoscopicSuspected: isPseudoscopicSuspected,
+            isStereoMismatchSuspected: stereoQuality.isMismatch,
+            stereoQualityWarning: stereoQuality.warningText,
+            stereoReportText: stereoQuality.reportText,
+            salvageAdvisory: advisory
         ))
+    }
+
+    /// ステレオ写真として幾何・被写体が両立しているかの総合適合性評価
+    /// 左右で別写真が貼られている場合や片側だけ被写体が消失しているケースを検出し、
+    /// 空間カバレッジや近景不一致を警告する
+    nonisolated static func evaluateStereoQuality(
+        matches: [StereoMatchPoint],
+        samples: [DisparitySample],
+        width w: Double,
+        height h: Double,
+        isPseudoscopic: Bool,
+        isSwapped: Bool
+    ) -> (isMismatch: Bool, warningText: String?, reportText: String) {
+        // 1. 特徴点数が極端に少ない場合
+        if matches.count < 20 || samples.count < 15 {
+            let warn = "⚠️ 特徴点不足 (アライメント信頼性低)"
+            let rep = "⚠️ Warning: Very low feature matches (\(matches.count) matches, \(samples.count) inliers)"
+            return (true, warn, rep)
+        }
+
+        // 2. 空間グリッドカバレッジ（3x3 = 9セル）
+        var gridCounts = [Int](repeating: 0, count: 9)
+        var topCount = 0
+        var midCount = 0
+        var botCount = 0
+
+        for s in samples {
+            let gx = min(2, max(0, Int(s.x / (w / 3.0))))
+            let gy = min(2, max(0, Int(s.y / (h / 3.0))))
+            gridCounts[gy * 3 + gx] += 1
+            if gy == 0 { topCount += 1 }
+            else if gy == 1 { midCount += 1 }
+            else { botCount += 1 }
+        }
+
+        let botActiveCells = [gridCounts[6], gridCounts[7], gridCounts[8]].filter { $0 >= 3 }.count
+        let topActiveCells = [gridCounts[0], gridCounts[1], gridCounts[2]].filter { $0 >= 3 }.count
+        let midActiveCells = [gridCounts[3], gridCounts[4], gridCounts[5]].filter { $0 >= 3 }.count
+        let activeCells = gridCounts.filter { $0 >= 3 }.count
+
+        let totalSamples = Double(samples.count)
+        let topRatio = Double(topCount) / totalSamples
+        let midRatio = Double(midCount) / totalSamples
+        let botRatio = Double(botCount) / totalSamples
+
+        // 1. 近景（手前下部）の被写体不一致・人物消失パターン
+        // （奥の部屋や天井・棚は共通してマッチするが、手前の人物や家具が片側にしかいない／別テイク・エラーカード）
+        // 上・中部に20点以上のマッチがあるのに、下部（近景）のインライアが極端に少ない（比率8%未満、または下段3セル中有効セルが1以下）
+        let isForegroundMismatch = (topCount + midCount >= 20) && (botCount < 8 || botRatio < 0.08 || botActiveCells <= 1)
+
+        // 2. 遠景・背景（画像上部）の不一致パターン（手前だけ一致して背景が別物）
+        let isBackgroundMismatch = (botCount + midCount >= 20) && (topCount < 6 || topRatio < 0.06 || topActiveCells <= 1)
+
+        // 3. 極端な空間偏在（3x3グリッド中4セル以下しかカバーされていない、または有効な行が1行以下）
+        let activeRows = [topCount, midCount, botCount].filter { $0 >= 8 }.count
+        let isSeverelySparse = activeCells <= 4 || activeRows <= 1
+
+        if isForegroundMismatch || isBackgroundMismatch || isSeverelySparse {
+            let reason: String
+            if isForegroundMismatch {
+                reason = "Near foreground mismatch / Missing subject in foreground (botRatio: \(String(format: "%.1f%%", botRatio * 100)), botCells: \(botActiveCells)/3)"
+            } else if isBackgroundMismatch {
+                reason = "Background / distant scene mismatch (topRatio: \(String(format: "%.1f%%", topRatio * 100)), topCells: \(topActiveCells)/3)"
+            } else {
+                reason = "Extreme spatial clustering (\(activeCells)/9 grid coverage, \(activeRows)/3 rows)"
+            }
+            let warn = "⚠️ ステレオ不成立 (左右不一致)"
+            let rep = "⚠️ Warning: Stereo Mismatch / Invalid Pair (\(reason); not a consistent stereoscopic pair)"
+            return (true, warn, rep)
+        }
+
+        // 3. 左右逆（偽視）
+        if isPseudoscopic {
+            if isSwapped {
+                return (false, nil, "Pseudoscopic (Auto-Swapped: Left <-> Right)")
+            } else {
+                let warn = "⚠️ 左右逆の疑い (偽視)"
+                let rep = "⚠️ Warning: Pseudoscopic detected (Reversed Left/Right; needs swap)"
+                return (false, warn, rep)
+            }
+        }
+
+        return (false, nil, "Normal (Consistent stereo pair)")
     }
 
     /// 視差勾配による左右逆（偽視 / Pseudoscopic）の自動検知
@@ -1832,6 +2070,105 @@ final class ViewStereoViewModel: ObservableObject {
         return diffBotTop >= 2.0 && corrYP >= 0.06
     }
 
+    /// 左右画像の構造・欠損比較および鮮鋭度評価
+    /// 片側プリントの破損（紙の破れ・白抜け・インク染み・カビ・乳剤剥離）を検出
+    nonisolated static func evaluateUnilateralDamage(
+        leftRGB: [UInt8],
+        rightRGB: [UInt8],
+        width w: Int,
+        height h: Int
+    ) -> (isDamaged: Bool, damagedSide: StereoSingleEyeSide?, leftDefect: Double, rightDefect: Double, leftSharp: Double, rightSharp: Double) {
+        guard w >= 64, h >= 64, leftRGB.count >= w * h * 3, rightRGB.count >= w * h * 3 else {
+            return (false, nil, 0.0, 0.0, 50.0, 50.0)
+        }
+
+        let stepX = max(1, w / 256)
+        let stepY = max(1, h / 256)
+
+        var sumGradL = 0.0, sumGradR = 0.0
+        var sampleCount = 0
+
+        func lumaAt(_ rgb: [UInt8], _ x: Int, _ y: Int) -> Double {
+            let idx = (y * w + x) * 3
+            return Double(rgb[idx]) * 0.299 + Double(rgb[idx + 1]) * 0.587 + Double(rgb[idx + 2]) * 0.114
+        }
+
+        var y = stepY
+        while y < h - stepY {
+            var x = stepX
+            while x < w - stepX {
+                let dxL = abs(lumaAt(leftRGB, x + 1, y) - lumaAt(leftRGB, x - 1, y))
+                let dyL = abs(lumaAt(leftRGB, x, y + 1) - lumaAt(leftRGB, x, y - 1))
+                let dxR = abs(lumaAt(rightRGB, x + 1, y) - lumaAt(rightRGB, x - 1, y))
+                let dyR = abs(lumaAt(rightRGB, x, y + 1) - lumaAt(rightRGB, x, y - 1))
+                sumGradL += dxL + dyL
+                sumGradR += dxR + dyR
+                sampleCount += 1
+                x += stepX
+            }
+            y += stepY
+        }
+
+        let meanGradL = sampleCount > 0 ? (sumGradL / Double(sampleCount)) : 0.0
+        let meanGradR = sampleCount > 0 ? (sumGradR / Double(sampleCount)) : 0.0
+        let leftSharp = min(100.0, max(0.0, meanGradL * 3.5))
+        let rightSharp = min(100.0, max(0.0, meanGradR * 3.5))
+
+        // 16x16 ブロックグリッドで左右の大きな輝度乖離（欠損・剥離）を評価
+        let numBlocksX = 16
+        let numBlocksY = 16
+        let blockW = max(2, w / numBlocksX)
+        let blockH = max(2, h / numBlocksY)
+        var leftDefectBlocks = 0
+        var rightDefectBlocks = 0
+        var totalBlocks = 0
+
+        for by in 0..<numBlocksY {
+            let by0 = by * blockH
+            let by1 = min(h, (by + 1) * blockH)
+            for bx in 0..<numBlocksX {
+                let bx0 = bx * blockW
+                let bx1 = min(w, (bx + 1) * blockW)
+
+                var sumL = 0.0, sumR = 0.0
+                var bSamples = 0
+                for py in stride(from: by0, to: by1, by: max(1, blockH / 4)) {
+                    for px in stride(from: bx0, to: bx1, by: max(1, blockW / 4)) {
+                        sumL += lumaAt(leftRGB, px, py)
+                        sumR += lumaAt(rightRGB, px, py)
+                        bSamples += 1
+                    }
+                }
+                guard bSamples > 0 else { continue }
+                totalBlocks += 1
+                let avgL = sumL / Double(bSamples)
+                let avgR = sumR / Double(bSamples)
+                let diff = abs(avgL - avgR)
+
+                if diff >= 50.0 {
+                    if (avgL >= 238.0 || avgL <= 20.0) && (avgR > 25.0 && avgR < 230.0) {
+                        leftDefectBlocks += 1
+                    } else if (avgR >= 238.0 || avgR <= 20.0) && (avgL > 25.0 && avgL < 230.0) {
+                        rightDefectBlocks += 1
+                    }
+                }
+            }
+        }
+
+        let leftDefectPct = totalBlocks > 0 ? (Double(leftDefectBlocks) / Double(totalBlocks) * 100.0) : 0.0
+        let rightDefectPct = totalBlocks > 0 ? (Double(rightDefectBlocks) / Double(totalBlocks) * 100.0) : 0.0
+
+        let isDamaged = (leftDefectPct >= 4.0 || rightDefectPct >= 4.0) && abs(leftDefectPct - rightDefectPct) >= 2.5
+        let damagedSide: StereoSingleEyeSide?
+        if isDamaged {
+            damagedSide = leftDefectPct > rightDefectPct ? .left : .right
+        } else {
+            damagedSide = nil
+        }
+
+        return (isDamaged, damagedSide, leftDefectPct, rightDefectPct, leftSharp, rightSharp)
+    }
+
     /// Vision Saliency Subject Priority トグル変更時にウィンドウ最適値を再計算・適用
     func recalculateOptimalWindow() {
         guard isAligned, let rectRes = lastRectResult, !lastMatches.isEmpty else { return }
@@ -1863,6 +2200,201 @@ final class ViewStereoViewModel: ObservableObject {
         autoOptimalShiftX = optTx
         windowShiftX = optTx
         applyManualWindowShift()
+    }
+
+    // MARK: - Single-Eye 2D-3D Depth Conversion (救済 3D コンバージョン)
+
+    /// 選択された片側画像から AI 深度推定 ＆ DIBR により高品質な 3D ステレオペアを生成・適用
+    func convertSingleEyeToDepth3D(side: StereoSingleEyeSide) {
+        guard isAligned || hasLoadedImages else { return }
+
+        // 1. 初回変換時、元の True Stereo ペアをバックアップ
+        if !stereoReconstructionMode.isSingleEyeDepth {
+            originalTrueStereoAlignedL = alignedLeftRGB
+            originalTrueStereoAlignedR = alignedRightRGB
+            originalTrueStereoCW = croppedWidth
+            originalTrueStereoCH = croppedHeight
+            originalTrueStereoPrevWarpedL = previewAlignedLeftRGB
+            originalTrueStereoPrevWarpedR = previewAlignedRightRGB
+            originalTrueStereoPrevCW = previewCroppedWidth
+            originalTrueStereoPrevCH = previewCroppedHeight
+            originalTrueStereoWindowShiftX = windowShiftX
+            originalTrueStereoMaxDisparityPercent = maxDisparityPercent
+        }
+
+        // 2. ソース画像の決定: 台紙から切り出された無歪み 100% 画角 (rawLeftRGB / rawRightRGB) を最優先
+        // なければ整準済み画像 (alignedLeftRGB / alignedRightRGB) を使用
+        let sourceRGB: [UInt8]
+        let srcW: Int
+        let srcH: Int
+        if side == .left {
+            if let rawL = rawLeftRGB, imageWidth > 0, imageHeight > 0 {
+                sourceRGB = rawL; srcW = imageWidth; srcH = imageHeight
+            } else if let alL = alignedLeftRGB, croppedWidth > 0, croppedHeight > 0 {
+                sourceRGB = alL; srcW = croppedWidth; srcH = croppedHeight
+            } else { return }
+        } else {
+            if let rawR = rawRightRGB, imageWidth > 0, imageHeight > 0 {
+                sourceRGB = rawR; srcW = imageWidth; srcH = imageHeight
+            } else if let alR = alignedRightRGB, croppedWidth > 0, croppedHeight > 0 {
+                sourceRGB = alR; srcW = croppedWidth; srcH = croppedHeight
+            } else { return }
+        }
+
+        isProcessing = true
+        statusMessage = String(localized: "Estimating Depth & Generating 3D Stereo Pair...")
+
+        let samples = lastDisparitySamples
+        let targetDispPct = virtualDepthBasePercent
+        let gamma = depthGamma
+
+        Task {
+            let synth = ViewStereoDepthSynthesizer.shared
+            // AI 深度推論
+            guard let depthRes = synth.estimateDisparity(rgb: sourceRGB, width: srcW, height: srcH) else {
+                await MainActor.run {
+                    self.isProcessing = false
+                    self.statusMessage = String(localized: "Depth estimation failed.")
+                }
+                return
+            }
+
+            // 実測視差サンプルによる較正（サンプルが十分あれば）
+            var dispMap = depthRes.disparity
+            if !samples.isEmpty {
+                dispMap = ViewStereoDepthSynthesizer.calibrateWithSparseStereo(
+                    disparityMap: dispMap,
+                    depthW: depthRes.width,
+                    depthH: depthRes.height,
+                    sparseSamples: samples,
+                    imageWidth: Double(srcW),
+                    imageHeight: Double(srcH)
+                )
+            }
+
+            // DIBR 対称ワーピングによるフル解像度ステレオペア合成
+            let (fullL, fullR) = synth.synthesizeStereoPair(
+                baseRGB: sourceRGB,
+                width: srcW,
+                height: srcH,
+                disparityMap: dispMap,
+                depthW: depthRes.width,
+                depthH: depthRes.height,
+                targetDisparityPercent: targetDispPct,
+                depthGamma: gamma
+            )
+
+            // プレビュー用軽量バッファ（最大長辺 previewMaxDimension = 1440）の生成
+            let prevScale = min(1.0, Double(Self.previewMaxDimension) / Double(max(srcW, srcH)))
+            let prevW = max(1, Int(Double(srcW) * prevScale))
+            let prevH = max(1, Int(Double(srcH) * prevScale))
+            let prevL = ViewStereoDepthSynthesizer.resizeRGB(fullL, width: srcW, height: srcH, targetWidth: prevW, targetHeight: prevH)
+            let prevR = ViewStereoDepthSynthesizer.resizeRGB(fullR, width: srcW, height: srcH, targetWidth: prevW, targetHeight: prevH)
+
+            await MainActor.run {
+                self.cachedBaseSideRGB = sourceRGB
+                self.cachedBaseW = srcW
+                self.cachedBaseH = srcH
+                self.cachedDisparityMap = dispMap
+                self.cachedDepthW = depthRes.width
+                self.cachedDepthH = depthRes.height
+
+                self.alignedLeftRGB = fullL
+                self.alignedRightRGB = fullR
+                self.croppedWidth = srcW
+                self.croppedHeight = srcH
+                self.previewAlignedLeftRGB = prevL
+                self.previewAlignedRightRGB = prevR
+                self.previewCroppedWidth = prevW
+                self.previewCroppedHeight = prevH
+                self.rectifiedPreviewLeftRGB = prevL
+                self.rectifiedPreviewRightRGB = prevR
+                self.rectifiedPreviewWidth = prevW
+                self.rectifiedPreviewHeight = prevH
+
+                self.stereoReconstructionMode = .singleEyeDepth(side)
+                self.isSwapped = false
+                self.windowShiftX = 0.0
+                self.autoOptimalShiftX = 0.0
+                self.maxDisparityPercent = targetDispPct
+                self.isProcessing = false
+                self.statusMessage = String(format: String(localized: "3D Conversion Done (%@) | Disp: %.1f%% | %.0f ms"), depthRes.engine.rawValue, targetDispPct, depthRes.elapsedMs)
+                self.renderDisplayPreview()
+            }
+        }
+    }
+
+    /// 深度マップキャッシュを用いたリアルタイム高速再ワーピング（スライダー操作時）
+    func reapplyDepthSynthesis() {
+        guard stereoReconstructionMode.isSingleEyeDepth,
+              let dispMap = cachedDisparityMap,
+              let baseRGB = cachedBaseSideRGB,
+              cachedBaseW > 0, cachedBaseH > 0 else { return }
+
+        let srcW = cachedBaseW
+        let srcH = cachedBaseH
+        let depthW = cachedDepthW
+        let depthH = cachedDepthH
+        let targetDispPct = virtualDepthBasePercent
+        let gamma = depthGamma
+
+        Task {
+            let synth = ViewStereoDepthSynthesizer.shared
+            let (fullL, fullR) = synth.synthesizeStereoPair(
+                baseRGB: baseRGB,
+                width: srcW,
+                height: srcH,
+                disparityMap: dispMap,
+                depthW: depthW,
+                depthH: depthH,
+                targetDisparityPercent: targetDispPct,
+                depthGamma: gamma
+            )
+
+            let prevScale = min(1.0, Double(Self.previewMaxDimension) / Double(max(srcW, srcH)))
+            let prevW = max(1, Int(Double(srcW) * prevScale))
+            let prevH = max(1, Int(Double(srcH) * prevScale))
+            let prevL = ViewStereoDepthSynthesizer.resizeRGB(fullL, width: srcW, height: srcH, targetWidth: prevW, targetHeight: prevH)
+            let prevR = ViewStereoDepthSynthesizer.resizeRGB(fullR, width: srcW, height: srcH, targetWidth: prevW, targetHeight: prevH)
+
+            await MainActor.run {
+                self.alignedLeftRGB = fullL
+                self.alignedRightRGB = fullR
+                self.previewAlignedLeftRGB = prevL
+                self.previewAlignedRightRGB = prevR
+                self.rectifiedPreviewLeftRGB = prevL
+                self.rectifiedPreviewRightRGB = prevR
+                self.maxDisparityPercent = targetDispPct
+                self.renderDisplayPreview()
+            }
+        }
+    }
+
+    /// 変換前のオリジナル真ステレオペアに非破壊復元
+    func revertToOriginalStereoPair() {
+        guard stereoReconstructionMode.isSingleEyeDepth,
+              let l = originalTrueStereoAlignedL,
+              let r = originalTrueStereoAlignedR else { return }
+
+        alignedLeftRGB = l
+        alignedRightRGB = r
+        croppedWidth = originalTrueStereoCW
+        croppedHeight = originalTrueStereoCH
+        previewAlignedLeftRGB = originalTrueStereoPrevWarpedL
+        previewAlignedRightRGB = originalTrueStereoPrevWarpedR
+        previewCroppedWidth = originalTrueStereoPrevCW
+        previewCroppedHeight = originalTrueStereoPrevCH
+        rectifiedPreviewLeftRGB = originalTrueStereoPrevWarpedL
+        rectifiedPreviewRightRGB = originalTrueStereoPrevWarpedR
+        rectifiedPreviewWidth = originalTrueStereoPrevCW
+        rectifiedPreviewHeight = originalTrueStereoPrevCH
+
+        windowShiftX = originalTrueStereoWindowShiftX
+        autoOptimalShiftX = originalTrueStereoWindowShiftX
+        maxDisparityPercent = originalTrueStereoMaxDisparityPercent
+        stereoReconstructionMode = .trueStereo
+        statusMessage = String(localized: "Restored to original stereo pair.")
+        renderDisplayPreview()
     }
 
     /// ウィンドウ最適シフトを解き、ステレオカード(preserveArch)用の上限クランプ後に
@@ -2714,6 +3246,8 @@ final class ViewStereoViewModel: ObservableObject {
         Matches / Inliers: \(matchCount) / \(inlierCount)
         Vertical RMSE   : \(String(format: "%.4f px", verticalRMSE))
         Window Shift X  : \(String(format: "%.3f px (Auto: %.3f px)", windowShiftX, autoOptimalShiftX))
+        Auto-Swap       : \(isSwapped ? "Applied (Left <-> Right swapped for pseudoscopic correction)" : "None")
+        Stereo Status   : \(stereoReportText)
         Log Scale (u_s) : \(p.logScale)
         Roll L / R (rad): \(p.rollL) / \(p.rollR)
         Keystone H L/R  : \(p.keystoneXL) / \(p.keystoneXR)
@@ -3323,6 +3857,8 @@ final class ViewStereoViewModel: ObservableObject {
             Matches / Inliers: \(out.matches.count) / \(out.rectRes.inlierCount)
             Vertical RMSE   : \(String(format: "%.4f px", out.rectRes.verticalRMSEPixels))
             Window Shift X  : \(String(format: "%.3f px", out.windowDecision.optimalShiftX))
+            Auto-Swap       : \(isSwapped ? "Applied (Left <-> Right swapped for pseudoscopic correction)" : "None")
+            Stereo Status   : \(out.stereoReportText)
             Log Scale (u_s) : \(p.logScale)
             Roll L / R (rad): \(p.rollL) / \(p.rollR)
             Keystone H L/R  : \(p.keystoneXL) / \(p.keystoneXR)
@@ -4170,12 +4706,12 @@ final class ViewStereoViewModel: ObservableObject {
             }
             if minX > maxX || minY > maxY { return nil }
 
-            // 端の1pxがリサンプリングで暗くなったフリンジ（黒ライン）である場合、左右と上端をインセット
-            // （下端の maxY は足先や靴底を守るため削らず保持する）
+            // 端の1pxがリサンプリングで暗くなったフリンジ（黒ライン）や台紙漏れを除去するため、左右および上下端をインセット
             if minX + 2 < maxX && minY + 2 < maxY {
                 minX += 1
                 maxX -= 1
                 minY += 1
+                maxY -= 1
             }
             return (minX, maxX, minY, maxY)
         }
@@ -4187,8 +4723,9 @@ final class ViewStereoViewModel: ObservableObject {
             return (left, right, width, height)
         }
 
-        let minY = min(bL.minY, bR.minY)
-        let maxY = max(bL.maxY, bR.maxY)
+        // アナグリフ等で片側チャンネルだけが光って横線になるのを防ぐため、両眼共通の有効範囲を採用
+        let minY = max(bL.minY, bR.minY)
+        let maxY = min(bL.maxY, bR.maxY)
         let targetH = max(1, maxY - minY + 1)
 
         let wL = max(1, bL.maxX - bL.minX + 1)

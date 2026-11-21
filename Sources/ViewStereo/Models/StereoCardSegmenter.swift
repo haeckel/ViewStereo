@@ -493,12 +493,12 @@ final class StereoCardSegmenter: @unchecked Sendable {
             var cLx0 = max(0, Int(floor(rawLx0 + insetLX)))
             var cLx1 = min(width, Int(ceil(rawLx1 - insetLX)))
             var cLy0 = max(0, Int(floor(rawLy0 + insetLY)))
-            var cLy1 = min(height, Int(ceil(rawLy1)))
+            var cLy1 = min(height, Int(floor(rawLy1 - insetLY)))
 
             var cRx0 = max(0, Int(floor(rawRx0 + insetRX)))
             var cRx1 = min(width, Int(ceil(rawRx1 - insetRX)))
             var cRy0 = max(0, Int(floor(rawRy0 + insetRY)))
-            var cRy1 = min(height, Int(ceil(rawRy1)))
+            var cRy1 = min(height, Int(floor(rawRy1 - insetRY)))
 
             trimHorizontalCardBorders(rgb: rgb, srcW: width, srcH: height, x0: cLx0, x1: cLx1, y0: &cLy0, y1: &cLy1)
             trimHorizontalCardBorders(rgb: rgb, srcW: width, srcH: height, x0: cRx0, x1: cRx1, y0: &cRy0, y1: &cRy1)
@@ -532,6 +532,40 @@ final class StereoCardSegmenter: @unchecked Sendable {
                     cRx0: &cRx0, cRx1: &cRx1, cRy0: cRy0, cRy1: cRy1,
                     cardRGB: effectiveCardRGB
                 )
+                // 水平トリム後の最終段階で写真上端（空・天井等）を再回復
+                Self.recoverOvercroppedTopEdgeRGB(
+                    rgb: rgb, srcW: width, srcH: height,
+                    cLx0: cLx0, cLx1: cLx1, cLy0: &cLy0, cLy1: cLy1,
+                    cRx0: cRx0, cRx1: cRx1, cRy0: &cRy0, cRy1: cRy1,
+                    cardRGB: effectiveCardRGB
+                )
+            }
+
+            // 上端過剰クロップ防止セーフティガード（富士山頂・空等のグラデーション領域が台紙と誤認されて削られるのを防止）
+            do {
+                let midLX = (cLx0 + cLx1) / 2
+                let midRX = (cRx0 + cRx1) / 2
+                var topBorderEnd = 0
+                while topBorderEnd < min(height / 8, 32) {
+                    let offL = (topBorderEnd * width + midLX) * 3
+                    let offR = (topBorderEnd * width + midRX) * 3
+                    let lL = (Double(rgb[offL]) + Double(rgb[offL + 1]) + Double(rgb[offL + 2])) / 3.0
+                    let lR = (Double(rgb[offR]) + Double(rgb[offR + 1]) + Double(rgb[offR + 2])) / 3.0
+                    if max(lL, lR) <= 35.0 {
+                        topBorderEnd += 1
+                    } else {
+                        break
+                    }
+                }
+                if topBorderEnd > 0 {
+                    let safeTop = topBorderEnd + 1
+                    if cLy0 > safeTop + 6 {
+                        cLy0 = safeTop
+                    }
+                    if cRy0 > safeTop + 6 {
+                        cRy0 = safeTop
+                    }
+                }
             }
 
             let lw = cLx1 - cLx0, lh = cLy1 - cLy0
@@ -650,45 +684,38 @@ final class StereoCardSegmenter: @unchecked Sendable {
 
                 return StereoCardCropper.CropResult(leftRGB: fullOutL, rightRGB: fullOutR, width: cw, height: ch, detectedCard: true, preservedArch: true)
             } else {
-                guard let rectL = largestInscribedRect(mask: finalMaskL, w: mw, h: mh),
-                      let rectR = largestInscribedRect(mask: finalMaskR, w: mw, h: mh) else {
-                    return nil
-                }
-                let pad = 2
-                let cLx0 = max(0, Int(ceil(Double(rectL.minX) * invScaleX)) + pad)
-                let cLy0 = max(0, Int(ceil(Double(rectL.minY) * invScaleY)) + pad)
-                let cLx1 = min(width, Int(floor(Double(rectL.maxX) * invScaleX)) - pad)
-                let cLy1 = min(height, Int(floor(Double(rectL.maxY) * invScaleY)) - pad)
-
-                let cRx0 = max(0, Int(ceil(Double(rectR.minX) * invScaleX)) + pad)
-                let cRy0 = max(0, Int(ceil(Double(rectR.minY) * invScaleY)) + pad)
-                let cRx1 = min(width, Int(floor(Double(rectR.maxX) * invScaleX)) - pad)
-                let cRy1 = min(height, Int(floor(Double(rectR.maxY) * invScaleY)) - pad)
-
-                let lw = cLx1 - cLx0, lh = cLy1 - cLy0
-                let rw = cRx1 - cRx0, rh = cRy1 - cRy0
-                let cw = min(lw, rw), ch = min(lh, rh)
-                guard cw >= max(64, Int(Double(width) * 0.25)),
-                      ch >= max(64, Int(Double(height) * 0.40)) else {
-                    return nil
+                // 矩形クロップ (.cropInner)
+                // 1. 直角プリントまたはアーチなしの場合:
+                // fullOutL / fullOutR はすでに外接矩形で切り出されており、
+                // 上下にアーチが存在しないため、最大内接矩形 (largestInscribedRect) で山頂や空などの上部を削る必要は一切ない。
+                let isTopSquare = (archParams.topRyRatio < 0.04 && archParams.topRxRatio < 0.04)
+                let isBotSquare = (archParams.botRyRatio < 0.04 && archParams.botRxRatio < 0.04)
+                if isTopSquare && isBotSquare {
+                    return StereoCardCropper.CropResult(leftRGB: fullOutL, rightRGB: fullOutR, width: cw, height: ch, detectedCard: true, preservedArch: false)
                 }
 
-                let startLX = cLx0 + (lw - cw) / 2
-                let startLY = cLy0 + (lh - ch) / 2
-                let startRX = cRx0 + (rw - cw) / 2
-                let startRY = cRy0 + (rh - ch) / 2
-
-                let boxFromRectL = IntBox(minX: rectL.minX, minY: rectL.minY, maxX: rectL.maxX, maxY: rectL.maxY)
-                let boxFromRectR = IntBox(minX: rectR.minX, minY: rectR.minY, maxX: rectR.maxX, maxY: rectR.maxY)
-                let skewAngle = Self.estimateSkewAngle(maskL: finalMaskL, boxL: boxFromRectL, maskR: finalMaskR, boxR: boxFromRectR, w: mw, h: mh)
-                let centerLX = Double(startLX) + Double(cw) * 0.5
-                let centerLY = Double(startLY) + Double(ch) * 0.5
-                let centerRX = Double(startRX) + Double(cw) * 0.5
-                let centerRY = Double(startRY) + Double(ch) * 0.5
-
-                let outL = cropRotatedRGB(rgb, srcW: width, srcH: height, centerX: centerLX, centerY: centerLY, width: cw, height: ch, angleRad: skewAngle)
-                let outR = cropRotatedRGB(rgb, srcW: width, srcH: height, centerX: centerRX, centerY: centerRY, width: cw, height: ch, angleRad: skewAngle)
-                return StereoCardCropper.CropResult(leftRGB: outL, rightRGB: outR, width: cw, height: ch, detectedCard: true, preservedArch: false)
+                // 2. アーチ付き写真の場合:
+                // 実測された幾何アーチパラメータ (archParams) に基づき、
+                // 上部アーチの高さ分・下部角丸の高さ分だけを正確にインセットして四角形に切り抜く。
+                // （largestInscribedRect のヒストグラム面積最大化アルゴリズムが、空や山頂を「横幅最大化」のために丸ごと削り落とすバグを防止）
+                let topInset = isTopSquare ? 0 : Int(ceil(Double(ch) * archParams.topRyRatio))
+                let botInset = isBotSquare ? 0 : Int(ceil(Double(ch) * archParams.botRyRatio))
+                let newCh = ch - topInset - botInset
+                if newCh >= max(64, Int(Double(height) * 0.40)) {
+                    var innerL = [UInt8](repeating: 0, count: cw * newCh * 3)
+                    var innerR = [UInt8](repeating: 0, count: cw * newCh * 3)
+                    let rowBytes = cw * 3
+                    for dy in 0..<newCh {
+                        let srcY = topInset + dy
+                        let srcOff = srcY * rowBytes
+                        let dstOff = dy * rowBytes
+                        innerL.replaceSubrange(dstOff..<(dstOff + rowBytes), with: fullOutL[srcOff..<(srcOff + rowBytes)])
+                        innerR.replaceSubrange(dstOff..<(dstOff + rowBytes), with: fullOutR[srcOff..<(srcOff + rowBytes)])
+                    }
+                    return StereoCardCropper.CropResult(leftRGB: innerL, rightRGB: innerR, width: cw, height: newCh, detectedCard: true, preservedArch: false)
+                } else {
+                    return StereoCardCropper.CropResult(leftRGB: fullOutL, rightRGB: fullOutR, width: cw, height: ch, detectedCard: true, preservedArch: false)
+                }
             }
         } catch {
             return nil
@@ -1345,7 +1372,29 @@ final class StereoCardSegmenter: @unchecked Sendable {
         let (topBg, topBgRef) = bgExtent(fromTop: true)
         let (botBg, botBgRef) = bgExtent(fromTop: false)
         let refB = cardRef(botBg - Int(Double(H) * 0.03), botBg - Int(Double(H) * 0.005), bgRef: botBgRef)
-        let refT = cardRef(topBg + Int(Double(H) * 0.005), topBg + Int(Double(H) * 0.02), bgRef: topBgRef)
+        let rawRefT = cardRef(topBg + Int(Double(H) * 0.005), topBg + Int(Double(H) * 0.02), bgRef: topBgRef)
+
+        // 上端台紙 refT の厳格な整合性検証:
+        // ステレオカード台紙は同素材のため、下端台紙 refB との整合性がある場合のみ上端台紙として認定。
+        // 下端台紙がない場合や明色（空・天井の誤認防止）の場合は台紙とみなさない。
+        let refT: Double?
+        if let rawT = rawRefT {
+            if let b = refB {
+                refT = abs(rawT - b) <= 25.0 ? rawT : nil
+            } else {
+                lock.lock()
+                let prevCard = latestCardLuma
+                lock.unlock()
+                if let pc = prevCard, abs(rawT - pc) <= 20.0, rawT < 175.0 {
+                    refT = rawT
+                } else {
+                    refT = nil
+                }
+            }
+        } else {
+            refT = nil
+        }
+
         if let r = refB ?? refT {
             lock.lock()
             latestCardLuma = r
@@ -1371,7 +1420,9 @@ final class StereoCardSegmenter: @unchecked Sendable {
             if ny1 < y1g - shrink { ny1 = y1g }
         }
 
-        if let ref = refT ?? refB {
+        // 上端の台紙トリミングは、上端に真の台紙（refT）が検証・確認された場合のみ実施
+        // （下端台紙 refB しかない場合に、その色で上端の空を誤トリムするのを防止）
+        if let ref = refT {
             func isCard(_ y: Int) -> Bool { std[y] <= 10 && abs(mean[y] - ref) <= 14 }
             let from = min(cy, y0g + win)
             let to = max(k, y0g - win)
@@ -1543,7 +1594,7 @@ final class StereoCardSegmenter: @unchecked Sendable {
                 let st = analyzeRow(y)
                 if st.bgRatio >= 0.35 || st.distCard < 26.0 { break }
                 if st.scanMatch { break }
-                if cLuma >= 115.0 && st.meanLuma >= max(210.0, cLuma + 22.0) { break }
+                if hasWhiteScan && st.meanLuma >= max(210.0, cLuma + 22.0) { break }
                 if cLuma >= 115.0 && ((st.darkRatio >= 0.45 && st.meanLuma <= 95.0) || st.darkRatio >= 0.55) { break }
                 candY = y
                 bgSum += st.bgRatio
@@ -1560,7 +1611,7 @@ final class StereoCardSegmenter: @unchecked Sendable {
             if !boundaryOK && candY >= 1 {
                 for k in 1...min(5, candY) {
                     let st = analyzeRow(candY - k)
-                    if st.bgRatio >= 0.45 || (cLuma >= 115.0 && st.darkRatio >= 0.50) {
+                    if st.bgRatio >= 0.45 || (cLuma >= 115.0 && st.darkRatio >= 0.50) || st.scanMatch {
                         boundaryOK = true
                         break
                     }
@@ -1887,7 +1938,12 @@ final class StereoCardSegmenter: @unchecked Sendable {
                         }
                     }
                     if pureRun >= 6 && pEnd < limitPureY {
-                        return max(yTop, min(yBot - 32, pEnd))
+                        let diff = stepDiff(pEnd, x0: cx0, x1: cx1)
+                        let nextSt = analyzeRow(min(yBot - 16, pEnd + 2), x0: cx0, x1: cx1)
+                        // 空の緩やかな階調変化を純台紙帯と誤認して写真を切り落とすのを防ぐため、明確なエッジや構造変化を要求
+                        if diff >= 14.0 || nextSt.std >= 12.0 || nextSt.distCard >= 20.0 {
+                            return max(yTop, min(yBot - 32, pEnd))
+                        }
                     }
                 }
             }
@@ -3196,20 +3252,7 @@ final class StereoCardSegmenter: @unchecked Sendable {
                 samples.append((r, g, b))
             }
 
-            // 上マージン（カード内 yTop より上）
-            let topLo = max(cardY0, min(yTop - 2, yTop - 22))
-            let topHi = max(topLo, min(srcH - 2, yTop - 2))
-            if topHi > topLo && sx1 > sx0 {
-                let yStep = max(1, (topHi - topLo) / 10)
-                var y = topLo
-                while y < topHi {
-                    var x = sx0
-                    while x < sx1 { collectPoint(x, y); x += xStep }
-                    y += yStep
-                }
-            }
-
-            // 下マージン（カード内 yBot より下）
+            // 1. 下マージン（カード内 yBot より下）からサンプル収集
             let botLo = min(cardY1 - 1, max(cardY0, yBot + 2))
             let botHi = min(cardY1 - 1, max(botLo, yBot + 36))
             if botHi > botLo && sx1 > sx0 {
@@ -3222,7 +3265,7 @@ final class StereoCardSegmenter: @unchecked Sendable {
                 }
             }
 
-            // 左右マージン（面積広く安定しているため密にサンプル収集）
+            // 2. 左右マージン（面積広く安定しているため密にサンプル収集）
             let my0 = cardY0 + cardH / 5
             let my1 = cardY1 - cardH / 5
             let yStep = max(1, (my1 - my0) / 48)
@@ -3244,6 +3287,54 @@ final class StereoCardSegmenter: @unchecked Sendable {
                     var x = rxStart
                     while x < cardX1 { collectPoint(x, y); x += rxStep }
                     y += yStep
+                }
+            }
+
+            // 3. 上マージン（カード内 yTop より上）
+            // 注意: 空や天井などの誤サンプリング防止
+            // 下部または左右マージンからサンプルが得られている場合は、その平均色と整合する場合のみ上部を採用。
+            // 下部・左右マージンから十分なサンプルが得られていない場合、上マージンが明色（luma >= 165.0）なら空とみなして採用しない。
+            let topLo = max(cardY0, min(yTop - 2, yTop - 22))
+            let topHi = max(topLo, min(srcH - 2, yTop - 2))
+            if topHi > topLo && sx1 > sx0 {
+                var topSamples: [(r: Double, g: Double, b: Double)] = []
+                let yStep = max(1, (topHi - topLo) / 10)
+                var y = topLo
+                while y < topHi {
+                    var x = sx0
+                    while x < sx1 {
+                        if x >= 2, x < srcW - 2, y >= 2, y < srcH - 2 {
+                            let i = (y * srcW + x) * 3
+                            let r = Double(base[i]), g = Double(base[i + 1]), b = Double(base[i + 2])
+                            let luma = (r + g + b) / 3.0
+                            if luma > 18.0 && luma < 244.0 {
+                                let iR = (y * srcW + (x + 2)) * 3
+                                let iD = ((y + 2) * srcW + x) * 3
+                                let lR = (Double(base[iR]) + Double(base[iR + 1]) + Double(base[iR + 2])) / 3.0
+                                let lD = (Double(base[iD]) + Double(base[iD + 1]) + Double(base[iD + 2])) / 3.0
+                                if abs(luma - lR) <= 7.0 && abs(luma - lD) <= 7.0 {
+                                    topSamples.append((r, g, b))
+                                }
+                            }
+                        }
+                        x += xStep
+                    }
+                    y += yStep
+                }
+
+                if !topSamples.isEmpty {
+                    let topMeanLuma = topSamples.reduce(0.0) { $0 + ($1.r + $1.g + $1.b) / 3.0 } / Double(topSamples.count)
+                    if samples.count >= 16 {
+                        let baseMeanR = samples.reduce(0.0) { $0 + $1.r } / Double(samples.count)
+                        let baseMeanG = samples.reduce(0.0) { $0 + $1.g } / Double(samples.count)
+                        let baseMeanB = samples.reduce(0.0) { $0 + $1.b } / Double(samples.count)
+                        let baseMeanLuma = (baseMeanR + baseMeanG + baseMeanB) / 3.0
+                        if abs(topMeanLuma - baseMeanLuma) <= 32.0 {
+                            samples.append(contentsOf: topSamples)
+                        }
+                    } else if topMeanLuma < 165.0 {
+                        samples.append(contentsOf: topSamples)
+                    }
                 }
             }
 
@@ -3351,8 +3442,8 @@ final class StereoCardSegmenter: @unchecked Sendable {
 
         let insetX = fw * max(0.0, extraInsetRatio)
         let insetYTop = fh * max(0.0, extraInsetRatio)
-        // 下端に角丸がない（アーチトップ型）場合は、足先や車輪底の被写体を切断しないよう下端インセットはゼロ
-        let insetYBot = hasBotRound ? (fh * max(0.0, extraInsetRatio)) : 0.0
+        // 下端に角丸がない場合でも、最外周の微小な台紙フリンジ・平行化回転誤差を除去するため極小インセットを適用
+        let insetYBot = hasBotRound ? (fh * max(0.0, extraInsetRatio)) : max(1.5, fh * max(0.0, extraInsetRatio * 0.5))
 
         let x0 = insetX + Double(edgeInsets.left)
         let x1 = fw - insetX - Double(edgeInsets.right)
@@ -3369,7 +3460,7 @@ final class StereoCardSegmenter: @unchecked Sendable {
         let topScale = min(rxTop, ryTop)
         let botScale = min(rxBot, ryBot)
         let safeY0 = Int(ceil(y0 + ryTop + 2.5))
-        let safeY1 = hasBotRound ? Int(floor(y1 - ryBot - 2.5)) : h
+        let safeY1 = Int(floor(y1 - ryBot - 2.5))
         let safeX0 = Int(ceil(x0 + 2.5))
         let safeX1 = Int(floor(x1 - 2.5))
 
@@ -3378,7 +3469,7 @@ final class StereoCardSegmenter: @unchecked Sendable {
             for y in 0..<h {
                 let py = Double(y) + 0.5
                 let dTop = py - y0
-                let dBot = hasBotRound ? (y1 - py) : (fh - py + 2.0)
+                let dBot = y1 - py
                 let dY = min(dTop, dBot)
                 let rowOff = y * w * 3
 
@@ -3459,9 +3550,10 @@ final class StereoCardSegmenter: @unchecked Sendable {
         if let card = cardLuma, w >= 64, h >= 64 {
             let a = residualBorderInsets(left, width: w, height: h, cardLuma: card)
             let b = residualBorderInsets(right, width: w, height: h, cardLuma: card)
-            // 下端（bottom）は地面や靴・服の暗部と台紙輝度が一致して誤爆しやすいため、
-            // 足先や車輪の過度な切り上げを防ぐため bottom のインセットは行わない（0に固定）
-            insets = (max(a.top, b.top), 0, max(a.left, b.left), max(a.right, b.right))
+            // 下端（bottom）の微小クロップ漏れ・平行化楔によるアナグリフ横線を除去
+            // （足先や車輪の過度な切り上げを防ぐため最大でも 4px / 0.8% に制限）
+            let safeBottom = min(max(4, Int(Double(h) * 0.008)), max(a.bottom, b.bottom))
+            insets = (max(a.top, b.top), safeBottom, max(a.left, b.left), max(a.right, b.right))
         }
         applyParametricArchMask(&left, width: w, height: h, params: params, extraInsetRatio: extraInsetRatio, edgeInsets: insets)
         applyParametricArchMask(&right, width: w, height: h, params: params, extraInsetRatio: extraInsetRatio, edgeInsets: insets)
@@ -3848,7 +3940,6 @@ final class StereoCardSegmenter: @unchecked Sendable {
 
 /// 台紙（マウント）の年代・様式プリセット
 enum StereoCardMountPreset: String, CaseIterable, Identifiable, Sendable {
-    case originalRemount = "Original Mount (Remount)"
     case autoSampleColor = "Auto Sample Source Color"
     case keystoneDark    = "1900s Keystone Dark"
     case classicBuff     = "1880s Classic Buff"
@@ -3862,7 +3953,7 @@ enum StereoCardMountPreset: String, CaseIterable, Identifiable, Sendable {
     /// プリセットの標準台紙RGBカラー
     var baseRGB: (r: UInt8, g: UInt8, b: UInt8) {
         switch self {
-        case .originalRemount, .autoSampleColor:
+        case .autoSampleColor:
             return (54, 56, 58) // サンプルがない場合のフォールバック（Keystone Dark）
         case .keystoneDark:
             return (52, 54, 57)   // チャコール・スレートグレー（1890s–1920s Keystone / Underwood）
@@ -3898,7 +3989,7 @@ enum StereoCardMountPreset: String, CaseIterable, Identifiable, Sendable {
             return true
         case .vividTerracotta, .victorianGreen, .chromeYellow:
             return true
-        case .earlyIvory, .originalRemount:
+        case .earlyIvory:
             return false
         }
     }
@@ -3916,7 +4007,7 @@ enum StereoCardMountPreset: String, CaseIterable, Identifiable, Sendable {
     /// プリセットに応じた標準の印画カット形状
     var defaultPrintCutStyle: StereoCardPrintCutStyle {
         switch self {
-        case .chromeYellow, .vividTerracotta, .victorianGreen, .keystoneDark, .autoSampleColor, .originalRemount:
+        case .chromeYellow, .vividTerracotta, .victorianGreen, .keystoneDark, .autoSampleColor:
             return .archTop
         case .classicBuff:
             return .roundedCorners
@@ -3987,7 +4078,7 @@ enum StereoCardTextMode: String, CaseIterable, Identifiable, Sendable {
 
 /// ステレオカード合成の設定一式
 struct StereoCardMountConfig: Equatable, Sendable {
-    var preset: StereoCardMountPreset = .originalRemount
+    var preset: StereoCardMountPreset = .autoSampleColor
     var sizeSpec: StereoCardSizeSpec = .standard
     var printCutStyle: StereoCardPrintCutStyle = .autoFromPreset
     var centerGapStyle: StereoCardCenterGapStyle = .autoFromPreset
@@ -4022,20 +4113,7 @@ enum StereoCardMountRenderer {
             return ([UInt8](repeating: 0, count: 64 * 32 * 4), 64, 32)
         }
 
-        // 1. 「元台紙を復元 (Original Mount Remount)」かつ元カードのコンテキストが存在する場合
-        if config.preset == .originalRemount, let ctx = mountContext {
-            return renderOriginalMountRemount(
-                leftRGB: leftRGB,
-                rightRGB: rightRGB,
-                printWidth: printWidth,
-                printHeight: printHeight,
-                config: config,
-                ctx: ctx,
-                transparentOuterCorners: transparentOuterCorners
-            )
-        }
-
-        // 2. プロシージャル年代別台紙（または元カード色スポイト台紙）の生成
+        // プロシージャル年代別台紙（または元カード色スポイト台紙）の生成
         return renderProceduralMount(
             leftRGB: leftRGB,
             rightRGB: rightRGB,
@@ -4090,175 +4168,7 @@ enum StereoCardMountRenderer {
         return (rgb, cw, ch)
     }
 
-    // MARK: - Mode A: 元台紙のデジタル・リマウント (Original Mount Restoration)
-
-    private static func renderOriginalMountRemount(
-        leftRGB: [UInt8],
-        rightRGB: [UInt8],
-        printWidth: Int,
-        printHeight: Int,
-        config: StereoCardMountConfig,
-        ctx: StereoCardSegmenter.OriginalCardMountContext,
-        transparentOuterCorners: Bool
-    ) -> (rgba: [UInt8], width: Int, height: Int) {
-        let origSlotW = max(1, min(ctx.leftBox.x1 - ctx.leftBox.x0, ctx.rightBox.x1 - ctx.rightBox.x0))
-        let scaleRatio = Double(printWidth) / Double(origSlotW)
-        let targetCardW: Int
-        let targetCardH: Int
-        let workingCardRGB: [UInt8]
-        let scaleX: Double
-        let scaleY: Double
-
-        if scaleRatio < 0.72 && ctx.cardWidth > 900 {
-            targetCardW = max(400, Int((Double(ctx.cardWidth) * scaleRatio).rounded()))
-            targetCardH = max(200, Int((Double(ctx.cardHeight) * scaleRatio).rounded()))
-            workingCardRGB = resizeBilinearRGB(ctx.cardRGB, sw: ctx.cardWidth, sh: ctx.cardHeight, dw: targetCardW, dh: targetCardH)
-            scaleX = Double(targetCardW) / Double(ctx.cardWidth)
-            scaleY = Double(targetCardH) / Double(ctx.cardHeight)
-        } else {
-            targetCardW = ctx.cardWidth
-            targetCardH = ctx.cardHeight
-            workingCardRGB = ctx.cardRGB
-            scaleX = 1.0
-            scaleY = 1.0
-        }
-
-        // Step 1: スキャン時の台紙傾き（Deskew）補正
-        var canvasRGB: [UInt8]
-        if abs(ctx.skewAngleRad * 180.0 / .pi) >= 0.15 {
-            canvasRGB = rotateFullImageRGB(
-                workingCardRGB,
-                width: targetCardW,
-                height: targetCardH,
-                angleRad: ctx.skewAngleRad,
-                fillRGB: ctx.sampledCardRGB
-            )
-        } else {
-            canvasRGB = workingCardRGB
-        }
-
-        let lx0 = max(0, min(targetCardW - 1, Int((Double(ctx.leftBox.x0) * scaleX).rounded())))
-        let ly0 = max(0, min(targetCardH - 1, Int((Double(ctx.leftBox.y0) * scaleY).rounded())))
-        let lx1 = max(lx0 + 1, min(targetCardW, Int((Double(ctx.leftBox.x1) * scaleX).rounded())))
-        let ly1 = max(ly0 + 1, min(targetCardH, Int((Double(ctx.leftBox.y1) * scaleY).rounded())))
-
-        let rx0 = max(0, min(targetCardW - 1, Int((Double(ctx.rightBox.x0) * scaleX).rounded())))
-        let ry0 = max(0, min(targetCardH - 1, Int((Double(ctx.rightBox.y0) * scaleY).rounded())))
-        let rx1 = max(rx0 + 1, min(targetCardW, Int((Double(ctx.rightBox.x1) * scaleX).rounded())))
-        let ry1 = max(ry0 + 1, min(targetCardH, Int((Double(ctx.rightBox.y1) * scaleY).rounded())))
-
-        let cutStyle: StereoCardPrintCutStyle = (config.printCutStyle == .autoFromPreset) ? .archTop : config.printCutStyle
-        let archParams = resolveArchParams(
-            cutStyle: cutStyle,
-            aiArchParams: ctx.archParams,
-            useAIArch: config.printCutStyle == .autoFromPreset
-        )
-
-        // Step 2: 旧印画領域の「中央谷間（594等）＆下部文字保護付き・台紙ヒーリング」
-        healPhotoSlotOnMount(
-            canvasRGB: &canvasRGB,
-            cardW: targetCardW,
-            cardH: targetCardH,
-            slot: (x0: lx0, y0: ly0, x1: lx1, y1: ly1),
-            archParams: archParams,
-            baseColor: ctx.sampledCardRGB,
-            seedOffset: 101
-        )
-        healPhotoSlotOnMount(
-            canvasRGB: &canvasRGB,
-            cardW: targetCardW,
-            cardH: targetCardH,
-            slot: (x0: rx0, y0: ry0, x1: rx1, y1: ry1),
-            archParams: archParams,
-            baseColor: ctx.sampledCardRGB,
-            seedOffset: 202
-        )
-
-        // Step 3: 整準・立体窓調整済みプリントのシンメトリック再貼付（SBS表示の完全なアスペクト比・全構図を100%維持）
-        let slotLW = lx1 - lx0
-        let slotLH = ly1 - ly0
-        let slotRW = rx1 - rx0
-        let slotRH = ry1 - ry0
-
-        let maxSlotW = max(16, min(slotLW, slotRW))
-        let maxSlotH = max(16, min(slotLH, slotRH))
-
-        let printAspect = Double(printWidth) / Double(printHeight)
-        let slotAspect = Double(maxSlotW) / Double(maxSlotH)
-
-        // 写真をクロップ（ズーム拡大）せず、SBS表示と同一の全ピクセルが収まる Aspect Fit サイズを算出
-        let dstPrintW: Int
-        let dstPrintH: Int
-        if printAspect > slotAspect {
-            dstPrintW = maxSlotW
-            dstPrintH = max(16, Int((Double(maxSlotW) / printAspect).rounded()))
-        } else {
-            dstPrintH = maxSlotH
-            dstPrintW = max(16, Int((Double(maxSlotH) * printAspect).rounded()))
-        }
-
-        let centerLY = Double(ly0 + ly1) * 0.5
-        let centerRY = Double(ry0 + ry1) * 0.5
-        let syncCenterY = (centerLY + centerRY) * 0.5
-        let pasteY = max(0, min(targetCardH - dstPrintH, Int((syncCenterY - Double(dstPrintH) * 0.5).rounded())))
-
-        let centerLX = Double(lx0 + lx1) * 0.5
-        let centerRX = Double(rx0 + rx1) * 0.5
-        let pasteLX = max(0, min(targetCardW - dstPrintW, Int((centerLX - Double(dstPrintW) * 0.5).rounded())))
-        let pasteRX = max(0, min(targetCardW - dstPrintW, Int((centerRX - Double(dstPrintW) * 0.5).rounded())))
-
-        // クロップ・ズームを排除し、アスペクト比100%維持の高品質バイリニア変倍でSBSと全く同一の構図を保つ
-        let scaledL = resizeBilinearRGB(leftRGB, sw: printWidth, sh: printHeight, dw: dstPrintW, dh: dstPrintH)
-        let scaledR = resizeBilinearRGB(rightRGB, sw: printWidth, sh: printHeight, dw: dstPrintW, dh: dstPrintH)
-
-        pastePrintOntoMount(
-            canvasRGB: &canvasRGB,
-            cardW: targetCardW,
-            cardH: targetCardH,
-            printRGB: scaledL,
-            pw: dstPrintW,
-            ph: dstPrintH,
-            dstX: pasteLX,
-            dstY: pasteY,
-            archParams: archParams
-        )
-
-        pastePrintOntoMount(
-            canvasRGB: &canvasRGB,
-            cardW: targetCardW,
-            cardH: targetCardH,
-            printRGB: scaledR,
-            pw: dstPrintW,
-            ph: dstPrintH,
-            dstX: pasteRX,
-            dstY: pasteY,
-            archParams: archParams
-        )
-
-        if config.textMode == .manualTypeset {
-            drawLetterpressTypography(
-                canvasRGB: &canvasRGB,
-                cardW: targetCardW,
-                cardH: targetCardH,
-                leftPrintRect: CGRect(x: pasteLX, y: pasteY, width: dstPrintW, height: dstPrintH),
-                rightPrintRect: CGRect(x: pasteRX, y: pasteY, width: dstPrintW, height: dstPrintH),
-                archParams: archParams,
-                mountBaseRGB: ctx.sampledCardRGB,
-                config: config
-            )
-        }
-
-        let rgba = convertMountToRGBA(
-            canvasRGB: canvasRGB,
-            width: targetCardW,
-            height: targetCardH,
-            roundedCorners: true,
-            transparentCorners: transparentOuterCorners
-        )
-        return (rgba, targetCardW, targetCardH)
-    }
-
-    // MARK: - Mode B: 年代別プロシージャル台紙生成 + 4領域インク転写 / 活版組版印字
+    // MARK: - 年代別プロシージャル台紙生成 + 4領域インク転写 / 活版組版印字
 
     private static func renderProceduralMount(
         leftRGB: [UInt8],
@@ -4269,11 +4179,9 @@ enum StereoCardMountRenderer {
         mountContext: StereoCardSegmenter.OriginalCardMountContext?,
         transparentOuterCorners: Bool
     ) -> (rgba: [UInt8], width: Int, height: Int) {
-        let effectivePreset: StereoCardMountPreset = (config.preset == .originalRemount) ? .keystoneDark : config.preset
+        let effectivePreset: StereoCardMountPreset = config.preset
         let baseRGB: (r: UInt8, g: UInt8, b: UInt8)
         if effectivePreset == .autoSampleColor, let ctx = mountContext {
-            baseRGB = ctx.sampledCardRGB
-        } else if config.preset == .originalRemount, let ctx = mountContext {
             baseRGB = ctx.sampledCardRGB
         } else {
             baseRGB = effectivePreset.baseRGB
@@ -4416,150 +4324,6 @@ enum StereoCardMountRenderer {
             transparentCorners: transparentOuterCorners
         )
         return (rgba, cardW, cardH)
-    }
-
-    // MARK: - 旧印画枠の台紙ヒーリング（中央上部アーチ谷間の番号 594 & 下部タイトル文字保護付き）
-
-    private static func healPhotoSlotOnMount(
-        canvasRGB: inout [UInt8],
-        cardW: Int,
-        cardH: Int,
-        slot: (x0: Int, y0: Int, x1: Int, y1: Int),
-        archParams: StereoCardSegmenter.ArchShapeParams,
-        baseColor: (r: UInt8, g: UInt8, b: UInt8),
-        seedOffset: UInt64
-    ) {
-        let padX = max(1, Int(Double(cardW) * 0.002))
-        let padTop = max(1, Int(Double(cardH) * 0.002))
-        let padBot = max(1, Int(Double(cardH) * 0.0015))
-
-        let hx0 = max(0, slot.x0 - padX)
-        let hx1 = min(cardW, slot.x1 + padX)
-        let hy0 = max(0, slot.y0 - padTop)
-        let hy1 = min(cardH, slot.y1 + padBot)
-        let hw = hx1 - hx0
-        let hh = hy1 - hy0
-        guard hw > 4, hh > 4 else { return }
-
-        let baseR = Double(baseColor.r)
-        let baseG = Double(baseColor.g)
-        let baseB = Double(baseColor.b)
-        let baseLuma = 0.299 * baseR + 0.587 * baseG + 0.114 * baseB
-
-        func sampleMountStrip(xRange: Range<Int>, yRange: Range<Int>) -> (r: Double, g: Double, b: Double) {
-            var rs: [Double] = []
-            var gs: [Double] = []
-            var bs: [Double] = []
-            for y in yRange where y >= 0 && y < cardH {
-                for x in xRange where x >= 0 && x < cardW {
-                    let idx = (y * cardW + x) * 3
-                    let r = Double(canvasRGB[idx])
-                    let g = Double(canvasRGB[idx + 1])
-                    let b = Double(canvasRGB[idx + 2])
-                    let diff = abs(r - baseR) + abs(g - baseG) + abs(b - baseB)
-                    if diff < 85.0 {
-                        rs.append(r); gs.append(g); bs.append(b)
-                    }
-                }
-            }
-            guard !rs.isEmpty else { return (baseR, baseG, baseB) }
-            rs.sort(); gs.sort(); bs.sort()
-            let mid = rs.count / 2
-            return (rs[mid], gs[mid], bs[mid])
-        }
-
-        let sampleBand = max(3, min(10, cardH / 90))
-        let topColors = (0..<hw).map { dx -> (r: Double, g: Double, b: Double) in
-            let x = hx0 + dx
-            return sampleMountStrip(xRange: max(0, x - 4)..<min(cardW, x + 5), yRange: max(0, hy0 - sampleBand)..<hy0)
-        }
-        let botColors = (0..<hw).map { dx -> (r: Double, g: Double, b: Double) in
-            let x = hx0 + dx
-            return sampleMountStrip(xRange: max(0, x - 4)..<min(cardW, x + 5), yRange: hy1..<min(cardH, hy1 + sampleBand))
-        }
-        let leftColors = (0..<hh).map { dy -> (r: Double, g: Double, b: Double) in
-            let y = hy0 + dy
-            return sampleMountStrip(xRange: max(0, hx0 - sampleBand)..<hx0, yRange: max(0, y - 4)..<min(cardH, y + 5))
-        }
-        let rightColors = (0..<hh).map { dy -> (r: Double, g: Double, b: Double) in
-            let y = hy0 + dy
-            return sampleMountStrip(xRange: hx1..<min(cardW, hx1 + sampleBand), yRange: max(0, y - 4)..<min(cardH, y + 5))
-        }
-
-        let wF = Double(hw)
-        let hF = Double(hh)
-        // アーチ・角丸より少しだけ広い範囲までをヒーリングし、中央谷間（594の印字領域）等は元の台紙を完全保護する
-        let healTopRx = max(0.0, (archParams.topRxRatio - 0.025) * wF)
-        let healTopRy = max(0.0, (archParams.topRyRatio - 0.025) * hF)
-        let healBotRx = max(0.0, (archParams.botRxRatio - 0.025) * wF)
-        let healBotRy = max(0.0, (archParams.botRyRatio - 0.025) * hF)
-
-        for dy in 0..<hh {
-            let y = hy0 + dy
-            let ty = Double(dy) / Double(max(1, hh - 1))
-            let wy = 1.0 / (min(ty, 1.0 - ty) + 0.08)
-            let lCol = leftColors[dy]
-            let rCol = rightColors[dy]
-            let isBottomFringe = (y >= slot.y1)
-
-            for dx in 0..<hw {
-                let x = hx0 + dx
-
-                // 上下コーナー外側の元台紙領域（中央谷間の番号 594 等がある場所）を保護
-                let alpha = archCornerAlpha(
-                    x: Double(dx) + 0.5,
-                    y: Double(dy) + 0.5,
-                    w: wF,
-                    h: hF,
-                    topRx: healTopRx,
-                    topRy: healTopRy,
-                    botRx: healBotRx,
-                    botRy: healBotRy
-                )
-                if alpha <= 0.05 {
-                    continue
-                }
-
-                let idx = (y * cardW + x) * 3
-                if isBottomFringe {
-                    let curR = Double(canvasRGB[idx])
-                    let curG = Double(canvasRGB[idx + 1])
-                    let curB = Double(canvasRGB[idx + 2])
-                    let curLuma = 0.299 * curR + 0.587 * curG + 0.114 * curB
-                    if baseLuma - curLuma > 25.0 {
-                        continue
-                    }
-                }
-
-                let tx = Double(dx) / Double(max(1, hw - 1))
-                let wx = 1.0 / (min(tx, 1.0 - tx) + 0.08)
-
-                let tCol = topColors[dx]
-                let bCol = botColors[dx]
-
-                let vR = tCol.r * (1.0 - ty) + bCol.r * ty
-                let vG = tCol.g * (1.0 - ty) + bCol.g * ty
-                let vB = tCol.b * (1.0 - ty) + bCol.b * ty
-
-                let hR = lCol.r * (1.0 - tx) + rCol.r * tx
-                let hG = lCol.g * (1.0 - tx) + rCol.g * tx
-                let hB = lCol.b * (1.0 - tx) + rCol.b * tx
-
-                let wSum = wx + wy
-                var outR = (hR * wx + vR * wy) / wSum
-                var outG = (hG * wx + vG * wy) / wSum
-                var outB = (hB * wx + vB * wy) / wSum
-
-                let grain = paperGrainNoise(x: x, y: y, seed: seedOffset) * 2.2
-                outR += grain
-                outG += grain
-                outB += grain * 0.9
-
-                canvasRGB[idx]     = UInt8(max(0, min(255, Int(outR.rounded()))))
-                canvasRGB[idx + 1] = UInt8(max(0, min(255, Int(outG.rounded()))))
-                canvasRGB[idx + 2] = UInt8(max(0, min(255, Int(outB.rounded()))))
-            }
-        }
     }
 
     // MARK: - 台紙サーフェス生成（年代別カラー + 曲面マウント陰影 + 紙質グレイン）
@@ -5244,52 +5008,6 @@ enum StereoCardMountRenderer {
         h = (h ^ (h >> 13)) &* 1274126177
         h = h ^ (h >> 16)
         return (Double(h & 0xFFFF) / 32767.5) - 1.0 // -1.0 ... +1.0
-    }
-
-    private static func rotateFullImageRGB(
-        _ src: [UInt8],
-        width: Int,
-        height: Int,
-        angleRad: Double,
-        fillRGB: (r: UInt8, g: UInt8, b: UInt8)
-    ) -> [UInt8] {
-        var dst = [UInt8](repeating: 0, count: width * height * 3)
-        let cx = Double(width) * 0.5
-        let cy = Double(height) * 0.5
-        let cosA = cos(angleRad)
-        let sinA = sin(angleRad)
-
-        for y in 0..<height {
-            let dy = Double(y) + 0.5 - cy
-            for x in 0..<width {
-                let dx = Double(x) + 0.5 - cx
-                let sx = cx + dx * cosA - dy * sinA - 0.5
-                let sy = cy + dx * sinA + dy * cosA - 0.5
-                let dIdx = (y * width + x) * 3
-
-                let x0 = Int(floor(sx)), y0 = Int(floor(sy))
-                if x0 >= 0 && x0 + 1 < width && y0 >= 0 && y0 + 1 < height {
-                    let ax = sx - Double(x0)
-                    let ay = sy - Double(y0)
-                    let w00 = (1.0 - ax) * (1.0 - ay)
-                    let w10 = ax * (1.0 - ay)
-                    let w01 = (1.0 - ax) * ay
-                    let w11 = ax * ay
-                    let i00 = (y0 * width + x0) * 3
-                    let i10 = i00 + 3
-                    let i01 = ((y0 + 1) * width + x0) * 3
-                    let i11 = i01 + 3
-                    dst[dIdx]     = UInt8(max(0, min(255, Int((Double(src[i00])     * w00 + Double(src[i10])     * w10 + Double(src[i01])     * w01 + Double(src[i11])     * w11).rounded()))))
-                    dst[dIdx + 1] = UInt8(max(0, min(255, Int((Double(src[i00 + 1]) * w00 + Double(src[i10 + 1]) * w10 + Double(src[i01 + 1]) * w01 + Double(src[i11 + 1]) * w11).rounded()))))
-                    dst[dIdx + 2] = UInt8(max(0, min(255, Int((Double(src[i00 + 2]) * w00 + Double(src[i10 + 2]) * w10 + Double(src[i01 + 2]) * w01 + Double(src[i11 + 2]) * w11).rounded()))))
-                } else {
-                    dst[dIdx]     = fillRGB.r
-                    dst[dIdx + 1] = fillRGB.g
-                    dst[dIdx + 2] = fillRGB.b
-                }
-            }
-        }
-        return dst
     }
 
     private static func cropSubRectRGB(_ src: [UInt8], srcW: Int, srcH: Int, x0: Int, y0: Int, cw: Int, ch: Int) -> (rgb: [UInt8], w: Int, h: Int) {

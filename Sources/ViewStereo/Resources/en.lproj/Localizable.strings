@@ -85,6 +85,8 @@
 "Clear" = "Clear";
 "⚠️ Reversed (Pseudoscopic)" = "⚠️ Reversed (Pseudoscopic)";
 "⚠️ Reversed (Auto-Swapped)" = "⚠️ Reversed (Swapped)";
+"⚠️ Mismatched (Invalid Stereo)" = "⚠️ Stereo Mismatch (Invalid Pair)";
+"Stereo Mismatch Warning Banner" = "⚠️ Stereo Mismatch: Foreground subjects do not match or appear to be different takes (Invalid pair)";
 "Floating Window" = "Floating Window";
 "Recommended" = "Recommended";
 "Not Needed" = "Not Needed";
@@ -301,3 +303,33 @@
 "Adjust settings in inspector, then click Execute Batch." = "Adjust settings in inspector, then click Execute Batch.";
 "No stereo images found in this folder." = "No stereo images found in this folder.";
 "%lld items" = "%lld items";
+
+/* Single-Eye 3D Conversion & Stereo Salvage */
+"Single-Eye 3D Conversion Active" = "Single-Eye 3D Conversion Active";
+"Reconstructed from %@ image using AI depth estimation." = "Reconstructed from %@ image using AI depth estimation.";
+"Stereo Mismatch Detected" = "Stereo Mismatch Detected";
+"Left and right images appear mismatched or from different shots." = "Left and right images appear mismatched or from different shots.";
+"Unilateral Damage Detected" = "Unilateral Damage Detected";
+"Left image has severe damage/defects." = "Left image has severe damage or defects.";
+"Right image has severe damage/defects." = "Right image has severe damage or defects.";
+"Excessive Stereo Baseline" = "Excessive Stereo Baseline";
+"Max disparity is %.1f%%, exceeding comfortable viewing limit." = "Max disparity is %.1f%%, exceeding comfortable viewing limit.";
+"Select source image for 3D conversion:" = "Select source image for 3D conversion:";
+"✨ Convert Left (Recommended)" = "✨ Convert Left (Recommended)";
+"Convert Left" = "Convert Left";
+"✨ Convert Right (Recommended)" = "✨ Convert Right (Recommended)";
+"Convert Right" = "Convert Right";
+"Defect: %.1f%% | Sharp: %.0f" = "Defect: %.1f%% | Sharp: %.0f";
+"Revert to Original Pair" = "Revert to Original Pair";
+"Use %@ Instead" = "Use %@ Instead";
+"Left" = "Left";
+"Right" = "Right";
+"Virtual Baseline (%)" = "Virtual Baseline (%)";
+"Depth Gamma" = "Depth Gamma";
+"Estimating Depth & Generating 3D Stereo Pair..." = "Estimating depth & generating 3D stereo pair...";
+"Depth estimation failed." = "Depth estimation failed.";
+"Single-eye 3D conversion complete." = "Single-eye 3D conversion complete.";
+"3D Conversion Done (%@) | Disp: %.1f%% | %.0f ms" = "3D Conversion Done (%@) | Disp: %.1f%% | %.0f ms";
+"Restored to original stereo pair." = "Restored to original stereo pair.";
+"⚠️ Mismatched (Invalid Stereo)" = "⚠️ Mismatched (Invalid Stereo)";
+

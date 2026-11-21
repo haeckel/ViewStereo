@@ -91,6 +91,8 @@
 "Clear" = "問題なし";
 "⚠️ Reversed (Pseudoscopic)" = "⚠️ 左右逆の疑い（偽視）";
 "⚠️ Reversed (Auto-Swapped)" = "⚠️ 左右逆（スワップ済）";
+"⚠️ Mismatched (Invalid Stereo)" = "⚠️ ステレオ不成立 (左右不一致)";
+"Stereo Mismatch Warning Banner" = "⚠️ ステレオ不成立: 左右で手前の被写体が一致しないか、別テイクのエラーカードの可能性があります";
 "Floating Window" = "フローティングウィンドウ";
 "Recommended" = "推奨";
 "Not Needed" = "不要";
@@ -308,3 +310,33 @@
 "Adjust settings in inspector, then click Execute Batch." = "右パレットで各種設定を行い、準備ができたらバッチ実行をクリック";
 "No stereo images found in this folder." = "このフォルダに対象のステレオ画像が見つかりませんでした。";
 "%lld items" = "%lld 件";
+
+/* Single-Eye 3D Conversion & Stereo Salvage */
+"Single-Eye 3D Conversion Active" = "片側画像からの 3D 変換を適用中";
+"Reconstructed from %@ image using AI depth estimation." = "%@画像から AI 深度推定により 3D ステレオペアを再構築しました。";
+"Stereo Mismatch Detected" = "ステレオ貼り間違いの疑い";
+"Left and right images appear mismatched or from different shots." = "左右で画像構図が一致しないか、別テイクの貼り間違いの可能性があります。";
+"Unilateral Damage Detected" = "片側画像の損傷を検知";
+"Left image has severe damage/defects." = "左画像に大きな欠損・剥離・劣化が検知されました。";
+"Right image has severe damage/defects." = "右画像に大きな欠損・剥離・劣化が検知されました。";
+"Excessive Stereo Baseline" = "ステレオベース過大 (現代機器不適)";
+"Max disparity is %.1f%%, exceeding comfortable viewing limit." = "最大視差が %.1f%% に達しており、VRや空間写真鑑賞で眼精疲労を生じる恐れがあります。";
+"Select source image for 3D conversion:" = "3D 変換に使用する元画像を選択:";
+"✨ Convert Left (Recommended)" = "✨ 左画像で 3D変換 (推奨)";
+"Convert Left" = "左画像で 3D変換";
+"✨ Convert Right (Recommended)" = "✨ 右画像で 3D変換 (推奨)";
+"Convert Right" = "右画像で 3D変換";
+"Defect: %.1f%% | Sharp: %.0f" = "欠損: %.1f%% | 鮮鋭度: %.0f";
+"Revert to Original Pair" = "Original L+R に戻す";
+"Use %@ Instead" = "%@画像で再変換";
+"Left" = "左";
+"Right" = "右";
+"Virtual Baseline (%)" = "仮想視差ベース (%)";
+"Depth Gamma" = "深度ガンマ";
+"Estimating Depth & Generating 3D Stereo Pair..." = "AI 深度推定 ＆ 3D ステレオペアを生成中...";
+"Depth estimation failed." = "深度推定に失敗しました。";
+"Single-eye 3D conversion complete." = "片側画像からの 3D 変換が完了しました。";
+"3D Conversion Done (%@) | Disp: %.1f%% | %.0f ms" = "3D変換完了 (%@) | 視差: %.1f%% | %.0f ms";
+"Restored to original stereo pair." = "オリジナルの左右ステレオペアに復元しました。";
+"⚠️ Mismatched (Invalid Stereo)" = "⚠️ 貼り間違い (ステレオ不成立)";
+

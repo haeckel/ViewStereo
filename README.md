@@ -1,6 +1,6 @@
 # ViewStereo 🎞️✨
 
-[![Version](https://img.shields.io/badge/version-0.1.5-brightgreen.svg)](https://viewstereo.p-media.jp/)
+[![Version](https://img.shields.io/badge/version-0.1.6-brightgreen.svg)](https://viewstereo.p-media.jp/)
 [![Status](https://img.shields.io/badge/status-Early%20Development-amber.svg)](#development-status)
 [![Platform](https://img.shields.io/badge/platform-macOS%2014.0+-lightgrey.svg)](https://apple.co/macos)
 [![Technology](https://img.shields.io/badge/tech-Card%20Segmentation%20%7C%207--DoF%20Homography%20%7C%20Stereo%20Window%20%7C%20Digital%20Remount-orange.svg)](https://viewstereo.p-media.jp/)
@@ -17,7 +17,13 @@ Designed as the archival restoration and geometric alignment companion to **Spla
 
 ## 🚀 Key Features
 
-### 🔄 v0.1.5 New: Pseudoscopic Stereo Auto-Swap & Enhanced SAM 2.1 Tiny
+### 🛟 v0.1.6 New: Single-Eye Depth 3D Salvage & Anomaly Diagnostics
+- **Automated Stereoscopic Anomaly Diagnostics**: Automatically diagnoses mismatched pairs (different takes/misplaced prints), unilateral damage/scratches, and excessive stereoscopic disparity during 7-DoF alignment.
+- **Human-in-the-Loop Single-Eye Depth 3D Salvage**: Provides 1-click action buttons directly under the status alert banner to convert the undamaged left or right image into a pristine AI Depth 3D stereo pair, complete with smart recommendation hints (✨ Recommended) based on defect rates and sharpness scores.
+- **Stereo Source Controls in Stereo Window (⌥⌘2)**: Adds persistent Stereo Source selection (Original L+R / Left Depth 3D / Right Depth 3D), virtual stereo base slider (0.5% - 6.0%), and depth curve gamma controls for real-time 60fps adjustment.
+- **Top-Edge Gradient Protection & Overcrop Recovery**: Enhances `StereoCardSegmenter` with sky/mountain gradient safety guards and top-border recovery to eliminate edge clipping on bright horizon prints.
+
+### 🔄 v0.1.5: Pseudoscopic Stereo Auto-Swap & Enhanced SAM 2.1 Tiny
 - **Intelligent Pseudoscopic (Reversed L/R) Detection & Auto-Swap**: Automatically detects reversed stereoscopic pairs (cross-eyed cards, mislabeled scans, inverted depth cues) upon ingestion. Safely auto-swaps to orthoscopic stereo with instant telemetry alerts (`⚠️ Reversed (Swapped)` / `⚠️ Reversed (Pseudoscopic)`), togglable in Preferences.
 - **Dynamic Stereo Window Recalculation on Manual Swap (`X`)**: Instantly recomputes foreground disparities and optimal window positioning when toggling `X` to eliminate window violation risks caused by disparity sign reversal.
 - **Refined SAM 2.1 Tiny Upper-Boundary Prompting**: Elevated the upper prompt point to `bh * 0.10` and implemented U-Net expected-height arbitration to prevent clipped top borders and false exclusions.

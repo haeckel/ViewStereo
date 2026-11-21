@@ -4,6 +4,34 @@ ViewStereo は現在開発中であり、特に開発初期段階のアプリケ
 
 ==================================================
 
+ViewStereo v0.1.6 リリースノート / Release Notes (2026.11.22)
+
+==================================================
+【ViewStereo v0.1.6 新機能・改善点 / New Features & Improvements】
+==================================================
+- ステレオ異常自動診断 ＆ ユーザー主導型片側救済（Single-Eye Depth 3D Salvage）:
+  - 貼り間違い・別テイク・ステレオ不成立（stereoMismatch）、片側大面積損傷・欠損（unilateralDamage）、ステレオベース過大（excessiveDisparity）の3大異常を7-DoF整準時に自動診断。
+  - ステータスバナー直下に「片側選択＆Depth 3D変換アクションバー」を新設。損傷率・鮮鋭度スコアから推奨側（✨ 推奨）を提示しつつ、ユーザーの審美眼で左または右をワンクリック選択して AI Depth 3D（2D-3D立体視）に変換・救済可能に。
+  - ステレオウィンドウ（⌥⌘2）パネル内に常設の「立体ソース（オリジナル L+R / 左眼 Depth 3D / 右眼 Depth 3D）」切替、仮想ステレオベーススライダー（0.5%〜6.0%、初期値3.0%）、深度カーブ/ガンマ（0.40〜2.20）の微調整コントロールを搭載。
+- 台紙セグメンテーション（StereoCardSegmenter）の更なる高精度化:
+  - 水平トリム後の最終段階での写真上端（空・天井等）再回復（recoverOvercroppedTopEdgeRGB）を強化。
+  - 上端過剰クロップ防止セーフティガードを新設し、富士山頂や青空などのグラデーション領域が台紙と誤認されて削られるのを防止。
+  - 直角プリントやアーチなしの場合の外接矩形切り出し処理を最適化し、最大内接矩形による上部余分トリムを排除。
+
+==================================================
+[v0.1.6 New Features & Highlights]
+==================================================
+- Automated Stereoscopic Anomaly Diagnostics & Single-Eye Depth 3D Salvage:
+  - Automatically identifies mismatched pairs, unilateral damage/scratches, and excessive stereoscopic disparity during 7-DoF alignment.
+  - Interactive Action Bar directly below the status banner enables 1-click conversion into AI Depth 3D from either the pristine left or right image, complete with intelligent recommendations based on defect percentage and sharpness scores.
+  - Added persistent Stereo Source switcher (Original L+R / Left Depth 3D / Right Depth 3D) within the Stereo Window (⌥⌘2) panel, featuring a virtual stereo base slider (0.5% - 6.0%) and depth gamma curve controls for real-time 60fps adjustment.
+- Enhanced Stereo Card Segmentation Engine:
+  - Strengthened top-edge recovery (recoverOvercroppedTopEdgeRGB) after horizontal trim passes.
+  - Implemented top-border gradient safety guards to prevent mountain peaks and open sky regions from being falsely clipped as card mounts.
+  - Optimized rectangular framing to preserve full outer bounding boxes on un-arched prints without over-trimming via inner inscribed bounds.
+
+==================================================
+
 ViewStereo v0.1.5 リリースノート / Release Notes (2026.11.21)
 
 ==================================================

@@ -16,6 +16,7 @@
 		SW0100070000000000000001 /* StereoCore in Frameworks */ = {isa = PBXBuildFile; productRef = SW0800020000000000000001 /* StereoCore */; };
 		SW0100080000000000000001 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = SW0200060000000000000001 /* Localizable.strings */; };
 		SW0100090000000000000001 /* StereoCardSegmenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = SW0200090000000000000001 /* StereoCardSegmenter.swift */; };
+		SW0100200000000000000001 /* ViewStereoDepthSynthesizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = SW0200200000000000000001 /* ViewStereoDepthSynthesizer.swift */; };
 		SW0100100000000000000001 /* StereoCardSeg.mlmodelc in Resources */ = {isa = PBXBuildFile; fileRef = SW0200100000000000000001 /* StereoCardSeg.mlmodelc */; };
 		SW0100130000000000000001 /* SAM2_1TinyImageEncoderFLOAT16.mlmodelc in Resources */ = {isa = PBXBuildFile; fileRef = SW0200130000000000000001 /* SAM2_1TinyImageEncoderFLOAT16.mlmodelc */; };
 		SW0100140000000000000001 /* SAM2_1TinyPromptEncoderFLOAT16.mlmodelc in Resources */ = {isa = PBXBuildFile; fileRef = SW0200140000000000000001 /* SAM2_1TinyPromptEncoderFLOAT16.mlmodelc */; };
@@ -36,6 +37,7 @@
 		SW0200070000000000000001 /* ja */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ja; path = ja.lproj/Localizable.strings; sourceTree = "<group>"; };
 		SW0200080000000000000001 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
 		SW0200090000000000000001 /* StereoCardSegmenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StereoCardSegmenter.swift; sourceTree = "<group>"; };
+		SW0200200000000000000001 /* ViewStereoDepthSynthesizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewStereoDepthSynthesizer.swift; sourceTree = "<group>"; };
 		SW0200100000000000000001 /* StereoCardSeg.mlmodelc */ = {isa = PBXFileReference; lastKnownFileType = folder; path = StereoCardSeg.mlmodelc; sourceTree = "<group>"; };
 		SW0200130000000000000001 /* SAM2_1TinyImageEncoderFLOAT16.mlmodelc */ = {isa = PBXFileReference; lastKnownFileType = folder; path = SAM2_1TinyImageEncoderFLOAT16.mlmodelc; sourceTree = "<group>"; };
 		SW0200140000000000000001 /* SAM2_1TinyPromptEncoderFLOAT16.mlmodelc */ = {isa = PBXFileReference; lastKnownFileType = folder; path = SAM2_1TinyPromptEncoderFLOAT16.mlmodelc; sourceTree = "<group>"; };
@@ -99,6 +101,7 @@
 			children = (
 				SW0200020000000000000001 /* ViewStereoModels.swift */,
 				SW0200090000000000000001 /* StereoCardSegmenter.swift */,
+				SW0200200000000000000001 /* ViewStereoDepthSynthesizer.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -228,6 +231,7 @@
 				SW0100020000000000000001 /* ViewStereoModels.swift in Sources */,
 				SW0100030000000000000001 /* ContentView.swift in Sources */,
 				SW0100090000000000000001 /* StereoCardSegmenter.swift in Sources */,
+				SW0100200000000000000001 /* ViewStereoDepthSynthesizer.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -288,7 +292,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.1.5;
+				MARKETING_VERSION = 0.1.6;
 				PRODUCT_BUNDLE_IDENTIFIER = jp.p-media.ViewStereo;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -311,7 +315,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.1.5;
+				MARKETING_VERSION = 0.1.6;
 				PRODUCT_BUNDLE_IDENTIFIER = jp.p-media.ViewStereo;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

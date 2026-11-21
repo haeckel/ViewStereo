@@ -1209,6 +1209,9 @@ struct ContentView: View {
                     label: "Window",
                     value: {
                         guard vm.isAligned else { return "—" }
+                        if vm.isStereoMismatchSuspected {
+                            return String(localized: "⚠️ Mismatched (Invalid Stereo)")
+                        }
                         if vm.isPseudoscopicSuspected {
                             return String(localized: vm.isSwapped ? "⚠️ Reversed (Auto-Swapped)" : "⚠️ Reversed (Pseudoscopic)")
                         }
@@ -1216,12 +1219,120 @@ struct ContentView: View {
                     }(),
                     highlight: {
                         guard vm.isAligned else { return .secondary }
+                        if vm.isStereoMismatchSuspected {
+                            return .palestineRed
+                        }
                         if vm.isPseudoscopicSuspected {
                             return vm.isSwapped ? .brightAmber : .palestineRed
                         }
                         return vm.hasWindowViolationRisk ? .brightAmber : .brightTeal
                     }()
                 )
+
+                if let advisory = vm.salvageAdvisory, advisory.shouldShowSalvagePrompt || vm.stereoReconstructionMode.isSingleEyeDepth {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(alignment: .top, spacing: 6) {
+                            Image(systemName: vm.stereoReconstructionMode.isSingleEyeDepth ? "sparkles" : "exclamationmark.triangle.fill")
+                                .font(.system(size: 12))
+                                .foregroundColor(vm.stereoReconstructionMode.isSingleEyeDepth ? .brightTeal : .brightAmber)
+                            
+                            VStack(alignment: .leading, spacing: 3) {
+                                if vm.stereoReconstructionMode.isSingleEyeDepth {
+                                    Text(String(localized: "Single-Eye 3D Conversion Active"))
+                                        .font(.system(size: 11, weight: .bold))
+                                        .foregroundColor(.white)
+                                    Text(String(format: String(localized: "Reconstructed from %@ image using AI depth estimation."), vm.stereoReconstructionMode.activeSide == .left ? String(localized: "Left") : String(localized: "Right")))
+                                        .font(.system(size: 10))
+                                        .foregroundColor(.white.opacity(0.85))
+                                } else {
+                                    Text(advisory.isMismatchSuspected ? String(localized: "Stereo Mismatch Detected") : (advisory.isUnilateralDamageSuspected ? String(localized: "Unilateral Damage Detected") : String(localized: "Excessive Stereo Baseline")))
+                                        .font(.system(size: 11, weight: .bold))
+                                        .foregroundColor(.white)
+                                    
+                                    if advisory.isMismatchSuspected {
+                                        Text(String(localized: "Left and right images appear mismatched or from different shots."))
+                                            .font(.system(size: 10))
+                                            .foregroundColor(.white.opacity(0.85))
+                                    } else if advisory.isUnilateralDamageSuspected {
+                                        let damagedText = advisory.damagedSide == .left ? String(localized: "Left image has severe damage/defects.") : String(localized: "Right image has severe damage/defects.")
+                                        Text(damagedText)
+                                            .font(.system(size: 10))
+                                            .foregroundColor(.white.opacity(0.85))
+                                    } else if advisory.isExcessiveDisparity {
+                                        Text(String(format: String(localized: "Max disparity is %.1f%%, exceeding comfortable viewing limit."), advisory.disparityPercent))
+                                            .font(.system(size: 10))
+                                            .foregroundColor(.white.opacity(0.85))
+                                    }
+                                }
+                            }
+                        }
+
+                        // ユーザー判断によるアクションボタン群
+                        if vm.stereoReconstructionMode.isSingleEyeDepth {
+                            HStack(spacing: 8) {
+                                Button(action: {
+                                    vm.revertToOriginalStereoPair()
+                                }) {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "arrow.uturn.backward")
+                                        Text(String(localized: "Revert to Original Pair"))
+                                    }
+                                    .font(.system(size: 11, weight: .medium))
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 5)
+                                }
+                                .buttonStyle(.bordered)
+                                .tint(.secondary)
+
+                                let otherSide: StereoSingleEyeSide = (vm.stereoReconstructionMode.activeSide == .left) ? .right : .left
+                                Button(action: {
+                                    vm.convertSingleEyeToDepth3D(side: otherSide)
+                                }) {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "arrow.triangle.2.circlepath")
+                                        Text(String(format: String(localized: "Use %@ Instead"), otherSide == .left ? String(localized: "Left") : String(localized: "Right")))
+                                    }
+                                    .font(.system(size: 11, weight: .medium))
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 5)
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .tint(.brightTeal.opacity(0.8))
+                            }
+                        } else {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(String(localized: "Select source image for 3D conversion:"))
+                                    .font(.system(size: 9.5, weight: .medium))
+                                    .foregroundColor(.white.opacity(0.75))
+
+                                HStack(spacing: 8) {
+                                    SalvageConversionButton(
+                                        side: .left,
+                                        isRecommended: advisory.suggestedSide == .left,
+                                        defectPercent: advisory.leftDefectPercent,
+                                        sharpnessScore: advisory.leftSharpnessScore,
+                                        action: { vm.convertSingleEyeToDepth3D(side: .left) }
+                                    )
+
+                                    SalvageConversionButton(
+                                        side: .right,
+                                        isRecommended: advisory.suggestedSide == .right,
+                                        defectPercent: advisory.rightDefectPercent,
+                                        sharpnessScore: advisory.rightSharpnessScore,
+                                        action: { vm.convertSingleEyeToDepth3D(side: .right) }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    .padding(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background((vm.stereoReconstructionMode.isSingleEyeDepth ? Color.brightTeal : Color.brightAmber).opacity(0.18), in: RoundedRectangle(cornerRadius: 6))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .strokeBorder((vm.stereoReconstructionMode.isSingleEyeDepth ? Color.brightTeal : Color.brightAmber).opacity(0.45), lineWidth: 1)
+                    )
+                }
             }
             .padding(10)
             .background(Color.black.opacity(0.25), in: RoundedRectangle(cornerRadius: 8))
@@ -1240,7 +1351,45 @@ struct ContentView: View {
             isExpanded: $vm.isWindowSectionExpanded
         ) {
             // 3点セット: スライダー + ResetButton + NumericInput
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 8) {
+                if vm.stereoReconstructionMode.isSingleEyeDepth {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text("Virtual Baseline (%)")
+                                .appSystemFont(size: 12, weight: .semibold)
+                            Spacer()
+                            ResetButton(isModified: abs(vm.virtualDepthBasePercent - 3.0) > 0.05) {
+                                vm.virtualDepthBasePercent = 3.0
+                            }
+                            NumericInput(
+                                value: $vm.virtualDepthBasePercent,
+                                range: 0.5...6.0,
+                                format: "%.1f"
+                            )
+                        }
+                        Slider(value: $vm.virtualDepthBasePercent, in: 0.5...6.0)
+                            .tint(.brightTeal)
+
+                        HStack {
+                            Text("Depth Gamma")
+                                .appSystemFont(size: 12, weight: .semibold)
+                            Spacer()
+                            ResetButton(isModified: abs(vm.depthGamma - 1.0) > 0.05) {
+                                vm.depthGamma = 1.0
+                            }
+                            NumericInput(
+                                value: $vm.depthGamma,
+                                range: 0.4...2.2,
+                                format: "%.2f"
+                            )
+                        }
+                        Slider(value: $vm.depthGamma, in: 0.4...2.2)
+                            .tint(.brightTeal)
+                    }
+                    .padding(.bottom, 4)
+                    Divider().opacity(0.3)
+                }
+
                 HStack {
                     Text("Horizontal Shift (px)")
                         .appSystemFont(size: 12, weight: .semibold)
@@ -1310,43 +1459,41 @@ struct ContentView: View {
                     .labelsHidden()
                 }
 
-                if vm.cardMountPreset != .originalRemount || !vm.hasOriginalCardMount {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Card Size (7-inch Standard)")
+                        .appSystemFont(size: 11, weight: .semibold)
+                        .foregroundColor(.secondary)
+                    Picker("Card Size", selection: $vm.cardSizeSpec) {
+                        ForEach(StereoCardSizeSpec.allCases) { spec in
+                            Text(LocalizedStringKey(spec.rawValue)).tag(spec)
+                        }
+                    }
+                    .labelsHidden()
+                }
+
+                HStack(spacing: 8) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Card Size (7-inch Standard)")
+                        Text("Print Cut")
                             .appSystemFont(size: 11, weight: .semibold)
                             .foregroundColor(.secondary)
-                        Picker("Card Size", selection: $vm.cardSizeSpec) {
-                            ForEach(StereoCardSizeSpec.allCases) { spec in
-                                Text(LocalizedStringKey(spec.rawValue)).tag(spec)
+                        Picker("Print Cut", selection: $vm.cardPrintCutStyle) {
+                            ForEach(StereoCardPrintCutStyle.allCases) { cut in
+                                Text(LocalizedStringKey(cut.rawValue)).tag(cut)
                             }
                         }
                         .labelsHidden()
                     }
 
-                    HStack(spacing: 8) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Print Cut")
-                                .appSystemFont(size: 11, weight: .semibold)
-                                .foregroundColor(.secondary)
-                            Picker("Print Cut", selection: $vm.cardPrintCutStyle) {
-                                ForEach(StereoCardPrintCutStyle.allCases) { cut in
-                                    Text(LocalizedStringKey(cut.rawValue)).tag(cut)
-                                }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Center Division")
+                            .appSystemFont(size: 11, weight: .semibold)
+                            .foregroundColor(.secondary)
+                        Picker("Center Division", selection: $vm.cardCenterGapStyle) {
+                            ForEach(StereoCardCenterGapStyle.allCases) { gap in
+                                Text(LocalizedStringKey(gap.rawValue)).tag(gap)
                             }
-                            .labelsHidden()
                         }
-
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Center Division")
-                                .appSystemFont(size: 11, weight: .semibold)
-                                .foregroundColor(.secondary)
-                            Picker("Center Division", selection: $vm.cardCenterGapStyle) {
-                                ForEach(StereoCardCenterGapStyle.allCases) { gap in
-                                    Text(LocalizedStringKey(gap.rawValue)).tag(gap)
-                                }
-                            }
-                            .labelsHidden()
-                        }
+                        .labelsHidden()
                     }
                 }
 
@@ -2333,5 +2480,54 @@ private struct InspectorAccordionSection<Content: View>: View {
             RoundedRectangle(cornerRadius: 10)
                 .stroke(borderColor, lineWidth: 1)
         )
+    }
+}
+
+private struct SalvageConversionButton: View {
+    let side: StereoSingleEyeSide
+    let isRecommended: Bool
+    let defectPercent: Double
+    let sharpnessScore: Double
+    let action: () -> Void
+
+    var body: some View {
+        if isRecommended {
+            buttonContent
+                .buttonStyle(.borderedProminent)
+                .tint(.brightTeal)
+        } else {
+            buttonContent
+                .buttonStyle(.bordered)
+                .tint(.secondary)
+        }
+    }
+
+    private var buttonContent: some View {
+        Button(action: action) {
+            VStack(spacing: 2) {
+                HStack(spacing: 3) {
+                    if isRecommended {
+                        Image(systemName: "sparkles")
+                    }
+                    Text(buttonTitle)
+                }
+                .font(.system(size: 10.5, weight: isRecommended ? .bold : .medium))
+
+                Text(String(format: String(localized: "Defect: %.1f%% | Sharp: %.0f"), defectPercent, sharpnessScore))
+                    .font(.system(size: 8.5))
+                    .opacity(0.8)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 5)
+        }
+    }
+
+    private var buttonTitle: String {
+        switch side {
+        case .left:
+            return isRecommended ? String(localized: "✨ Convert Left (Recommended)") : String(localized: "Convert Left")
+        case .right:
+            return isRecommended ? String(localized: "✨ Convert Right (Recommended)") : String(localized: "Convert Right")
+        }
     }
 }
