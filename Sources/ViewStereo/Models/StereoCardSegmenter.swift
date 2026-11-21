@@ -385,7 +385,6 @@ final class StereoCardSegmenter: @unchecked Sendable {
                   var roughBoxR = robustBoundingBox(mask: maskR, w: W, h: H) else {
                 return nil
             }
-
             // 外周ラベル枠（P. Rossier / Keystone 等）の垂直境界線トリミング + 台紙境界エッジへのスナップ + 帯域検証付き左右上下Y範囲同期
             trimOuterLabelBorders(rgb: rgb, srcW: width, srcH: height, boxL: &roughBoxL, boxR: &roughBoxR, maskW: W, maskH: H)
             refineVerticalBoundsInMask(rgb: rgb, srcW: width, srcH: height, boxL: &roughBoxL, boxR: &roughBoxR, maskW: W, maskH: H)
@@ -799,7 +798,7 @@ final class StereoCardSegmenter: @unchecked Sendable {
                     // 正ポイント (label = 1.0, 最大 3 点)
                     let posCandidates = [
                         (cx, cy),
-                        (cx, box.minY + Int(Double(bh) * 0.30)),
+                        (cx, box.minY + max(2, Int(Double(bh) * 0.10))),
                         (cx, box.minY + Int(Double(bh) * 0.72)),
                     ]
                     var seenY: [Int] = []
@@ -1021,7 +1020,16 @@ final class StereoCardSegmenter: @unchecked Sendable {
                 if abs(scoreDiff) >= 0.03 {
                     trustLeft = scoreDiff > 0
                 } else {
-                    trustLeft = hL <= hR
+                    // スコアが同等の場合、U-Netのプロンプト高さ（expectedH）に近い方を優先する（上端が削れて小さくなった誤検出を優先しない）
+                    let expectedHL = Double(boxL.maxY - boxL.minY + 1) / Double(refH) * Double(validH)
+                    let expectedHR = Double(boxR.maxY - boxR.minY + 1) / Double(refH) * Double(validH)
+                    let diffExpectedL = abs(Double(hL) - expectedHL)
+                    let diffExpectedR = abs(Double(hR) - expectedHR)
+                    if abs(diffExpectedL - diffExpectedR) >= 2.0 {
+                        trustLeft = diffExpectedL < diffExpectedR
+                    } else {
+                        trustLeft = hL <= hR
+                    }
                 }
                 let trust = trustLeft ? resL : resR
                 let bad = trustLeft ? resR : resL

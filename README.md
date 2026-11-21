@@ -1,6 +1,6 @@
 # ViewStereo 🎞️✨
 
-[![Version](https://img.shields.io/badge/version-0.1.4-brightgreen.svg)](https://viewstereo.p-media.jp/)
+[![Version](https://img.shields.io/badge/version-0.1.5-brightgreen.svg)](https://viewstereo.p-media.jp/)
 [![Status](https://img.shields.io/badge/status-Early%20Development-amber.svg)](#development-status)
 [![Platform](https://img.shields.io/badge/platform-macOS%2014.0+-lightgrey.svg)](https://apple.co/macos)
 [![Technology](https://img.shields.io/badge/tech-Card%20Segmentation%20%7C%207--DoF%20Homography%20%7C%20Stereo%20Window%20%7C%20Digital%20Remount-orange.svg)](https://viewstereo.p-media.jp/)
@@ -17,7 +17,13 @@ Designed as the archival restoration and geometric alignment companion to **Spla
 
 ## 🚀 Key Features
 
-### 🎛️ v0.1.4 New: Workflow Palette Architecture & Corner Segmentation Engine
+### 🔄 v0.1.5 New: Pseudoscopic Stereo Auto-Swap & Enhanced SAM 2.1 Tiny
+- **Intelligent Pseudoscopic (Reversed L/R) Detection & Auto-Swap**: Automatically detects reversed stereoscopic pairs (cross-eyed cards, mislabeled scans, inverted depth cues) upon ingestion. Safely auto-swaps to orthoscopic stereo with instant telemetry alerts (`⚠️ Reversed (Swapped)` / `⚠️ Reversed (Pseudoscopic)`), togglable in Preferences.
+- **Dynamic Stereo Window Recalculation on Manual Swap (`X`)**: Instantly recomputes foreground disparities and optimal window positioning when toggling `X` to eliminate window violation risks caused by disparity sign reversal.
+- **Refined SAM 2.1 Tiny Upper-Boundary Prompting**: Elevated the upper prompt point to `bh * 0.10` and implemented U-Net expected-height arbitration to prevent clipped top borders and false exclusions.
+- **Batch Processing State Isolation**: Guarantees independent auto-swap evaluation per image without leaking swap state across batch runs.
+
+### 🎛️ v0.1.4: Workflow Palette Architecture & Corner Segmentation Engine
 - **Optimized Right Inspector Hierarchy**: Placed **Basic Settings (Auto Recipe)** at the very top of the inspector panel. By default on startup / standby drop mode, only Basic Settings is expanded while downstream adjustment panels remain collapsed, establishing a clean, logical workflow order.
 - **Top-Down Shortcut & Toolbar Alignment**: Keyboard shortcuts (⌥⌘1: Recipe, ⌥⌘2: Window, ⌥⌘3: Mount, ⌥⌘4: Restore, ⌥⌘5: Colorize, ⌥⌘6: Batch) and toolbar icons now strictly mirror the vertical palette structure.
 - **Multi-Corner Independent Geometric Measurement**: Upgraded `StereoCardSegmenter` to independently measure and determine square, rounded, and arched corners from background corner samples (supporting white/black backings), with full-healing protection for notch numbering and historic imprints.

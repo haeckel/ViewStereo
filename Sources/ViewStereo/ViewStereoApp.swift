@@ -9,7 +9,7 @@ extension AboutBrandInfo {
         badgeLetter: "V",
         subtitleKey: nil,
         engineTagline: "19th Century Stereoview Restoration & Intelligent Stereo Window Studio",
-        fallbackVersion: "0.1.4",
+        fallbackVersion: "0.1.5",
         fallbackBuild: "1",
         websiteURL: URL(string: "https://viewstereo.p-media.jp/"),
         websiteLabel: "viewstereo.p-media.jp",
@@ -206,12 +206,16 @@ struct AppSettingsView: View {
 
     var body: some View {
         Form {
+            Section("Auto Correction") {
+                Toggle("Auto-Swap Reversed Stereo (Pseudoscopic)", isOn: $settings.autoSwapPseudoscopic)
+            }
+
             Section("Appearance & Accessibility") {
                 Toggle("Large Text Mode (1.2x UI Scale)", isOn: $settings.useLargeTextMode)
             }
         }
         .formStyle(.grouped)
-        .frame(width: 420, height: 180)
+        .frame(width: 440, height: 230)
         .preferredColorScheme(.dark)
     }
 }

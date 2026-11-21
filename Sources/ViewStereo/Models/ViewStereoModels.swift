@@ -196,6 +196,12 @@ struct StereoBatchItem: Identifiable, Sendable {
 final class ViewStereoSettings: ObservableObject {
     static let shared = ViewStereoSettings()
 
+    @Published var autoSwapPseudoscopic: Bool = UserDefaults.standard.object(forKey: "VS.autoSwapPseudoscopic") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(autoSwapPseudoscopic, forKey: "VS.autoSwapPseudoscopic")
+        }
+    }
+
     @Published var useLargeTextMode: Bool = false {
         didSet {
             StudioAccessibilityState.shared.useLargeTextMode = useLargeTextMode
@@ -231,6 +237,7 @@ final class ViewStereoViewModel: ObservableObject {
             }
         }
     }
+    @Published var isPseudoscopicSuspected: Bool = false
     private var isSyncingLayoutAndMode = false
     @Published var displayMode: StereoDisplayMode = .stereoviewCard {
         didSet {
@@ -770,6 +777,7 @@ final class ViewStereoViewModel: ObservableObject {
         requiresFloatingWindow = false
         maxDisparityPercent = 0.0
         lastFullResShiftX = 0.0
+        isPseudoscopicSuspected = false
 
         isSwapped = false
         resetVintageRestoration(renderPreview: false)
@@ -1267,6 +1275,8 @@ final class ViewStereoViewModel: ObservableObject {
     func swapLeftRight() {
         guard !isProcessing else { return }
         isSwapped.toggle()
+        // 左右入れ替えで視差の符号が反転するため、ウィンドウ最適シフトを再計算してバイオレーションを防ぐ
+        if isAligned { recalculateOptimalWindow() }
         statusMessage = isSwapped ? "Swapped Left/Right" : "Restored Original Left/Right"
     }
 
@@ -1293,6 +1303,7 @@ final class ViewStereoViewModel: ObservableObject {
         maxDisparityPercent = 0
         verticalRMSE = 0
         inlierCount = 0
+        isPseudoscopicSuspected = false
         statusMessage = "Reset to original images."
         renderDisplayPreview()
     }
@@ -1320,6 +1331,7 @@ final class ViewStereoViewModel: ObservableObject {
         let windowDecision: StereoWindowDecision
         let elapsedMs: Double
         let dispRangePct: Double
+        let isPseudoscopicSuspected: Bool
     }
 
     private enum AlignmentPipelineError: Error {
@@ -1412,6 +1424,10 @@ final class ViewStereoViewModel: ObservableObject {
         hasWindowViolationRisk = out.windowDecision.hasWindowViolationRisk
         requiresFloatingWindow = out.windowDecision.requiresFloatingWindow
         maxDisparityPercent = out.dispRangePct
+        isPseudoscopicSuspected = out.isPseudoscopicSuspected
+        if out.isPseudoscopicSuspected && ViewStereoSettings.shared.autoSwapPseudoscopic {
+            isSwapped = true
+        }
         isProcessing = false
         statusMessage = String(format: "Aligned in %.1f ms | vRMSE: %.3f px", out.elapsedMs, out.rectRes.verticalRMSEPixels)
         renderDisplayPreview()
@@ -1607,19 +1623,26 @@ final class ViewStereoViewModel: ObservableObject {
             }
         }
 
+        let isPseudoscopicSuspected = detectPseudoscopicParallax(samples: samples, height: Double(h))
+
         let winOpts = makeWindowOptimizationOptions(preserveArch: preserveArch)
-        let rawWindowDecision = IntelligentStereoWindow.solveOptimalHorizontalShift(samples: samples, imageWidth: Double(w), imageHeight: Double(h), options: winOpts)
-        // ステレオカード（preserveArch）は当時すでに職人により立体窓の奥に適正マウントされているため、
-        // 過大なシフトで写真が枠外へ飛び出したり被写体が切断・巨大ズームされるのを防ぐため、最大シフト幅を 2%（±16px程度）に制限
-        let maxArchShift = Double(w) * 0.020
-        let tx = preserveArch ? min(maxArchShift, max(-maxArchShift, rawWindowDecision.optimalShiftX)) : rawWindowDecision.optimalShiftX
-        let windowDecision = StereoWindowDecision(
-            optimalShiftX: tx,
-            minShiftedParallax: rawWindowDecision.minShiftedParallax,
-            farShiftedParallax: rawWindowDecision.farShiftedParallax,
-            hasWindowViolationRisk: rawWindowDecision.hasWindowViolationRisk,
-            requiresFloatingWindow: rawWindowDecision.requiresFloatingWindow
-        )
+        // 左右逆を自動スワップする場合、ユーザーが見る視差は符号反転 (-p) になるため、
+        // 反転視差でウィンドウ最適化を行い、実ワープ座標系のシフトは符号を戻して適用する
+        let willAutoSwap = isPseudoscopicSuspected && (UserDefaults.standard.object(forKey: "VS.autoSwapPseudoscopic") as? Bool ?? true)
+        let solveSamples = willAutoSwap
+            ? samples.map { DisparitySample(x: $0.x, y: $0.y, parallax: -$0.parallax, saliency: $0.saliency, foregroundWeight: $0.foregroundWeight) }
+            : samples
+        let solved = Self.resolveWindowDecision(samples: solveSamples, width: Double(w), height: Double(h), preserveArch: preserveArch, options: winOpts)
+        let windowDecision = willAutoSwap
+            ? StereoWindowDecision(
+                optimalShiftX: -solved.optimalShiftX,
+                minShiftedParallax: -solved.farShiftedParallax,
+                farShiftedParallax: -solved.minShiftedParallax,
+                hasWindowViolationRisk: solved.hasWindowViolationRisk,
+                requiresFloatingWindow: solved.requiresFloatingWindow
+            )
+            : solved
+        let tx = windowDecision.optimalShiftX
 
         // 5. 対称水平シフトを適用した最終行列と MAAIR 内接矩形算出
         let shiftL = HomographyGeometry.translation(dx: -0.5 * tx, dy: 0) * rectRes.homographyLeftPixel
@@ -1773,8 +1796,40 @@ final class ViewStereoViewModel: ObservableObject {
             saliencyMap: saliencyMap,
             windowDecision: windowDecision,
             elapsedMs: elapsedMs,
-            dispRangePct: max(0, dispRangePct)
+            dispRangePct: max(0, dispRangePct),
+            isPseudoscopicSuspected: isPseudoscopicSuspected
         ))
+    }
+
+    /// 視差勾配による左右逆（偽視 / Pseudoscopic）の自動検知
+    /// 通常（正視）の場合、手前（画像下部 / 近景）ほど視差 parallax (qR.x - qL.x) は負の方向に大きくなり、
+    /// 奥（画像上部 / 遠景）ほど正またはゼロに近くなる (botMed < topMed, diffBotTop < 0)。
+    /// 左右逆に貼られている場合、これが逆転して手前（画像下部）ほど視差が正になり、
+    /// Y座標（上0→下height）と Parallax に正の相関が生じる (botMed > topMed, diffBotTop >= 2.0 && corrYP >= 0.06)。
+    nonisolated static func detectPseudoscopicParallax(samples: [DisparitySample], height: Double) -> Bool {
+        guard samples.count >= 10, height > 0 else { return false }
+
+        let n = Double(samples.count)
+        let meanY = samples.reduce(0.0) { $0 + $1.y } / n
+        let meanP = samples.reduce(0.0) { $0 + $1.parallax } / n
+        var covYP = 0.0, varY = 0.0, varP = 0.0
+        for s in samples {
+            let dy = s.y - meanY
+            let dp = s.parallax - meanP
+            covYP += dy * dp
+            varY += dy * dy
+            varP += dp * dp
+        }
+        let corrYP = (varY > 0 && varP > 0) ? (covYP / sqrt(varY * varP)) : 0.0
+
+        let topPs = samples.filter { $0.y < height * 0.35 }.map(\.parallax).sorted()
+        let botPs = samples.filter { $0.y > height * 0.65 }.map(\.parallax).sorted()
+        guard topPs.count >= 3, botPs.count >= 3 else { return false }
+        let topMed = topPs[topPs.count / 2]
+        let botMed = botPs[botPs.count / 2]
+        let diffBotTop = botMed - topMed
+
+        return diffBotTop >= 2.0 && corrYP >= 0.06
     }
 
     /// Vision Saliency Subject Priority トグル変更時にウィンドウ最適値を再計算・適用
@@ -1797,12 +1852,60 @@ final class ViewStereoViewModel: ObservableObject {
         }
         lastDisparitySamples = updatedSamples
         let winOpts = Self.makeWindowOptimizationOptions(preserveArch: hasPreservedArch)
-        let decision = IntelligentStereoWindow.solveOptimalHorizontalShift(samples: updatedSamples, imageWidth: w, imageHeight: h, options: winOpts)
-        let maxArchShift = w * 0.020
-        let optTx = hasPreservedArch ? min(maxArchShift, max(-maxArchShift, decision.optimalShiftX)) : decision.optimalShiftX
+        // スワップ中はユーザーが見る視差が符号反転 (-p) になるため、反転視差で最適化し、実シフトは符号を戻す
+        let solveSamples = isSwapped
+            ? updatedSamples.map { DisparitySample(x: $0.x, y: $0.y, parallax: -$0.parallax, saliency: $0.saliency, foregroundWeight: $0.foregroundWeight) }
+            : updatedSamples
+        let solved = Self.resolveWindowDecision(samples: solveSamples, width: w, height: h, preserveArch: hasPreservedArch, options: winOpts)
+        let optTx = isSwapped ? -solved.optimalShiftX : solved.optimalShiftX
+        hasWindowViolationRisk = solved.hasWindowViolationRisk
+        requiresFloatingWindow = solved.requiresFloatingWindow
         autoOptimalShiftX = optTx
         windowShiftX = optTx
         applyManualWindowShift()
+    }
+
+    /// ウィンドウ最適シフトを解き、ステレオカード(preserveArch)用の上限クランプ後に
+    /// 端帯域のバイオレーションを再評価する。
+    /// 通常は ±2% に制限するが、制限後も端で飛び出しが残る場合は ±5% まで拡張して飛び出しを防ぐ。
+    nonisolated private static func resolveWindowDecision(
+        samples: [DisparitySample],
+        width w: Double,
+        height h: Double,
+        preserveArch: Bool,
+        options: WindowOptimizationOptions
+    ) -> StereoWindowDecision {
+        let solved = IntelligentStereoWindow.solveOptimalHorizontalShift(samples: samples, imageWidth: w, imageHeight: h, options: options)
+        let leftEdge = w * options.edgeBandRatio
+        let rightEdge = w * (1.0 - options.edgeBandRatio)
+        let topEdge = h * options.edgeBandRatio
+        let bottomEdge = h * (1.0 - options.edgeBandRatio)
+        let edgeSamples = samples.filter { $0.x <= leftEdge || $0.x >= rightEdge || $0.y <= topEdge || $0.y >= bottomEdge }
+        func violates(_ tx: Double) -> Bool {
+            edgeSamples.contains { $0.parallax + tx < -0.5 }
+        }
+
+        var tx = solved.optimalShiftX
+        if preserveArch {
+            func clamped(_ ratio: Double) -> Double {
+                let m = w * ratio
+                return min(m, max(-m, solved.optimalShiftX))
+            }
+            tx = clamped(0.020)
+            // 2% 制限でも端で飛び出しが残る場合は、ウィンドウ適正化（立体窓の確保）を優先して上限を外す（安全上限 15%）
+            if violates(tx) { tx = clamped(0.150) }
+        }
+        let delta = tx - solved.optimalShiftX
+        let violation = violates(tx)
+        let farShifted = solved.farShiftedParallax + delta
+        let exceedsComfort = farShifted > options.maxComfortRatio * w + 0.5
+        return StereoWindowDecision(
+            optimalShiftX: tx,
+            minShiftedParallax: solved.minShiftedParallax + delta,
+            farShiftedParallax: farShifted,
+            hasWindowViolationRisk: violation,
+            requiresFloatingWindow: violation || exceedsComfort
+        )
     }
 
     nonisolated private static func makeWindowOptimizationOptions(preserveArch: Bool) -> WindowOptimizationOptions {
@@ -1977,7 +2080,7 @@ final class ViewStereoViewModel: ObservableObject {
         let pw = previewWidth, ph = previewHeight
         let preserveArch = hasPreservedArch
         let rawTx = windowShiftX
-        let maxArchShift = Double(w) * 0.035
+        let maxArchShift = Double(w) * 0.150
         let tx = preserveArch ? min(maxArchShift, max(-maxArchShift, rawTx)) : rawTx
         let keepAR = keepOriginalAspectRatio
         let samples = lastDisparitySamples
@@ -2219,7 +2322,7 @@ final class ViewStereoViewModel: ObservableObject {
         let w = imageWidth, h = imageHeight
         let preserveArch = hasPreservedArch
         let rawTx = windowShiftX
-        let maxArchShift = Double(w) * 0.035
+        let maxArchShift = Double(w) * 0.150
         let tx = preserveArch ? min(maxArchShift, max(-maxArchShift, rawTx)) : rawTx
         let keepAR = keepOriginalAspectRatio
 
@@ -2698,6 +2801,7 @@ final class ViewStereoViewModel: ObservableObject {
         let layout = exportLayout
         let imgFormat = exportImageFormat
         let swapped = isSwapped
+        let autoSwapPseudo = ViewStereoSettings.shared.autoSwapPseudoscopic
         let saveReport = batchSaveReport
         let restOpts = makeVintageRestorationOptions(ignorePreviewToggle: true)
         let detailOpts = makeDetailRestorationOptions(ignorePreviewToggle: true)
@@ -2765,6 +2869,8 @@ final class ViewStereoViewModel: ObservableObject {
                             itemCardCfg.leftMarginText = rec.leftMargin
                             itemCardCfg.rightMarginText = rec.rightMargin
                         }
+                        // 左右逆(偽視)検知 + 自動修正ON の場合は、そのアイテムのみ自動スワップして書き出す
+                        let itemSwapped = (out.isPseudoscopicSuspected && autoSwapPseudo) ? true : swapped
                         let savedOK = Self.saveBatchOutput(
                             out: out,
                             item: item,
@@ -2773,7 +2879,7 @@ final class ViewStereoViewModel: ObservableObject {
                             outDir: outDir,
                             layout: layout,
                             imageFormat: imgFormat,
-                            isSwapped: swapped,
+                            isSwapped: itemSwapped,
                             frameStyle: style,
                             cardConfig: itemCardCfg,
                             mountContext: mountCtx,
@@ -2803,6 +2909,7 @@ final class ViewStereoViewModel: ObservableObject {
                     }
                     imageWidth = w
                     imageHeight = h
+                    isSwapped = swapped  // 前アイテムの自動スワップ状態を持ち越さない
                     applyAlignmentOutput(out)
                 } else {
                     failCnt += 1

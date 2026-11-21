@@ -1,10 +1,10 @@
 {
-  "latest_version": "0.1.4",
-  "release_date": "2026/11/20",
+  "latest_version": "0.1.5",
+  "release_date": "2026/11/21",
   "download_url": "https://viewstereo.p-media.jp/ViewStereo.dmg",
   "changelog": {
-    "ja": "【ViewStereo 0.1.4 アップデート】\n・右インスペクターパレットの再設計 & 初期表示の最適化：「基本設定（自動処理レシピ）」を最上段に配置。新規画面（ドロップ待機時）は基本設定のみを開き、他の微調整パネル（ウィンドウ、台紙、退色復元、AIカラー化、バッチ）はデフォルトで閉じた状態とすることで、作業フローと視認性を大幅に向上。\n・キーボードショートカット & ツールバーの完全同期：パレットの上からの並び順に合わせて、ショートカットキー（⌥⌘1: 基本設定 〜 ⌥⌘6: 複数一括処理）およびツールバーのボタン順を一新。\n・4隅丸角・アーチ・直角の高精度独立判定 & 台紙ヒーリング保護：切り出し画像の上部・下部の各コーナー背景色（白抜き・黒抜き背景を含む）から角丸・直角・アーチを独立判定し、台紙リマウント時の中央谷間印字（番号等）の保護ヒーリングに対応。",
-    "en": "[ViewStereo 0.1.4 Update]\n- Redesigned Right Inspector Hierarchy & Default Collapse Behavior: Placed \"Basic Settings (Auto Recipe)\" at the top of the inspector panel. By default on startup / standby drop mode, only Basic Settings is expanded while downstream adjustment panels remain collapsed, establishing a clean, intuitive workflow order.\n- Synchronized Shortcuts & Toolbar: Realigned keyboard shortcuts and toolbar action buttons to match the vertical palette layout: ⌥⌘1: Recipe through ⌥⌘6: Batch.\n- Multi-Corner Independent Geometric Measurement & Healing Protection: Enhanced StereoCardSegmenter to independently measure and determine square, rounded, and arched corners from background corner samples (supporting white/black backings) and improved center imprint healing protection."
+    "ja": "【ViewStereo 0.1.5 アップデート】\n・左右逆（偽視 / Pseudoscopic Stereo）の自動検出 ＆ 自動スワップ：交差法や反転スキャン素材の左右逆を読み込み時に自動検出して正しい立体視にスワップ補正。ステータス警告（⚠️ 左右逆）や手動再反転（Xキー）時のステレオウィンドウ最適シフト即時再計算に対応。\n・SAM 2.1 Tiny セグメンテーションの精度向上：上端プロンプト位置の最適化および U-Net 高度調停の導入により、写真上端の輪郭欠け誤検出を抑制。\n・環境設定画面に「自動補正」セクションを新設し、左右逆自動修正トグルを配置。",
+    "en": "[ViewStereo 0.1.5 Update]\n- Intelligent Pseudoscopic Stereo Auto-Swap: Automatically detects reversed L/R stereocards upon import and swaps channels to restore orthoscopic depth, featuring telemetry warnings and dynamic window shift recalculation upon manual swapping.\n- Enhanced SAM 2.1 Tiny Segmentation Engine: Optimized upper prompt positioning and introduced U-Net height arbitration to eliminate top-border clipping.\n- Extended Preferences: Added new Auto Correction section with Auto-Swap toggle."
   },
   "minimum_supported_version": "0.0.1"
 }

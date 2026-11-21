@@ -56,7 +56,7 @@
                     <div>
                         <div class="hero-app-name"><span class="depth">View</span><span class="stereo">Stereo</span></div>
                         <div class="hero-version-row">
-                            <div class="hero-version" data-i18n="hero-version">v0.1.4 (2026.11.20)</div>
+                            <div class="hero-version" data-i18n="hero-version">v0.1.5 (2026.11.21)</div>
                             <span class="dev-status-pill status-early" data-i18n="dev-status-badge">開発初期・現在開発中</span>
                         </div>
                     </div>
@@ -276,7 +276,7 @@
     <section class="download" id="download" style="padding: 100px 20px; text-align: center;">
         <div class="reveal">
             <h2 data-i18n="dl-title" style="font-size: 3rem; margin-bottom: 24px;">体験を、今すぐ。</h2>
-            <p data-i18n="dl-subtitle" style="color: var(--accent-view-glow); font-weight: 600; text-shadow: 0 0 15px rgba(245, 166, 35, 0.35); margin-bottom: 40px;">ViewStereo v0.1.4 がリリースされました。</p>
+            <p data-i18n="dl-subtitle" style="color: var(--accent-view-glow); font-weight: 600; text-shadow: 0 0 15px rgba(245, 166, 35, 0.35); margin-bottom: 40px;">ViewStereo v0.1.5 がリリースされました。</p>
             <a href="https://viewstereo.p-media.jp/ViewStereo.dmg" class="btn-cta" data-i18n="btn-download" style="padding: 20px 60px; font-size: 1.2rem;">ViewStereo をダウンロード</a>
             <p data-i18n="dl-support" style="margin-top: 20px; font-size: 0.8rem; color: #555;">Supported on macOS 14.0+ (Apple Silicon Recommended)</p>
             <div class="dev-notice-box" data-i18n="dev-notice-box">
@@ -292,6 +292,19 @@
             <p data-i18n="upd-header-subtitle">精度と再現性の向上のため、進化し続けます。</p>
         </div>
         <div class="updates-container reveal">
+            <!-- v0.1.5 -->
+            <div class="changelog-item">
+                <div class="version-header">
+                    <span class="version-tag">v0.1.5</span>
+                    <span class="version-date">2026.11.21</span>
+                </div>
+                <ul class="change-list">
+                    <li data-i18n="upd-015-1">左右逆（偽視 / Pseudoscopic Stereo）の自動検出 ＆ 自動スワップ：交差法や反転スキャン素材の左右逆を読み込み時に自動補正し、ステータス警告と連動</li>
+                    <li data-i18n="upd-015-2">手動反転（Xキー）時のステレオウィンドウ最適シフト即時再計算による枠抜けバイオレーション防止</li>
+                    <li data-i18n="upd-015-3">SAM 2.1 Tiny セグメンテーションの上端プロンプトおよび U-Net 高度調停による輪郭欠け防止</li>
+                </ul>
+            </div>
+
             <!-- v0.1.4 -->
             <div class="changelog-item">
                 <div class="version-header">

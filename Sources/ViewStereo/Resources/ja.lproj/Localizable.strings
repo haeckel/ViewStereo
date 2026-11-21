@@ -16,6 +16,8 @@
 "ViewStereo Help" = "ViewStereo ヘルプ";
 "Appearance & Accessibility" = "外観とアクセシビリティ";
 "Large Text Mode (1.2x UI Scale)" = "大きい文字モード（UI 1.2倍）";
+"Auto Correction" = "自動補正";
+"Auto-Swap Reversed Stereo (Pseudoscopic)" = "読み込み時に左右逆を自動修正する";
 
 /* Display Modes & Tabs */
 "SBS View" = "SBS表示";
@@ -87,6 +89,8 @@
 "Window Violation" = "ウィンドウ・バイオレーション";
 "Detected (Edge)" = "検出（端飛び出し）";
 "Clear" = "問題なし";
+"⚠️ Reversed (Pseudoscopic)" = "⚠️ 左右逆の疑い（偽視）";
+"⚠️ Reversed (Auto-Swapped)" = "⚠️ 左右逆（スワップ済）";
 "Floating Window" = "フローティングウィンドウ";
 "Recommended" = "推奨";
 "Not Needed" = "不要";

@@ -4,6 +4,40 @@ ViewStereo は現在開発中であり、特に開発初期段階のアプリケ
 
 ==================================================
 
+ViewStereo v0.1.5 リリースノート / Release Notes (2026.11.21)
+
+==================================================
+【ViewStereo v0.1.5 新機能・改善点 / New Features & Improvements】
+==================================================
+- 左右逆（偽視 / Pseudoscopic Stereo）の自動検出 ＆ 自動スワップ機能:
+  - 交差法素材や左右反転スキャンなどで生じる左右逆（偽視・奥行き前後逆転）を読み込み時に自動検出。
+  - 左右逆の疑いがある場合、自動で左右画像を入れ替えて正常な立体視に補正（環境設定「読み込み時に左右逆を自動修正する」でON/OFF可能、デフォルトON）。
+  - インスペクターのステータスに「⚠️ 左右逆（スワップ済）」または「⚠️ 左右逆の疑い（偽視）」と警告表示し、手動での再反転にも柔軟に対応。
+  - 手動反転（Xキー）時にも左右入れ替えに伴う視差符号反転に合わせてステレオウィンドウ最適シフトを即時再計算し、枠抜けバイオレーションを防止。
+  - 複数一括バッチ処理時にも前アイテムのスワップ状態を持ち越さず、画像ごとに独立して安全に自動判定・補正。
+- SAM 2.1 Tiny セグメンテーションの精度向上:
+  - 上部プロンプト位置を上端寄り（高さ10%）へ引き上げ、写真上端付近の抽出精度を向上。
+  - 左右の信頼スコアが同等の場合、U-Netのプロンプト高さに近い方を優先判定するロジックを導入し、上端欠け誤検出を抑制。
+- 環境設定画面の拡張:
+  - 「自動補正（Auto Correction）」セクションを新設し、左右逆自動修正トグルを配置。
+
+==================================================
+[v0.1.5 New Features & Highlights]
+==================================================
+- Intelligent Pseudoscopic Stereo (Reversed L/R) Detection & Auto-Swap:
+  - Automatically identifies reversed stereoscopic pairs (cross-eyed cards, mislabeled scans, inverted depth cues) upon media import.
+  - Automatically swaps left and right channels to restore natural orthoscopic depth (configurable via Preferences "Auto-Swap Reversed Stereo", enabled by default).
+  - Telemetry window panel displays immediate visual warnings ("⚠️ Reversed (Swapped)" or "⚠️ Reversed (Pseudoscopic)") for clear user feedback.
+  - Manual swapping (`X`) now immediately recomputes optimal stereo window shift to prevent window boundary violations caused by disparity sign inversion.
+  - Guarantees independent auto-swap evaluation per image in batch processing mode without carryover of prior swap states.
+- Enhanced SAM 2.1 Tiny Segmentation Engine:
+  - Elevated upper prompt positioning to `bh * 0.10` for improved top border coverage on historical prints.
+  - Added U-Net expected-height arbitration when confidence scores are close, effectively preventing truncated top borders.
+- Extended Preferences:
+  - Introduced new "Auto Correction" section featuring the Auto-Swap Reversed Stereo toggle.
+
+==================================================
+
 ViewStereo v0.1.4 リリースノート / Release Notes (2026.11.20)
 
 ==================================================

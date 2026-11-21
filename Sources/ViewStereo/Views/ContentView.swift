@@ -1207,8 +1207,20 @@ struct ContentView: View {
                 )
                 telemetryRow(
                     label: "Window",
-                    value: vm.isAligned ? String(localized: vm.hasWindowViolationRisk ? "Detected (Edge)" : "Clear") : "—",
-                    highlight: vm.isAligned ? (vm.hasWindowViolationRisk ? .brightAmber : .brightTeal) : .secondary
+                    value: {
+                        guard vm.isAligned else { return "—" }
+                        if vm.isPseudoscopicSuspected {
+                            return String(localized: vm.isSwapped ? "⚠️ Reversed (Auto-Swapped)" : "⚠️ Reversed (Pseudoscopic)")
+                        }
+                        return String(localized: vm.hasWindowViolationRisk ? "Detected (Edge)" : "Clear")
+                    }(),
+                    highlight: {
+                        guard vm.isAligned else { return .secondary }
+                        if vm.isPseudoscopicSuspected {
+                            return vm.isSwapped ? .brightAmber : .palestineRed
+                        }
+                        return vm.hasWindowViolationRisk ? .brightAmber : .brightTeal
+                    }()
                 )
             }
             .padding(10)
