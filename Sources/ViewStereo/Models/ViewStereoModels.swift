@@ -512,6 +512,8 @@ final class ViewStereoViewModel: ObservableObject {
     private var cachedDisparityMap: [Float]? = nil
     private var cachedDepthW: Int = 0
     private var cachedDepthH: Int = 0
+    private var cachedSynthFullLeftRGB: [UInt8]? = nil
+    private var cachedSynthFullRightRGB: [UInt8]? = nil
     private var isSyncingLayoutAndMode = false
     @Published var displayMode: StereoDisplayMode = .stereoviewCard {
         didSet {
@@ -1061,6 +1063,8 @@ final class ViewStereoViewModel: ObservableObject {
         originalTrueStereoAlignedL = nil
         originalTrueStereoAlignedR = nil
         cachedDisparityMap = nil
+        cachedSynthFullLeftRGB = nil
+        cachedSynthFullRightRGB = nil
 
         isSwapped = false
         resetVintageRestoration(renderPreview: false)
@@ -1815,6 +1819,8 @@ final class ViewStereoViewModel: ObservableObject {
         originalTrueStereoAlignedL = nil
         originalTrueStereoAlignedR = nil
         cachedDisparityMap = nil
+        cachedSynthFullLeftRGB = nil
+        cachedSynthFullRightRGB = nil
         statusMessage = "Reset to original images."
         renderDisplayPreview()
     }
@@ -2585,6 +2591,10 @@ final class ViewStereoViewModel: ObservableObject {
 
     /// Vision Saliency Subject Priority トグル変更時にウィンドウ最適値を再計算・適用
     func recalculateOptimalWindow() {
+        if stereoReconstructionMode.isDepthSynthesized {
+            reapplyDepthSynthesis()
+            return
+        }
         guard isAligned, let rectRes = lastRectResult, !lastMatches.isEmpty else { return }
         let w = Double(imageWidth), h = Double(imageHeight)
         let useSaliency = useAttentionSaliency
@@ -2661,6 +2671,9 @@ final class ViewStereoViewModel: ObservableObject {
         let samples = lastDisparitySamples
         let targetDispPct = virtualDepthBasePercent
         let gamma = depthGamma
+        let useSaliency = useAttentionSaliency
+        let preserveArch = hasPreservedArch
+        let existingSalMap = lastRawSaliencyMap
         let preferredEngine = ViewStereoSettings.shared.preferredDepthEngine
         let releaseAfter = ViewStereoSettings.shared.releaseAIModelsAfterGeneration
 
@@ -2694,6 +2707,26 @@ final class ViewStereoViewModel: ObservableObject {
                 )
             }
 
+            var salMap = existingSalMap
+            if salMap == nil && useSaliency,
+               let cgImg = ViewStereoDepthSynthesizer.createCGImage(from: sourceRGB, width: srcW, height: srcH) {
+                salMap = try? VisionAnalyzer.extractAttentionSaliency(from: cgImg)
+            }
+
+            // ステレオウィンドウ自動最適化（エッジ飛び出し防止）
+            let winSetup = Self.computeDepthWindowSetup(
+                disparityMap: dispMap,
+                depthW: depthRes.width,
+                depthH: depthRes.height,
+                imageWidth: srcW,
+                imageHeight: srcH,
+                targetDisparityPercent: targetDispPct,
+                depthGamma: gamma,
+                saliencyMap: salMap,
+                useSaliency: useSaliency,
+                preserveArch: preserveArch
+            )
+
             // DIBR 対称ワーピングによるフル解像度ステレオペア合成
             let (fullL, fullR) = synth.synthesizeStereoPair(
                 baseRGB: sourceRGB,
@@ -2703,7 +2736,8 @@ final class ViewStereoViewModel: ObservableObject {
                 depthW: depthRes.width,
                 depthH: depthRes.height,
                 targetDisparityPercent: targetDispPct,
-                depthGamma: gamma
+                depthGamma: gamma,
+                focusRatio: winSetup.focusRatio
             )
 
             // プレビュー用軽量バッファ（最大長辺 previewMaxDimension = 1440）の生成
@@ -2720,6 +2754,11 @@ final class ViewStereoViewModel: ObservableObject {
                 self.cachedDisparityMap = dispMap
                 self.cachedDepthW = depthRes.width
                 self.cachedDepthH = depthRes.height
+                self.cachedSynthFullLeftRGB = fullL
+                self.cachedSynthFullRightRGB = fullR
+                if let salMap {
+                    self.lastRawSaliencyMap = salMap
+                }
 
                 self.alignedLeftRGB = fullL
                 self.alignedRightRGB = fullR
@@ -2736,9 +2775,13 @@ final class ViewStereoViewModel: ObservableObject {
 
                 self.stereoReconstructionMode = .singleEyeDepth(side)
                 self.isSwapped = false
+                self.lastDisparitySamples = winSetup.samples
                 self.windowShiftX = 0.0
                 self.autoOptimalShiftX = 0.0
-                self.maxDisparityPercent = targetDispPct
+                self.lastFullResShiftX = 0.0
+                self.hasWindowViolationRisk = winSetup.hasWindowViolationRisk
+                self.requiresFloatingWindow = winSetup.requiresFloatingWindow
+                self.maxDisparityPercent = winSetup.dispRangePct
                 self.isProcessing = false
                 self.statusMessage = String(format: String(localized: "3D Conversion Done (%@) | Disp: %.1f%% | %.0f ms"), depthRes.engineName, targetDispPct, depthRes.elapsedMs)
                 self.renderDisplayPreview()
@@ -2753,6 +2796,8 @@ final class ViewStereoViewModel: ObservableObject {
 
         let targetDispPct = virtualDepthBasePercent
         let gamma = depthGamma
+        let useSaliency = useAttentionSaliency
+        let preserveArch = hasPreservedArch
         let preferredEngine = ViewStereoSettings.shared.preferredDepthEngine
         let releaseAfter = ViewStereoSettings.shared.releaseAIModelsAfterGeneration
         let activeID = workspaceActiveItemID
@@ -2776,6 +2821,25 @@ final class ViewStereoViewModel: ObservableObject {
                 return
             }
 
+            var salMap: NormalizedFloatMap? = nil
+            if useSaliency,
+               let cgImg = ViewStereoDepthSynthesizer.createCGImage(from: sourceRGB, width: srcW, height: srcH) {
+                salMap = try? VisionAnalyzer.extractAttentionSaliency(from: cgImg)
+            }
+
+            let winSetup = Self.computeDepthWindowSetup(
+                disparityMap: depthRes.disparity,
+                depthW: depthRes.width,
+                depthH: depthRes.height,
+                imageWidth: srcW,
+                imageHeight: srcH,
+                targetDisparityPercent: targetDispPct,
+                depthGamma: gamma,
+                saliencyMap: salMap,
+                useSaliency: useSaliency,
+                preserveArch: preserveArch
+            )
+
             let (fullL, fullR) = synth.synthesizeStereoPair(
                 baseRGB: sourceRGB,
                 width: srcW,
@@ -2784,7 +2848,8 @@ final class ViewStereoViewModel: ObservableObject {
                 depthW: depthRes.width,
                 depthH: depthRes.height,
                 targetDisparityPercent: targetDispPct,
-                depthGamma: gamma
+                depthGamma: gamma,
+                focusRatio: winSetup.focusRatio
             )
 
             let prevScale = min(1.0, Double(Self.previewMaxDimension) / Double(max(srcW, srcH)))
@@ -2800,6 +2865,9 @@ final class ViewStereoViewModel: ObservableObject {
                 self.cachedDisparityMap = depthRes.disparity
                 self.cachedDepthW = depthRes.width
                 self.cachedDepthH = depthRes.height
+                self.cachedSynthFullLeftRGB = fullL
+                self.cachedSynthFullRightRGB = fullR
+                self.lastRawSaliencyMap = salMap
 
                 self.alignedLeftRGB = fullL
                 self.alignedRightRGB = fullR
@@ -2817,9 +2885,13 @@ final class ViewStereoViewModel: ObservableObject {
                 self.isAligned = true
                 self.stereoReconstructionMode = .fullFrame2DDepth
                 self.isSwapped = false
+                self.lastDisparitySamples = winSetup.samples
                 self.windowShiftX = 0.0
                 self.autoOptimalShiftX = 0.0
-                self.maxDisparityPercent = targetDispPct
+                self.lastFullResShiftX = 0.0
+                self.hasWindowViolationRisk = winSetup.hasWindowViolationRisk
+                self.requiresFloatingWindow = winSetup.requiresFloatingWindow
+                self.maxDisparityPercent = winSetup.dispRangePct
                 self.verticalRMSE = 0.0
                 self.lastDepthEngineLabel = depthRes.engineName
                 self.lastDepthInferenceMs = depthRes.elapsedMs
@@ -2935,8 +3007,24 @@ final class ViewStereoViewModel: ObservableObject {
         let depthH = cachedDepthH
         let targetDispPct = virtualDepthBasePercent
         let gamma = depthGamma
+        let useSaliency = useAttentionSaliency
+        let preserveArch = hasPreservedArch
+        let salMap = lastRawSaliencyMap
 
         Task {
+            let winSetup = Self.computeDepthWindowSetup(
+                disparityMap: dispMap,
+                depthW: depthW,
+                depthH: depthH,
+                imageWidth: srcW,
+                imageHeight: srcH,
+                targetDisparityPercent: targetDispPct,
+                depthGamma: gamma,
+                saliencyMap: salMap,
+                useSaliency: useSaliency,
+                preserveArch: preserveArch
+            )
+
             let synth = ViewStereoDepthSynthesizer.shared
             let (fullL, fullR) = synth.synthesizeStereoPair(
                 baseRGB: baseRGB,
@@ -2946,7 +3034,8 @@ final class ViewStereoViewModel: ObservableObject {
                 depthW: depthW,
                 depthH: depthH,
                 targetDisparityPercent: targetDispPct,
-                depthGamma: gamma
+                depthGamma: gamma,
+                focusRatio: winSetup.focusRatio
             )
 
             let prevScale = min(1.0, Double(Self.previewMaxDimension) / Double(max(srcW, srcH)))
@@ -2956,14 +3045,31 @@ final class ViewStereoViewModel: ObservableObject {
             let prevR = ViewStereoDepthSynthesizer.resizeRGB(fullR, width: srcW, height: srcH, targetWidth: prevW, targetHeight: prevH)
 
             await MainActor.run {
+                self.cachedSynthFullLeftRGB = fullL
+                self.cachedSynthFullRightRGB = fullR
                 self.alignedLeftRGB = fullL
                 self.alignedRightRGB = fullR
+                self.croppedWidth = srcW
+                self.croppedHeight = srcH
                 self.previewAlignedLeftRGB = prevL
                 self.previewAlignedRightRGB = prevR
+                self.previewCroppedWidth = prevW
+                self.previewCroppedHeight = prevH
                 self.rectifiedPreviewLeftRGB = prevL
                 self.rectifiedPreviewRightRGB = prevR
-                self.maxDisparityPercent = targetDispPct
-                self.renderDisplayPreview()
+                self.rectifiedPreviewWidth = prevW
+                self.rectifiedPreviewHeight = prevH
+                self.lastDisparitySamples = winSetup.samples
+                self.lastFullResShiftX = 0.0
+
+                if abs(self.windowShiftX) > 0.05 {
+                    self.scheduleRealtimeWindowPreview()
+                } else {
+                    self.hasWindowViolationRisk = winSetup.hasWindowViolationRisk
+                    self.requiresFloatingWindow = winSetup.requiresFloatingWindow
+                    self.maxDisparityPercent = winSetup.dispRangePct
+                    self.renderDisplayPreview()
+                }
             }
         }
     }
@@ -3046,6 +3152,104 @@ final class ViewStereoViewModel: ObservableObject {
         opts.maxComfortRatio = 0.05
         opts.lambdaNear = 150.0
         return opts
+    }
+
+    /// 2D→3D 深度マップから視差サンプルを抽出し、ステレオウィンドウ違反を防ぐ最適 focusRatio を算出する
+    nonisolated private static func computeDepthWindowSetup(
+        disparityMap: [Float],
+        depthW: Int,
+        depthH: Int,
+        imageWidth w: Int,
+        imageHeight h: Int,
+        targetDisparityPercent: Double,
+        depthGamma: Double,
+        saliencyMap: NormalizedFloatMap?,
+        useSaliency: Bool,
+        preserveArch: Bool
+    ) -> (focusRatio: Double, samples: [DisparitySample], hasWindowViolationRisk: Bool, requiresFloatingWindow: Bool, dispRangePct: Double) {
+        guard w > 0, h > 0, depthW > 0, depthH > 0, disparityMap.count >= depthW * depthH else {
+            return (0.75, [], false, false, targetDisparityPercent)
+        }
+
+        let maxBaselinePx = Double(w) * max(0.2, min(8.0, targetDisparityPercent)) / 100.0
+        let baseFocus = 0.5
+        let cols = 32
+        let rows = 24
+        var gridPoints: [(x: Double, y: Double, d: Double, sal: Double)] = []
+        gridPoints.reserveCapacity(cols * rows)
+
+        for gy in 0..<rows {
+            let v = 0.01 + 0.98 * Double(gy) / Double(rows - 1)
+            let py = v * Double(h)
+            for gx in 0..<cols {
+                let u = 0.01 + 0.98 * Double(gx) / Double(cols - 1)
+                let px = u * Double(w)
+                let d = Double(ViewStereoDepthSynthesizer.sampleNormalizedDisparity(
+                    disparityMap: disparityMap,
+                    depthW: depthW,
+                    depthH: depthH,
+                    u: Float(u),
+                    v: Float(v),
+                    depthGamma: depthGamma
+                ))
+                let rawSal = saliencyMap?.sample(atPixelX: px, pixelY: py, imageWidth: Double(w), imageHeight: Double(h)) ?? 0.5
+                let sal = useSaliency ? max(0.05, rawSal) : 0.5
+                gridPoints.append((px, py, d, sal))
+            }
+        }
+
+        let baseSamples = gridPoints.map { pt in
+            DisparitySample(
+                x: pt.x,
+                y: pt.y,
+                parallax: -(pt.d - baseFocus) * maxBaselinePx,
+                saliency: pt.sal,
+                foregroundWeight: 0.7
+            )
+        }
+
+        let winOpts = makeWindowOptimizationOptions(preserveArch: preserveArch)
+        let solved = resolveWindowDecision(
+            samples: baseSamples,
+            width: Double(w),
+            height: Double(h),
+            preserveArch: preserveArch,
+            options: winOpts
+        )
+
+        var optFocus = min(1.0, max(0.0, baseFocus + solved.optimalShiftX / max(1.0, maxBaselinePx)))
+
+        // 端帯域（edgeBandRatio）でウィンドウ飛び出しが残る場合は安全側（最大1.0=飛び出しゼロ）へ補正
+        let edgeRatio = winOpts.edgeBandRatio
+        let leftEdge = Double(w) * edgeRatio
+        let rightEdge = Double(w) * (1.0 - edgeRatio)
+        let topEdge = Double(h) * edgeRatio
+        let bottomEdge = Double(h) * (1.0 - edgeRatio)
+        let safeTol = 0.5 / max(1.0, maxBaselinePx)
+        for pt in gridPoints where (pt.x <= leftEdge || pt.x >= rightEdge || pt.y <= topEdge || pt.y >= bottomEdge) {
+            if pt.d - optFocus > safeTol {
+                optFocus = min(1.0, max(optFocus, pt.d))
+            }
+        }
+
+        let finalSamples = gridPoints.map { pt in
+            DisparitySample(
+                x: pt.x,
+                y: pt.y,
+                parallax: -(pt.d - optFocus) * maxBaselinePx,
+                saliency: pt.sal,
+                foregroundWeight: 0.7
+            )
+        }
+
+        let erg = evaluateWindowErgonomics(
+            samples: finalSamples,
+            shiftX: 0.0,
+            imageWidth: Double(w),
+            imageHeight: Double(h),
+            cropWidth: w
+        )
+        return (optFocus, finalSamples, erg.hasWindowViolationRisk, erg.requiresFloatingWindow, erg.dispRangePct)
     }
 
     /// スライダードラッグ中のゼロレイテンシ追従プレビュー（Metal 呼び出しなし・1パス RGBA 合成）
@@ -3198,8 +3402,61 @@ final class ViewStereoViewModel: ObservableObject {
     }
 
     private func runNextPreviewWarp() {
-        guard isAligned,
-              let rectRes = lastRectResult,
+        guard isAligned else { return }
+
+        if lastRectResult == nil && stereoReconstructionMode.isDepthSynthesized {
+            guard let rL = rectifiedPreviewLeftRGB,
+                  let rR = rectifiedPreviewRightRGB,
+                  rectifiedPreviewWidth > 0,
+                  rectifiedPreviewHeight > 0,
+                  cachedBaseW > 0,
+                  cachedBaseH > 0 else {
+                return
+            }
+            let rw = rectifiedPreviewWidth
+            let rh = rectifiedPreviewHeight
+            let tx = windowShiftX
+            let sx = Double(rw) / Double(cachedBaseW)
+            let dxL = Int((-0.5 * tx * sx).rounded())
+            let dxR = Int((+0.5 * tx * sx).rounded())
+            let startX = max(0, max(dxL, dxR))
+            let endX = min(rw, min(rw + dxL, rw + dxR))
+            let cropW = endX - startX
+            guard cropW >= 16 else { return }
+
+            let srcXL = startX - dxL
+            let srcXR = startX - dxR
+            let sl = Self.cropHorizontalSlice(rL, srcW: rw, height: rh, srcX: srcXL, cropW: cropW)
+            let sr = Self.cropHorizontalSlice(rR, srcW: rw, height: rh, srcX: srcXR, cropW: cropW)
+
+            let fullDxL = Int((-0.5 * tx).rounded())
+            let fullDxR = Int((+0.5 * tx).rounded())
+            let fullStartX = max(0, max(fullDxL, fullDxR))
+            let fullEndX = min(cachedBaseW, min(cachedBaseW + fullDxL, cachedBaseW + fullDxR))
+            let fullCW = max(16, fullEndX - fullStartX)
+
+            previewAlignedLeftRGB = sl
+            previewAlignedRightRGB = sr
+            previewCroppedWidth = cropW
+            previewCroppedHeight = rh
+            croppedWidth = fullCW
+            croppedHeight = cachedBaseH
+
+            let erg = Self.evaluateWindowErgonomics(
+                samples: lastDisparitySamples,
+                shiftX: tx,
+                imageWidth: Double(cachedBaseW),
+                imageHeight: Double(cachedBaseH),
+                cropWidth: fullCW
+            )
+            hasWindowViolationRisk = erg.hasWindowViolationRisk
+            requiresFloatingWindow = erg.requiresFloatingWindow
+            maxDisparityPercent = erg.dispRangePct
+            renderDisplayPreview()
+            return
+        }
+
+        guard let rectRes = lastRectResult,
               let pL = previewRawLeftRGB,
               let pR = previewRawRightRGB,
               let renderer = metalRenderer else {
@@ -3443,6 +3700,47 @@ final class ViewStereoViewModel: ObservableObject {
            alignedRightRGB != nil {
             return true
         }
+        if lastRectResult == nil && stereoReconstructionMode.isDepthSynthesized {
+            guard let fullL = cachedSynthFullLeftRGB,
+                  let fullR = cachedSynthFullRightRGB,
+                  cachedBaseW > 0,
+                  cachedBaseH > 0 else {
+                return false
+            }
+            let w = cachedBaseW
+            let h = cachedBaseH
+            let tx = windowShiftX
+            let dxL = Int((-0.5 * tx).rounded())
+            let dxR = Int((+0.5 * tx).rounded())
+            let startX = max(0, max(dxL, dxR))
+            let endX = min(w, min(w + dxL, w + dxR))
+            let cropW = endX - startX
+            guard cropW >= 16 else { return false }
+
+            if cropW == w && dxL == 0 && dxR == 0 {
+                alignedLeftRGB = fullL
+                alignedRightRGB = fullR
+                croppedWidth = w
+                croppedHeight = h
+            } else {
+                let srcXL = startX - dxL
+                let srcXR = startX - dxR
+                let (sl, sr) = await Task.detached(priority: .userInitiated) {
+                    (
+                        Self.cropHorizontalSlice(fullL, srcW: w, height: h, srcX: srcXL, cropW: cropW),
+                        Self.cropHorizontalSlice(fullR, srcW: w, height: h, srcX: srcXR, cropW: cropW)
+                    )
+                }.value
+                alignedLeftRGB = sl
+                alignedRightRGB = sr
+                croppedWidth = cropW
+                croppedHeight = h
+            }
+            lastFullResShiftX = tx
+            lastFullResRemoveNoise = removeNoise
+            return true
+        }
+
         guard let rectRes = lastRectResult,
               let lRGB = rawLeftRGB,
               let rRGB = rawRightRGB,
@@ -4303,22 +4601,7 @@ final class ViewStereoViewModel: ObservableObject {
 
                     // A. 通常の 2D 写真と判定された場合
                     if loaded.is2DPhoto {
-                        if verifyOnly {
-                            let synth = ViewStereoDepthSynthesizer.shared
-                            guard let depthRes = synth.estimateDisparity(
-                                rgb: lRGB, width: w, height: h,
-                                preferredEngine: preferredEngine, releaseAfterInference: false
-                            ) else {
-                                return .failed("Depth estimation failed")
-                            }
-                            let (fullL, fullR) = synth.synthesizeStereoPair(
-                                baseRGB: lRGB, width: w, height: h,
-                                disparityMap: depthRes.disparity, depthW: depthRes.width, depthH: depthRes.height,
-                                targetDisparityPercent: targetDispPct, depthGamma: gamma
-                            )
-                            return .aiConverted2D3D(left: fullL, right: fullR, width: w, height: h, is2DSource: true, preservedArch: false, mountCtx: nil, cardCfg: itemCardCfg)
-                        }
-                        if warningPolicy == .onlyConvertWarningsTo3D {
+                        if !verifyOnly && warningPolicy == .onlyConvertWarningsTo3D {
                             return .skippedClean
                         }
                         let synth = ViewStereoDepthSynthesizer.shared
@@ -4328,11 +4611,32 @@ final class ViewStereoViewModel: ObservableObject {
                         ) else {
                             return .failed("Depth estimation failed")
                         }
+                        var salMap: NormalizedFloatMap? = nil
+                        if useSaliency,
+                           let cgImg = ViewStereoDepthSynthesizer.createCGImage(from: lRGB, width: w, height: h) {
+                            salMap = try? VisionAnalyzer.extractAttentionSaliency(from: cgImg)
+                        }
+                        let winSetup = Self.computeDepthWindowSetup(
+                            disparityMap: depthRes.disparity,
+                            depthW: depthRes.width,
+                            depthH: depthRes.height,
+                            imageWidth: w,
+                            imageHeight: h,
+                            targetDisparityPercent: targetDispPct,
+                            depthGamma: gamma,
+                            saliencyMap: salMap,
+                            useSaliency: useSaliency,
+                            preserveArch: false
+                        )
                         let (fullL, fullR) = synth.synthesizeStereoPair(
                             baseRGB: lRGB, width: w, height: h,
                             disparityMap: depthRes.disparity, depthW: depthRes.width, depthH: depthRes.height,
-                            targetDisparityPercent: targetDispPct, depthGamma: gamma
+                            targetDisparityPercent: targetDispPct, depthGamma: gamma,
+                            focusRatio: winSetup.focusRatio
                         )
+                        if verifyOnly {
+                            return .aiConverted2D3D(left: fullL, right: fullR, width: w, height: h, is2DSource: true, preservedArch: false, mountCtx: nil, cardCfg: itemCardCfg)
+                        }
                         let savedOK = Self.saveBatchRGBPair(
                             left: fullL, right: fullR, width: w, height: h,
                             baseName: "\(item.baseName)_2D3D",
@@ -4372,10 +4676,28 @@ final class ViewStereoViewModel: ObservableObject {
                                 sparseSamples: samples, imageWidth: Double(w), imageHeight: Double(h)
                             )
                         }
+                        var salMap: NormalizedFloatMap? = nil
+                        if useSaliency,
+                           let cgImg = ViewStereoDepthSynthesizer.createCGImage(from: baseRGB, width: w, height: h) {
+                            salMap = try? VisionAnalyzer.extractAttentionSaliency(from: cgImg)
+                        }
+                        let winSetup = Self.computeDepthWindowSetup(
+                            disparityMap: dispMap,
+                            depthW: depthRes.width,
+                            depthH: depthRes.height,
+                            imageWidth: w,
+                            imageHeight: h,
+                            targetDisparityPercent: targetDispPct,
+                            depthGamma: gamma,
+                            saliencyMap: salMap,
+                            useSaliency: useSaliency,
+                            preserveArch: preservedArch
+                        )
                         let (fullL, fullR) = synth.synthesizeStereoPair(
                             baseRGB: baseRGB, width: w, height: h,
                             disparityMap: dispMap, depthW: depthRes.width, depthH: depthRes.height,
-                            targetDisparityPercent: targetDispPct, depthGamma: gamma
+                            targetDisparityPercent: targetDispPct, depthGamma: gamma,
+                            focusRatio: winSetup.focusRatio
                         )
                         let savedOK = Self.saveBatchRGBPair(
                             left: fullL, right: fullR, width: w, height: h,

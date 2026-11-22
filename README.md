@@ -1,6 +1,6 @@
 # ViewStereo 🎞️✨
 
-[![Version](https://img.shields.io/badge/version-0.1.7-brightgreen.svg)](https://viewstereo.p-media.jp/)
+[![Version](https://img.shields.io/badge/version-0.1.8-brightgreen.svg)](https://viewstereo.p-media.jp/)
 [![Status](https://img.shields.io/badge/status-Early%20Development-amber.svg)](#development-status)
 [![Platform](https://img.shields.io/badge/platform-macOS%2014.0+-lightgrey.svg)](https://apple.co/macos)
 [![Technology](https://img.shields.io/badge/tech-Card%20Segmentation%20%7C%207--DoF%20Homography%20%7C%20Stereo%20Window%20%7C%20Digital%20Remount-orange.svg)](https://viewstereo.p-media.jp/)
@@ -17,7 +17,12 @@ Designed as the archival restoration and geometric alignment companion to **Spla
 
 ## 🚀 Key Features
 
-### 🗂️ v0.1.7 New: 3-Pane Studio Workflow & 9-Engine AI Depth Model Manager
+### 🪟 v0.1.8 New: Intelligent DIBR Stereo Window Optimization & High-Res 2D-to-3D Export
+- **Intelligent Zero-Parallax Plane Alignment for 2D-to-3D Synthesis**: Coupled depth disparity distributions and Apple Vision Attention Saliency into `computeDepthWindowSetup`, automatically setting the optimal zero-parallax focal plane (`focusRatio`) to structurally eliminate frame-edge stereoscopic window violations while maintaining natural Percival comfort-zone depth.
+- **High-Resolution Export & Batch 2D-to-3D Synthesis**: Introduced full-resolution synthesis caching (`cachedSynthFullLeftRGB`/`RightRGB`), ensuring flawless Spatial Photo, SBS, and Anaglyph exports with dynamic zero-parallax window placement during both single-item and folder batch runs.
+- **Unified Normalized Disparity Sampling**: Standardized bilinear disparity map sampling with gamma and contrast curve transformations across preview warping, interactive parameter adjustments, and offline rendering.
+
+### 🗂️ v0.1.7: 3-Pane Studio Workflow & 9-Engine AI Depth Model Manager
 - **3-Pane Studio Workspace & Tree-Style File Browser**: Redesigned workflow around a workspace directory with a persistent left tree browser (`⌥⌘L`). Features initial launch folder selection sheet (`NSOpenPanel`), automatic L/R pair grouping (`_L`/`_R`, `-L`/`-R`), per-item processing status badges (`✓`/`⚠️`/`✕`), and output directory protection (`ViewStereo_Output`).
 - **AI Depth Model Manager (StereoStudioCore Integration)**: Unified model management supporting 9 Core ML depth engines—Apple Depth Pro, Depth Pro 2 (Small/Base/Large), Depth Anything V2/V3, and MoGe-2 (ViT-B/L). Features on-demand Hugging Face downloading directly within Preferences and zero-duplicate shared model storage across the Stereo Studio app family.
 - **Production-Grade Single-Eye Depth 3D Salvage**: Fully wired the Single-Eye Depth 3D pipeline to the user's preferred Core ML depth engine, delivering pristine 2D-to-3D stereoscopic conversion with automatic peak memory reclamation.

@@ -68,7 +68,7 @@
                     <div>
                         <div class="hero-app-name"><span class="depth">View</span><span class="stereo">Stereo</span></div>
                         <div class="hero-version-row">
-                            <div class="hero-version" data-i18n="hero-version">v0.1.7 (2026.11.22)</div>
+                            <div class="hero-version" data-i18n="hero-version">v0.1.8 (2026.11.23)</div>
                             <span class="dev-status-pill status-early" data-i18n="dev-status-badge">開発初期・現在開発中</span>
                         </div>
                     </div>
@@ -416,7 +416,7 @@
         <div class="download-plaque reveal">
             <span class="plate-kicker" style="font-family: var(--font-display); font-size: 0.78rem; letter-spacing: 0.2em; color: var(--accent-brass); display: block; margin-bottom: 12px;">ARCHIVAL EDITION · MACOS APPLICATION</span>
             <h2 data-i18n="dl-title">体験を、今すぐ。</h2>
-            <p data-i18n="dl-subtitle" class="dl-subtitle-text">ViewStereo v0.1.7 がリリースされました。</p>
+            <p data-i18n="dl-subtitle" class="dl-subtitle-text">ViewStereo v0.1.8 がリリースされました。</p>
             <a href="https://viewstereo.p-media.jp/ViewStereo.dmg" class="btn-cta" data-i18n="btn-download" style="padding: 18px 52px; font-size: 1.1rem;">ViewStereo をダウンロード</a>
             <p data-i18n="dl-support" style="margin-top: 20px; font-size: 0.82rem; font-family: var(--font-mono); color: var(--text-muted);">Supported on macOS 14.0+ (Apple Silicon Recommended)</p>
             <div class="dev-notice-box" data-i18n="dev-notice-box">
@@ -434,10 +434,23 @@
             <div class="ornament-divider">❦</div>
         </div>
         <div class="updates-container reveal">
-            <!-- v0.1.7 -->
+            <!-- v0.1.8 -->
             <div class="changelog-item">
                 <div class="version-header">
-                    <span class="version-tag">v0.1.7</span>
+                    <span class="version-tag">v0.1.8</span>
+                    <span class="version-date">2026.11.23</span>
+                </div>
+                <ul class="change-list">
+                    <li data-i18n="upd-018-1">DIBR 2D-3D 合成のステレオウィンドウ自動最適化（エッジ飛び出し防止）：深度マップと Vision 顕著性解析を統合した「ゼロ視差面（focusRatio）自動算出アルゴリズム」を新搭載。画面端での枠抜けバイオレーションを構造的に抑止し、パーシバル快適域に収まる自然な立体奥行きを実現</li>
+                    <li data-i18n="upd-018-2">単眼 2D 画像および片側救済の高品位バッチ・高解像度書き出し強化：フル解像度合成バッファのキャッシュ管理を最適化し、Spatial Photo・SBS・アナグリフ書き出し時やフォルダ一括バッチ処理時にも最適なステレオウィンドウを自動適用</li>
+                    <li data-i18n="upd-018-3">視差サンプリングエンジンの共通化と安定化：バイリニア補間とガンマ/コントラスト補正を統合した最適化サンプラーにより、スライダー操作時のリアルタイムプレビュー応答性を向上</li>
+                </ul>
+            </div>
+
+            <!-- v0.1.8 -->
+            <div class="changelog-item">
+                <div class="version-header">
+                    <span class="version-tag">v0.1.8</span>
                     <span class="version-date">2026.11.22</span>
                 </div>
                 <ul class="change-list">

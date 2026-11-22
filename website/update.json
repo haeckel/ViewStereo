@@ -1,10 +1,10 @@
 {
-  "latest_version": "0.1.7",
-  "release_date": "2026/11/22",
+  "latest_version": "0.1.8",
+  "release_date": "2026/11/23",
   "download_url": "https://viewstereo.p-media.jp/ViewStereo.dmg",
   "changelog": {
-    "ja": "【ViewStereo 0.1.7 アップデート】\n・3ペイン・スタジオ型ファイルブラウザワークフローの導入：左ペインにツリー型ファイルブラウザ（⌥⌘L）を新設。起動時フォルダ指定、L/Rペア自動統合（_L/_R等）、処理ステータスバッジ（✓/⚠️/✕）、出力先フォルダ自動除外に対応し、Finder不要のシームレスな作業を実現。\n・AI 深度モデルマネージャー ＆ 全9種マルチエンジン対応：Apple Depth Pro、Depth Pro 2（Small/Base/Large）、Depth Anything V2/V3、MoGe-2（ViT-B/L）に対応。環境設定からオンデマンド導入および優先エンジン切替が可能になり、Stereo Studio シリーズ間でモデルをゼロ重複共有。\n・ステレオ異常救済（Single-Eye Depth 3D）パイプラインの本格強化：選択した優先 Core ML 深度エンジンによる高品質な2D-3D立体視生成と自動メモリ解放に対応。",
-    "en": "[ViewStereo 0.1.7 Update]\n- 3-Pane Studio Workflow with Tree-Style File Browser: Introduced persistent left sidebar file browser (⌥⌘L) with launch folder prompt, automatic L/R pair grouping (_L/_R), real-time status badges (✓/⚠️/✕), and output folder protection.\n- AI Depth Model Manager & 9 Multi-Engine Architecture: Full support for Apple Depth Pro, Depth Pro 2 (Small/Base/Large), Depth Anything V2/V3, and MoGe-2 (ViT-B/L) with on-demand downloading in Preferences and zero-duplicate shared storage across Stereo Studio apps.\n- Production-Grade Single-Eye Depth 3D Salvage Pipeline: High-fidelity 2D-to-3D stereoscopic synthesis powered by your preferred Core ML depth engine with automatic peak memory reclamation."
+    "ja": "【ViewStereo 0.1.8 アップデート】\n・DIBR 2D-3D 合成のステレオウィンドウ自動最適化（エッジ飛び出し防止）：深度マップと Apple Vision 顕著性解析を統合した「ゼロ視差面（focusRatio）自動算出アルゴリズム」を新搭載。画面端での枠抜けバイオレーションを構造的に抑止し、パーシバル快適域に収まる自然な立体奥行きを実現。\n・単眼 2D 画像および片側救済の高品位バッチ・高解像度書き出し強化：フル解像度合成バッファのキャッシュ管理を最適化し、Spatial Photo・SBS・アナグリフ書き出し時やフォルダ一括バッチ処理時にも最適なステレオウィンドウを自動適用。\n・視差サンプリングエンジンの共通化と安定化：バイリニア補間とガンマ/コントラスト補正を統合した最適化サンプラーにより、スライダー操作時のリアルタイムプレビュー応答性を向上。",
+    "en": "[ViewStereo 0.1.8 Update]\n- Intelligent Zero-Parallax Stereo Window Optimization for DIBR 2D-to-3D: Integrated depth map and Vision saliency analysis to dynamically calculate the optimal zero-parallax plane (focusRatio), preventing frame-edge stereoscopic window violations.\n- Enhanced High-Resolution Export & Batch 2D-to-3D Processing: Introduced full-resolution synthesis caching for pristine Spatial Photo, SBS, and Anaglyph exports with automatic window alignment applied during batch runs.\n- Unified Normalized Disparity Sampler: Standardized bilinear disparity interpolation with gamma/contrast curve controls for smoother real-time interactive parameter adjustments."
   },
   "minimum_supported_version": "0.0.1"
 }

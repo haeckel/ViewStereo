@@ -665,6 +665,45 @@ public final class ViewStereoDepthSynthesizer: @unchecked Sendable {
 
     // MARK: - DIBR Stereo Synthesis (対称ステレオペア合成)
 
+    /// 正規化視差マップをバイリニア補間＋ガンマ/コントラスト補正して [0.0=奥, 1.0=手前] の値を返す
+    public static func sampleNormalizedDisparity(
+        disparityMap: [Float],
+        depthW: Int,
+        depthH: Int,
+        u: Float,
+        v: Float,
+        depthGamma: Double = 1.0,
+        depthContrast: Double = 0.0
+    ) -> Float {
+        guard depthW > 0, depthH > 0, disparityMap.count >= depthW * depthH else { return 0.5 }
+        let x = min(Float(depthW - 1), max(0.0, u * Float(depthW)))
+        let y = min(Float(depthH - 1), max(0.0, v * Float(depthH)))
+        let x0 = Int(x)
+        let y0 = Int(y)
+        let x1 = min(depthW - 1, x0 + 1)
+        let y1 = min(depthH - 1, y0 + 1)
+        let fx = x - Float(x0)
+        let fy = y - Float(y0)
+
+        let row0 = y0 * depthW
+        let row1 = y1 * depthW
+        let d00 = disparityMap[row0 + x0]
+        let d10 = disparityMap[row0 + x1]
+        let d01 = disparityMap[row1 + x0]
+        let d11 = disparityMap[row1 + x1]
+
+        var d = (1.0 - fy) * ((1.0 - fx) * d00 + fx * d10) + fy * ((1.0 - fx) * d01 + fx * d11)
+
+        if abs(depthGamma - 1.0) > 0.01 {
+            d = pow(max(0.0001, d), Float(1.0 / max(0.2, depthGamma)))
+        }
+        if abs(depthContrast) > 0.01 {
+            let s = d * d * (3.0 - 2.0 * d)
+            d = (1.0 - Float(depthContrast)) * d + Float(depthContrast) * s
+        }
+        return min(1.0, max(0.0, d))
+    }
+
     /// 単眼RGBバッファと正規化視差マップ (0.0=奥 ~ 1.0=手前) から、左右ステレオペアを合成する
     public func synthesizeStereoPair(
         baseRGB: [UInt8],
@@ -676,7 +715,7 @@ public final class ViewStereoDepthSynthesizer: @unchecked Sendable {
         targetDisparityPercent: Double = 3.0,
         depthGamma: Double = 1.0,
         depthContrast: Double = 0.0,
-        focusRatio: Double = 0.20
+        focusRatio: Double = 0.75
     ) -> (leftRGB: [UInt8], rightRGB: [UInt8]) {
         let count = width * height
         guard baseRGB.count >= count * 3, depthW > 0, depthH > 0 else {
@@ -685,39 +724,10 @@ public final class ViewStereoDepthSynthesizer: @unchecked Sendable {
 
         let maxBaselinePx = Float(width) * Float(max(0.2, min(8.0, targetDisparityPercent)) / 100.0)
         let halfBaseline = maxBaselinePx * 0.5
-        let focusVal = Float(max(0.05, min(0.95, focusRatio)))
+        let focusVal = Float(max(0.0, min(1.0, focusRatio)))
 
         var leftRGB = [UInt8](repeating: 0, count: count * 3)
         var rightRGB = [UInt8](repeating: 0, count: count * 3)
-
-        func sampleDisparity(u: Float, v: Float) -> Float {
-            let x = min(Float(depthW - 1), max(0.0, u * Float(depthW)))
-            let y = min(Float(depthH - 1), max(0.0, v * Float(depthH)))
-            let x0 = Int(x)
-            let y0 = Int(y)
-            let x1 = min(depthW - 1, x0 + 1)
-            let y1 = min(depthH - 1, y0 + 1)
-            let fx = x - Float(x0)
-            let fy = y - Float(y0)
-
-            let row0 = y0 * depthW
-            let row1 = y1 * depthW
-            let d00 = disparityMap[row0 + x0]
-            let d10 = disparityMap[row0 + x1]
-            let d01 = disparityMap[row1 + x0]
-            let d11 = disparityMap[row1 + x1]
-
-            var d = (1.0 - fy) * ((1.0 - fx) * d00 + fx * d10) + fy * ((1.0 - fx) * d01 + fx * d11)
-
-            if abs(depthGamma - 1.0) > 0.01 {
-                d = pow(max(0.0001, d), Float(1.0 / max(0.2, depthGamma)))
-            }
-            if abs(depthContrast) > 0.01 {
-                let s = d * d * (3.0 - 2.0 * d)
-                d = (1.0 - Float(depthContrast)) * d + Float(depthContrast) * s
-            }
-            return min(1.0, max(0.0, d))
-        }
 
         let fWidth = Float(width)
         let fHeight = Float(height)
@@ -728,7 +738,15 @@ public final class ViewStereoDepthSynthesizer: @unchecked Sendable {
 
             for x in 0..<width {
                 let u = Float(x) / fWidth
-                let d = sampleDisparity(u: u, v: v)
+                let d = Self.sampleNormalizedDisparity(
+                    disparityMap: disparityMap,
+                    depthW: depthW,
+                    depthH: depthH,
+                    u: u,
+                    v: v,
+                    depthGamma: depthGamma,
+                    depthContrast: depthContrast
+                )
                 // 手前(d > focusVal)は飛び出し、奥(d < focusVal)は引き込み
                 let dispOffset = (d - focusVal) * halfBaseline
 
