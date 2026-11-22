@@ -5,16 +5,36 @@ document.addEventListener('DOMContentLoaded', () => {
             'meta-desc': 'ViewStereo - 19世紀ステレオカードのAI自動検出・7自由度ホモグラフィ整準・デジタルリマウント & 空間写真復元スタジオ',
             'title': 'ViewStereo | 歴史的ステレオカード復元 & インテリジェント・ステレオウィンドウスタジオ',
             'mac-exclusive': ' ViewStereo は macOS 専用アプリケーションです。',
-            'nav-features': '機能',
+            'nav-features': '復元図録',
             'nav-stereoview': '歴史と魅力',
-            'nav-tech': 'テクノロジー',
-            'nav-download': 'ダウンロード',
+            'nav-specimens': '標本展示',
+            'nav-tech': '工学仕様',
+            'nav-download': '収蔵・DL',
             'btn-get-beta': '無料ダウンロード',
             'hero-title': '<span>時を超えた立体視、</span><br><span>精密に蘇る。</span>',
             'hero-version': 'v0.1.7 (2026.11.22)',
             'dev-status-badge': '開発初期・現在開発中',
             'hero-subtitle': 'ViewStereo は、19世紀の歴史的ステレオカード（Stereoview / Stereograph）や現代のステレオ写真を、Core ML自動検出・7自由度対称ホモグラフィ整準・ステレオウィンドウ最適化によって高品位な空間写真やデジタル・リマウントカードへ復元する macOS 専用アプリケーションです。',
+            'hero-plate-caption': 'Fig. I. — The Holmes Hand Stereoscope &amp; Binocular Optical Path',
+            'hero-arch-tag': 'TWIN ARCH-TOP STEREOGRAPH · c. 1890s',
+            'hero-arch-desc': '7自由度ホモグラフィ整準 ＆ AI セグメンテーションにより、19世紀の肉筆台紙カードを現代の空間写真へ無劣化復元します。',
             'about-desc': 'ViewStereo は、StereoCardSeg (U-Net) と MobileSAM / SAM 2.1 Tiny による精密なカード領域抽出と、Accelerate LAPACK (dposv_ + IRLS) を用いた7自由度対称ホモグラフィ整準を統合。19世紀ステレオカードの傾き・歪み・垂直視差・経年退色を自動で補正し、Apple Vision Pro 空間写真（MV-HEVC）や時代別デジタル・リマウントカードとして現代に蘇らせます。',
+            'story-plate-caption': 'Plate II. — Victorian Parlor Stereoscope &amp; Authentic Archival Stereocards (Underwood &amp; Underwood / T. Enami)',
+            'spec-header-title': '実物ステレオカード標本展示',
+            'spec-header-subtitle': '学習用アーカイブおよび復元検証に使用される、19世紀〜20世紀初頭のパブリックドメイン・ステレオカード実物コレクション。',
+            'spec-1-title': '明治・横浜手彩色「芸者図」',
+            'spec-1-desc': 'T. Enami（江南信國）による輸出用手彩色ステレオカード。セージ／イエロー台紙と優雅なアーチ枠。',
+            'spec-2-title': '幕末・明治初期「侍（Japanese Officers）」',
+            'spec-2-desc': '鶏卵紙プリントによる初期アイボリー台紙カード。経年退色と手貼り傾きを ViewStereo で精密整準。',
+            'spec-3-title': 'Underwood &amp; Underwood 社版',
+            'spec-3-desc': '世界最大手パブリッシャーによるアーチ型曲面台紙。両端マージンの活版クレジットも OCR 復元対象。',
+            'spec-4-title': '自由の女神像（Liberty Enlightening）',
+            'spec-4-desc': 'サーモンピンク台紙の建築・記念碑ビュー。遠景の空領域を保護しつつアーチ境界を高精度に抽出。',
+            'spec-5-title': 'Keystone 社「オリオン座星雲」',
+            'spec-5-desc': 'ヤーキス天文台撮影の天体ステレオカード。1900年代のダークグレー曲面台紙の代表例。',
+            'spec-6-title': '「ステレオ写真専門店」風俗図',
+            'spec-6-desc': 'ステレオカードを買い求めるヴィクトリア朝の貴婦人たちを立体撮影したメタ的風俗カード。',
+            'tech-diagram-caption': 'Fig. II. — Symmetric 7-DoF Homography Epipolar Alignment &amp; MAAIR Crop Geometry',
             'heritage-badge': 'Historical Heritage · 19th Century Media Revolution',
             'heritage-title': '<span>Stereoview &amp; Stereograph</span><br><span>19世紀の「没入体験」と空間メディアの原点</span>',
             'heritage-subtitle': '100年以上前、ヴィクトリア朝の人々は「ステレオスコープ」という魔法の双眼鏡を覗き込み、世界を立体で体験していました。それは現代のVRゴーグルやApple Vision Proを先取りした、人類最初の空間メディア革命でした。',
@@ -31,7 +51,7 @@ document.addEventListener('DOMContentLoaded', () => {
             'pillar-3-title': '100年の封印を解き、空間写真へ',
             'pillar-3-desc': '手貼りによる傾きや経年退色を抱えたヴィンテージ・ステレオカード。ViewStereo は Core ML セグメンテーションと7自由度対称ホモグラフィ整準により、幾何歪みと垂直視差を完全除去。Apple Vision Pro の Spatial Photo や高精細SBSとして現代に解放します。',
             'btn-try-free': '今すぐ無料ダウンロード',
-            'btn-view-features': '機能を見る',
+            'btn-view-features': '復元図録を見る',
             'feat-header-title': '研ぎ澄まされた機能',
             'feat-header-subtitle': 'AI セグメンテーションと数理幾何最適化の結晶が、歴史的立体写真を現代に蘇らせます。',
             'feat-1-title': 'ステレオカード自動検出 ＆ 7自由度ホモグラフィ整準',
@@ -44,7 +64,7 @@ document.addEventListener('DOMContentLoaded', () => {
             'feat-4-desc': 'Apple Vision Pro 用の MV-HEVC 空間写真（HEIC）、SBS、アナグリフ（Dubois/Color/Gray）、偏光、MPO、個別L/Rなど11形式の出力に対応。大量のアーカイブをフォルダごと自動処理し、調整レポート（.txt）も保存できます。',
             'tech-header-title': 'Powered by State-of-the-Art Tech',
             'tech-header-subtitle': 'Core ML、Vision、Accelerate LAPACK を核とし、Apple Silicon に最適化された精密処理。',
-            'about-sharp-content': `<p>ViewStereo は、独自の Core ML モデル「StereoCardSeg」に加え、<a href="https://github.com/ChaoningZhang/MobileSAM" target="_blank" rel="noopener noreferrer" class="tech-link">MobileSAM</a> や Meta AI の <a href="https://github.com/facebookresearch/sam2" target="_blank" rel="noopener noreferrer" class="tech-link">SAM 2.1 Tiny</a> をオンデバイスで実行し、劣化した歴史的ステレオカードの印画境界を正確に抽出します。続く幾何補正では Accelerate LAPACK (<code>dposv_</code>) による7自由度対称ホモグラフィ最適化と MAAIR 内接矩形クロップを行い、視覚的疲労の原因となる垂直視差を完全に排除します。<br><span style="font-size: 0.9rem; color: #FDE68A; display: block; margin-top: 10px;">※すべての AI モデルはアプリに同梱され、100% オンデバイス（オフライン）で高速に動作します。</span></p>`,
+            'about-sharp-content': `<p>ViewStereo は、独自の Core ML モデル「StereoCardSeg」に加え、<a href="https://github.com/ChaoningZhang/MobileSAM" target="_blank" rel="noopener noreferrer" class="tech-link">MobileSAM</a> や Meta AI の <a href="https://github.com/facebookresearch/sam2" target="_blank" rel="noopener noreferrer" class="tech-link">SAM 2.1 Tiny</a> をオンデバイスで実行し、劣化した歴史的ステレオカードの印画境界を正確に抽出します。続く幾何補正では Accelerate LAPACK (<code>dposv_</code>) による7自由度対称ホモグラフィ最適化と MAAIR 内接矩形クロップを行い、視覚的疲労の原因となる垂直視差を完全に排除します。<br><span style="font-size: 0.9rem; color: var(--accent-vermilion); display: block; margin-top: 10px; font-weight: 600;">※すべての AI モデルはアプリに同梱され、100% オンデバイス（オフライン）で高速に動作します。</span></p>`,
             'upd-header-title': '更新履歴',
             'upd-header-subtitle': '精度と再現性の向上のため、進化し続けます。',
             'upd-017-1': '【ViewStereo 0.1.7 アップデート】3ペイン・スタジオ型ファイルブラウザワークフローの導入：左ペインにツリー型ファイルブラウザ（⌥⌘L）を新設。起動時フォルダ指定、L/Rペア自動統合（_L/_R等）、処理ステータスバッジ（✓/⚠️/✕）、出力先フォルダ自動除外に対応',
@@ -89,16 +109,36 @@ document.addEventListener('DOMContentLoaded', () => {
             'meta-desc': 'ViewStereo - 19th Century Stereoview Restoration, 7-DoF Homography Alignment & Spatial Photo Studio',
             'title': 'ViewStereo | Historical Stereoview Restoration & Intelligent Stereo Window Studio',
             'mac-exclusive': ' ViewStereo is exclusively designed for macOS.',
-            'nav-features': 'Features',
-            'nav-stereoview': 'Stereoview Heritage',
-            'nav-tech': 'Technology',
+            'nav-features': 'Archival Plates',
+            'nav-stereoview': 'Heritage',
+            'nav-specimens': 'Specimens',
+            'nav-tech': 'Schematics',
             'nav-download': 'Download',
             'btn-get-beta': 'Free Download',
             'hero-title': '<span>Timeless Stereoscopy,</span><br><span>Precision Restored.</span>',
             'hero-version': 'v0.1.7 (2026.11.22)',
             'dev-status-badge': 'Early Development',
             'hero-subtitle': 'ViewStereo is a native macOS studio app that transforms 19th-century historical stereoview cards and modern stereo photos into pristine Apple Vision Pro Spatial Photos, SBS, and digitally remounted cards using Core ML segmentation and 7-DoF homography alignment.',
+            'hero-plate-caption': 'Fig. I. — The Holmes Hand Stereoscope &amp; Binocular Optical Path',
+            'hero-arch-tag': 'TWIN ARCH-TOP STEREOGRAPH · c. 1890s',
+            'hero-arch-desc': 'Restoring 19th-century hand-mounted stereocards into pristine Spatial Photos via 7-DoF homography alignment and AI segmentation.',
             'about-desc': 'ViewStereo combines StereoCardSeg (U-Net) and MobileSAM / SAM 2.1 Tiny mask refinement with Accelerate LAPACK (dposv_ + IRLS) 7-DoF symmetric homography alignment. It automatically eliminates vertical disparity, keystone distortion, and color aging—preserving heritage stereoviews for modern spatial displays.',
+            'story-plate-caption': 'Plate II. — Victorian Parlor Stereoscope &amp; Authentic Archival Stereocards (Underwood &amp; Underwood / T. Enami)',
+            'spec-header-title': 'Archival Stereocard Specimens',
+            'spec-header-subtitle': 'Authentic 19th- to early 20th-century public-domain stereoviews from our training and restoration reference archive.',
+            'spec-1-title': 'T. Enami Hand-Tinted "Geisha Girls"',
+            'spec-1-desc': 'Export hand-colored stereoview by T. Enami (Yokohama, Japan), featuring arched-top frames on a vintage mount.',
+            'spec-2-title': 'Bakumatsu / Meiji "Japanese Officers"',
+            'spec-2-desc': 'Early albumen print on an ivory mount. Hand-mounting tilt and fading are rectified down to sub-pixel precision.',
+            'spec-3-title': 'Underwood &amp; Underwood Publishers',
+            'spec-3-desc': 'Classic arched curved mount from the world’s largest stereoview publisher, complete with letterpress side margins.',
+            'spec-4-title': 'Statue of Liberty (New York)',
+            'spec-4-desc': 'Monumental view on a salmon-pink mount. Sky gradients are safely preserved during arch boundary extraction.',
+            'spec-5-title': 'Keystone "Constellation of Orion"',
+            'spec-5-desc': 'Yerkes Observatory astronomical stereoview mounted on a classic 1900s Keystone Dark curved card.',
+            'spec-6-title': '"Stereoscopic Views Emporium"',
+            'spec-6-desc': 'Hand-tinted Victorian genre card depicting patrons browsing stereographs inside a 19th-century optical shop.',
+            'tech-diagram-caption': 'Fig. II. — Symmetric 7-DoF Homography Epipolar Alignment &amp; MAAIR Crop Geometry',
             'heritage-badge': 'Historical Heritage · 19th Century Media Revolution',
             'heritage-title': '<span>Stereoview &amp; Stereograph</span><br><span>The 19th-Century Virtual Reality &amp; The Dawn of Spatial Media</span>',
             'heritage-subtitle': 'Over a century ago, Victorian parlors gathered around a magical binocular device known as the stereoscope. Far from a mere novelty, it was mankind’s first spatial media revolution—foreshadowing today’s VR headsets and Apple Vision Pro.',
@@ -128,7 +168,7 @@ document.addEventListener('DOMContentLoaded', () => {
             'feat-4-desc': 'Export across 11 layouts including Apple Vision Pro MV-HEVC Spatial Photos (HEIC), SBS, Dubois/Color/Gray Anaglyph, Polarized, MPO, and Separate L/R. Process entire archival folders automatically with optional .txt adjustment reports.',
             'tech-header-title': 'Powered by State-of-the-Art Tech',
             'tech-header-subtitle': 'Built on Core ML, Apple Vision, and Accelerate LAPACK optimized for Apple Silicon.',
-            'about-sharp-content': `<p>ViewStereo runs custom Core ML localization (StereoCardSeg) alongside <a href="https://github.com/ChaoningZhang/MobileSAM" target="_blank" rel="noopener noreferrer" class="tech-link">MobileSAM</a> and Meta AI’s <a href="https://github.com/facebookresearch/sam2" target="_blank" rel="noopener noreferrer" class="tech-link">SAM 2.1 Tiny</a> directly on-device to trace degraded historical print edges. Its 7-DoF symmetric homography solver powered by Accelerate LAPACK (<code>dposv_</code>) and MAAIR cropping completely removes eye-straining vertical disparity.<br><span style="font-size: 0.9rem; color: #FDE68A; display: block; margin-top: 10px;">* All AI models are bundled locally and run 100% offline on your Mac.</span></p>`,
+            'about-sharp-content': `<p>ViewStereo runs custom Core ML localization (StereoCardSeg) alongside <a href="https://github.com/ChaoningZhang/MobileSAM" target="_blank" rel="noopener noreferrer" class="tech-link">MobileSAM</a> and Meta AI’s <a href="https://github.com/facebookresearch/sam2" target="_blank" rel="noopener noreferrer" class="tech-link">SAM 2.1 Tiny</a> directly on-device to trace degraded historical print edges. Its 7-DoF symmetric homography solver powered by Accelerate LAPACK (<code>dposv_</code>) and MAAIR cropping completely removes eye-straining vertical disparity.<br><span style="font-size: 0.9rem; color: var(--accent-vermilion); display: block; margin-top: 10px; font-weight: 600;">* All AI models are bundled locally and run 100% offline on your Mac.</span></p>`,
             'upd-header-title': 'Release History',
             'upd-header-subtitle': 'Continuously evolving for archival precision and spatial fidelity.',
             'upd-017-1': '[ViewStereo 0.1.7 Update] 3-Pane Studio Workflow with Tree-Style File Browser: Introduced persistent left sidebar file browser (⌥⌘L) with launch folder prompt, automatic L/R pair grouping (_L/_R), real-time status badges (✓/⚠️/✕), and output folder protection.',
@@ -352,9 +392,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const cardW = Math.min(width, height) * 0.58;
             const cardH = cardW * 0.5;
 
-            // Perspective grid lines
+            // Perspective grid lines (delicate sepia drafting grid)
             ctx.save();
-            ctx.strokeStyle = 'rgba(245, 166, 35, 0.09)';
+            ctx.strokeStyle = 'rgba(35, 27, 20, 0.055)';
             ctx.lineWidth = 1;
             const cols = 10;
             const rows = 6;
@@ -385,13 +425,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const twinH = cardH * 0.74;
             const gap = cardW * 0.04;
 
-            drawArchFrame(cx - twinW / 2 - gap + currentTiltY * 0.7 - parallax, cy + currentTiltX * 0.7, twinW, twinH, 0.35, '#F5A623');
-            drawArchFrame(cx + twinW / 2 + gap + currentTiltY * 0.7 + parallax, cy + currentTiltX * 0.7, twinW, twinH, 0.35, '#FFB84D');
+            drawArchFrame(cx - twinW / 2 - gap + currentTiltY * 0.7 - parallax, cy + currentTiltX * 0.7, twinW, twinH, 0.22, '#9A7234');
+            drawArchFrame(cx + twinW / 2 + gap + currentTiltY * 0.7 + parallax, cy + currentTiltX * 0.7, twinW, twinH, 0.22, '#9E3A2E');
 
             // Epiline horizontal alignment guide
             ctx.save();
             ctx.setLineDash([4, 6]);
-            ctx.strokeStyle = 'rgba(255, 184, 77, 0.22)';
+            ctx.strokeStyle = 'rgba(158, 58, 46, 0.22)';
             ctx.beginPath();
             ctx.moveTo(cx - cardW * 0.65, cy + currentTiltX * 0.7);
             ctx.lineTo(cx + cardW * 0.65, cy + currentTiltX * 0.7);
