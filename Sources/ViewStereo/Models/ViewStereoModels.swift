@@ -156,6 +156,33 @@ enum StereoBatchPairingMode: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+/// ステレオ警告・整準失敗時のバッチ書き出しポリシー
+enum BatchWarningPolicy: String, CaseIterable, Identifiable {
+    case exportAll = "Export All Normally"
+    case skipWarnings = "Skip Warnings"
+    case convertWarningsTo3D = "Convert Warnings to 2D-3D"
+    case onlyConvertWarningsTo3D = "Only Convert Warnings to 2D-3D"
+
+    var id: String { rawValue }
+}
+
+/// 単一画像の入力解釈モード（2D自動判定 / 強制ステレオ / 強制2D→3D）
+enum StereoInputInterpretation: String, CaseIterable, Identifiable {
+    case auto = "Auto (Stereo / 2D)"
+    case forceStereo = "Force Stereo (SBS / Card)"
+    case force2D = "Force 2D Photo → 3D"
+
+    var id: String { rawValue }
+}
+
+/// アプリ全体の作業モード（ステレオ修復 / 2D→3D 専用）
+enum ViewStereoWorkspaceMode: String, CaseIterable, Identifiable {
+    case stereoRestore = "Stereo Restore"
+    case convert2DTo3D = "2D → 3D"
+
+    var id: String { rawValue }
+}
+
 /// ステレオカード自動切り出しモード
 enum StereoCardMode: String, CaseIterable, Identifiable {
     case off = "Off"
@@ -186,17 +213,25 @@ public enum StereoSingleEyeSide: String, CaseIterable, Identifiable, Sendable {
 public enum StereoReconstructionMode: Equatable, Sendable {
     case trueStereo
     case singleEyeDepth(StereoSingleEyeSide)
+    case fullFrame2DDepth
 
     public var isSingleEyeDepth: Bool {
         switch self {
-        case .trueStereo: return false
+        case .trueStereo, .fullFrame2DDepth: return false
         case .singleEyeDepth: return true
+        }
+    }
+
+    public var isDepthSynthesized: Bool {
+        switch self {
+        case .trueStereo: return false
+        case .singleEyeDepth, .fullFrame2DDepth: return true
         }
     }
 
     public var activeSide: StereoSingleEyeSide? {
         switch self {
-        case .trueStereo: return nil
+        case .trueStereo, .fullFrame2DDepth: return nil
         case .singleEyeDepth(let s): return s
         }
     }
@@ -233,8 +268,10 @@ public struct StereoSalvageAdvisory: Sendable, Equatable {
 struct BatchCompletionSummary: Equatable {
     let succeeded: Int
     let failed: Int
+    let warningCount: Int
     let total: Int
     let wasCancelled: Bool
+    let isVerifyOnly: Bool
     let outputDirectory: URL
 }
 
@@ -247,7 +284,7 @@ struct StereoBatchItem: Identifiable, Sendable {
     let rightURL: URL? // nil の場合は SBS 単体画像
 }
 
-/// アプリ設定（UI大文字モード等）
+/// アプリ設定（UI大文字モード・AI深度モデル・メモリ管理等）
 final class ViewStereoSettings: ObservableObject {
     static let shared = ViewStereoSettings()
 
@@ -263,7 +300,78 @@ final class ViewStereoSettings: ObservableObject {
         }
     }
 
-    private init() {}
+    @Published var depthModelEngineRaw: Int {
+        didSet {
+            UserDefaults.standard.set(depthModelEngineRaw, forKey: "VS.depthModelEngine")
+        }
+    }
+
+    var preferredDepthEngine: StudioDepthEngine {
+        get { StudioDepthEngine(rawValue: depthModelEngineRaw) ?? .depthAnythingV2Small }
+        set { depthModelEngineRaw = newValue.rawValue }
+    }
+
+    @Published var releaseAIModelsAfterGeneration: Bool = UserDefaults.standard.object(forKey: "VS.releaseAIModelsAfterGeneration") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(releaseAIModelsAfterGeneration, forKey: "VS.releaseAIModelsAfterGeneration")
+        }
+    }
+
+    @Published var startupFolderActionRaw: String = UserDefaults.standard.string(forKey: "VS.startupFolderAction") ?? StartupFolderAction.showSheet.rawValue {
+        didSet {
+            UserDefaults.standard.set(startupFolderActionRaw, forKey: "VS.startupFolderAction")
+        }
+    }
+
+    var startupFolderAction: StartupFolderAction {
+        get { StartupFolderAction(rawValue: startupFolderActionRaw) ?? .showSheet }
+        set { startupFolderActionRaw = newValue.rawValue }
+    }
+
+    @Published var keepRecipeAcrossImages: Bool = UserDefaults.standard.object(forKey: "VS.keepRecipeAcrossImages") as? Bool ?? false {
+        didSet {
+            UserDefaults.standard.set(keepRecipeAcrossImages, forKey: "VS.keepRecipeAcrossImages")
+        }
+    }
+
+    @Published var lastWorkspaceFolderPath: String? = UserDefaults.standard.string(forKey: "VS.lastWorkspaceFolderPath") {
+        didSet {
+            UserDefaults.standard.set(lastWorkspaceFolderPath, forKey: "VS.lastWorkspaceFolderPath")
+        }
+    }
+
+    @Published var recentWorkspaceFolderPaths: [String] = UserDefaults.standard.stringArray(forKey: "VS.recentWorkspaceFolderPaths") ?? [] {
+        didSet {
+            UserDefaults.standard.set(recentWorkspaceFolderPaths, forKey: "VS.recentWorkspaceFolderPaths")
+        }
+    }
+
+    func recordWorkspaceFolder(_ url: URL) {
+        let path = url.standardizedFileURL.path
+        lastWorkspaceFolderPath = path
+        var list = recentWorkspaceFolderPaths.filter { $0 != path }
+        list.insert(path, at: 0)
+        if list.count > 8 {
+            list = Array(list.prefix(8))
+        }
+        recentWorkspaceFolderPaths = list
+    }
+
+    private init() {
+        if let saved = UserDefaults.standard.object(forKey: "VS.depthModelEngine") as? Int,
+           StudioDepthEngine(rawValue: saved) != nil {
+            self.depthModelEngineRaw = saved
+        } else {
+            // 初回起動時はシリーズ他アプリに既に導入済みの高精度エンジンがあれば優先選択する
+            let priorityOrder: [StudioDepthEngine] = [
+                .depthPro2Large, .depthPro2Base, .moge2ViTL, .depthPro,
+                .depthAnythingV3Mono, .depthAnythingV2Large, .moge2ViTB,
+                .depthPro2Small, .depthAnythingV2Small
+            ]
+            let detected = priorityOrder.first { $0.isInstalled(preferredAppFolder: "ViewStereo") }
+            self.depthModelEngineRaw = (detected ?? .depthAnythingV2Small).rawValue
+        }
+    }
 }
 
 /// ViewStereo メイン ViewModel
@@ -278,6 +386,80 @@ final class ViewStereoViewModel: ObservableObject {
     @Published var restorationProgressMessage: String = ""
 
     // プレビュー・UI状態
+    @Published var isShowingFileBrowser: Bool = UserDefaults.standard.object(forKey: "VS.isShowingFileBrowser") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(isShowingFileBrowser, forKey: "VS.isShowingFileBrowser")
+        }
+    }
+    @Published var fileBrowserWidth: CGFloat = 260
+
+    /// 左ファイルブラウザ専用ストア（ViewStereoViewModel.objectWillChange を発火させず選択等を独立更新）
+    let browserStore = WorkspaceBrowserStore()
+    private var currentImageLoadTask: Task<Void, Never>? = nil
+    private var imageLoadGeneration: Int = 0
+
+    var browserViewMode: WorkspaceBrowserViewMode {
+        get { browserStore.viewMode }
+        set { browserStore.viewMode = newValue }
+    }
+    var browserSearchText: String {
+        get { browserStore.searchText }
+        set { browserStore.searchText = newValue }
+    }
+    var browserShowWarningsOnly: Bool {
+        get { browserStore.showWarningsOnly }
+        set { browserStore.showWarningsOnly = newValue }
+    }
+    var workspaceRootFolder: URL? {
+        browserStore.rootFolder
+    }
+    var workspaceSelectedNodeIDs: Set<String> {
+        get { browserStore.selectedNodeIDs }
+        set { browserStore.updateSelection(newValue) }
+    }
+    var workspaceSelectedBatchCount: Int {
+        browserStore.selectedBatchCount
+    }
+    var workspaceActiveItemID: String? {
+        get { browserStore.activeItemID }
+        set { browserStore.activeItemID = newValue }
+    }
+    var workspaceItemStatuses: [String: WorkspaceItemStatus] {
+        get { browserStore.itemStatuses }
+        set { browserStore.itemStatuses = newValue }
+    }
+
+    @Published var hasHandledStartupWorkspacePrompt: Bool = false
+    @Published var isShowingStartupFolderSheet: Bool = false
+
+    @Published var workspaceMode: ViewStereoWorkspaceMode = {
+        if let raw = UserDefaults.standard.string(forKey: "VS.workspaceMode"),
+           let mode = ViewStereoWorkspaceMode(rawValue: raw) {
+            return mode
+        }
+        return .stereoRestore
+    }() {
+        didSet {
+            guard oldValue != workspaceMode else { return }
+            UserDefaults.standard.set(workspaceMode.rawValue, forKey: "VS.workspaceMode")
+            browserStore.configureOptions(
+                pairingMode: effectiveBrowserPairingMode,
+                includeSubfolders: batchIncludeSubfolders,
+                outputFolder: batchOutputFolder
+            )
+            if hasLoadedImages, let url = leftURL, !isProcessing && !isBatchRunning {
+                loadSingleSBSImage(url: url, resetRestoration: false)
+            }
+        }
+    }
+    @Published var is2D3DSectionExpanded: Bool = true
+    @Published var lastDepthEngineLabel: String = ""
+    @Published var lastDepthInferenceMs: Double = 0.0
+
+    var effectiveBrowserPairingMode: StereoBatchPairingMode {
+        workspaceMode == .convert2DTo3D ? .sbsOnly : batchPairingMode
+    }
+
     @Published var isShowingInspector: Bool = true
     @Published var isRecipeSectionExpanded: Bool = true
     @Published var isWindowSectionExpanded: Bool = false
@@ -300,14 +482,14 @@ final class ViewStereoViewModel: ObservableObject {
     @Published var stereoReconstructionMode: StereoReconstructionMode = .trueStereo
     @Published var virtualDepthBasePercent: Double = 3.0 {
         didSet {
-            if stereoReconstructionMode.isSingleEyeDepth, oldValue != virtualDepthBasePercent {
+            if stereoReconstructionMode.isDepthSynthesized, oldValue != virtualDepthBasePercent {
                 reapplyDepthSynthesis()
             }
         }
     }
     @Published var depthGamma: Double = 1.0 {
         didSet {
-            if stereoReconstructionMode.isSingleEyeDepth, oldValue != depthGamma {
+            if stereoReconstructionMode.isDepthSynthesized, oldValue != depthGamma {
                 reapplyDepthSynthesis()
             }
         }
@@ -835,6 +1017,7 @@ final class ViewStereoViewModel: ObservableObject {
 
         leftURL = nil
         rightURL = nil
+        workspaceActiveItemID = nil
         isSingleSBSInput = false
         hasPreservedArch = false
         currentMountContext = nil
@@ -934,21 +1117,72 @@ final class ViewStereoViewModel: ObservableObject {
 
     // バッチ処理状態
     @Published var batchInputFolder: URL? = nil
-    @Published var batchOutputFolder: URL? = nil
+    @Published var batchOutputFolder: URL? = nil {
+        didSet {
+            browserStore.configureOptions(
+                pairingMode: effectiveBrowserPairingMode,
+                includeSubfolders: batchIncludeSubfolders,
+                outputFolder: batchOutputFolder
+            )
+        }
+    }
     @Published var batchPairingMode: StereoBatchPairingMode = .auto {
         didSet {
             UserDefaults.standard.set(batchPairingMode.rawValue, forKey: "VS.batchPairingMode")
+            browserStore.configureOptions(
+                pairingMode: effectiveBrowserPairingMode,
+                includeSubfolders: batchIncludeSubfolders,
+                outputFolder: batchOutputFolder
+            )
             if isBatchQueueActive, let dir = batchInputFolder {
                 batchQueueItems = Self.discoverBatchItems(in: dir, mode: batchPairingMode)
             }
         }
     }
-    @Published var batchSaveReport: Bool = false
+    @Published var batchIncludeSubfolders: Bool = UserDefaults.standard.object(forKey: "VS.batchIncludeSubfolders") as? Bool ?? false {
+        didSet {
+            UserDefaults.standard.set(batchIncludeSubfolders, forKey: "VS.batchIncludeSubfolders")
+            browserStore.configureOptions(
+                pairingMode: effectiveBrowserPairingMode,
+                includeSubfolders: batchIncludeSubfolders,
+                outputFolder: batchOutputFolder
+            )
+        }
+    }
+    @Published var batchWarningPolicy: BatchWarningPolicy = {
+        if let raw = UserDefaults.standard.string(forKey: "VS.batchWarningPolicy"),
+           let p = BatchWarningPolicy(rawValue: raw) {
+            return p
+        }
+        return .exportAll
+    }() {
+        didSet {
+            UserDefaults.standard.set(batchWarningPolicy.rawValue, forKey: "VS.batchWarningPolicy")
+        }
+    }
+    @Published var inputInterpretation: StereoInputInterpretation = {
+        if let raw = UserDefaults.standard.string(forKey: "VS.inputInterpretation"),
+           let mode = StereoInputInterpretation(rawValue: raw) {
+            return mode
+        }
+        return .auto
+    }() {
+        didSet {
+            UserDefaults.standard.set(inputInterpretation.rawValue, forKey: "VS.inputInterpretation")
+        }
+    }
+    @Published var batchSaveReport: Bool = UserDefaults.standard.object(forKey: "VS.batchSaveReport") as? Bool ?? false {
+        didSet {
+            UserDefaults.standard.set(batchSaveReport, forKey: "VS.batchSaveReport")
+        }
+    }
     @Published var isBatchRunning: Bool = false
+    @Published var isBatchVerifyOnly: Bool = false
     @Published var batchProgress: Double = 0.0
     @Published var batchTotalCount: Int = 0
     @Published var batchCompletedCount: Int = 0
     @Published var batchFailedCount: Int = 0
+    @Published var verifyWarningCount: Int = 0
     @Published var batchCurrentFile: String = ""
     @Published var batchCompletionSummary: BatchCompletionSummary? = nil
     @Published var batchQueueItems: [StereoBatchItem] = []
@@ -1101,6 +1335,14 @@ final class ViewStereoViewModel: ObservableObject {
         if ud.object(forKey: "VS.cardUseFilenameAsCaption") != nil {
             self.cardUseFilenameAsCaption = ud.bool(forKey: "VS.cardUseFilenameAsCaption")
         }
+        if let bpm = ud.string(forKey: "VS.batchPairingMode"), let mode = StereoBatchPairingMode(rawValue: bpm) {
+            self.batchPairingMode = mode
+        }
+        browserStore.configureOptions(
+            pairingMode: effectiveBrowserPairingMode,
+            includeSubfolders: batchIncludeSubfolders,
+            outputFolder: batchOutputFolder
+        )
     }
 
     var currentSourceName: String {
@@ -1161,15 +1403,81 @@ final class ViewStereoViewModel: ObservableObject {
         }
     }
 
+    private func isTemporaryLocation(_ url: URL) -> Bool {
+        let p = url.standardizedFileURL.path
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory()).standardizedFileURL.path
+        return p.hasPrefix("/var/folders/") || p.hasPrefix("/private/var/folders/") || p.hasPrefix(tmp)
+    }
+
+    @discardableResult
+    func promptOutputFolderForSelection() -> URL? {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = String(localized: "Select Output Folder")
+        panel.message = String(localized: "Choose a destination folder for processed images.")
+        if let existing = batchOutputFolder, !isTemporaryLocation(existing),
+           FileManager.default.fileExists(atPath: existing.path) {
+            panel.directoryURL = existing
+        } else if let pics = FileManager.default.urls(for: .picturesDirectory, in: .userDomainMask).first {
+            panel.directoryURL = pics
+        }
+        if panel.runModal() == .OK, let dir = panel.url {
+            batchOutputFolder = dir
+            return dir
+        }
+        return nil
+    }
+
+    func setVirtualWorkspaceSelection(urls: [URL]) {
+        batchInputFolder = nil
+        if let out = batchOutputFolder, isTemporaryLocation(out) {
+            batchOutputFolder = nil
+        }
+        // 写真アプリ等からの複数選択時は、出力先ダイアログで出力先を指定させる
+        if batchOutputFolder == nil {
+            _ = promptOutputFolderForSelection()
+        }
+        browserStore.setVirtualSelection(
+            urls: urls,
+            pairingMode: effectiveBrowserPairingMode,
+            outputFolder: batchOutputFolder,
+            includeSubfolders: batchIncludeSubfolders
+        )
+        isShowingFileBrowser = true
+        statusMessage = browserStore.displayTitle ?? "Selected Photos"
+        if let firstItem = browserStore.rootNodes().compactMap(\.item).first {
+            openBrowserItem(firstItem)
+        }
+    }
+
     func handleDroppedURLs(_ urls: [URL]) {
+        hasHandledStartupWorkspacePrompt = true
         if let dir = urls.first(where: { $0.hasDirectoryPath }) {
-            prepareBatchQueue(folder: dir)
+            setWorkspaceRootFolder(dir)
+            isShowingFileBrowser = true
             return
         }
         let filtered = urls.filter { Self.supportedImageExtensions.contains($0.pathExtension.lowercased()) }
-        if filtered.count >= 2 {
+        if filtered.count >= 3 || (workspaceMode == .convert2DTo3D && filtered.count >= 2) {
+            setVirtualWorkspaceSelection(urls: filtered)
+        } else if filtered.count >= 2 {
+            if workspaceRootFolder == nil && !isTemporaryLocation(filtered[0]) {
+                setWorkspaceRootFolder(filtered[0].deletingLastPathComponent())
+                isShowingFileBrowser = true
+            } else if isTemporaryLocation(filtered[0]), let out = batchOutputFolder, isTemporaryLocation(out) {
+                batchOutputFolder = nil
+            }
             loadSeparateImages(left: filtered[0], right: filtered[1])
         } else if let single = filtered.first {
+            if workspaceRootFolder == nil && !isTemporaryLocation(single) {
+                setWorkspaceRootFolder(single.deletingLastPathComponent())
+                isShowingFileBrowser = true
+            } else if isTemporaryLocation(single), let out = batchOutputFolder, isTemporaryLocation(out) {
+                batchOutputFolder = nil
+            }
             loadSingleSBSImage(url: single)
         }
     }
@@ -1179,102 +1487,167 @@ final class ViewStereoViewModel: ObservableObject {
         loadSingleSBSImage(url: url, resetRestoration: false)
     }
 
-    func loadSingleSBSImage(url: URL, resetRestoration: Bool = true) {
+    func loadSingleSBSImage(
+        url: URL,
+        resetRestoration: Bool = true,
+        interpretationOverride: StereoInputInterpretation? = nil
+    ) {
+        currentImageLoadTask?.cancel()
+        imageLoadGeneration += 1
+        let gen = imageLoadGeneration
+
+        if let prevID = workspaceActiveItemID,
+           prevID != url.path,
+           workspaceItemStatuses[prevID] == .processing {
+            workspaceItemStatuses[prevID] = .idle
+        }
+
         isBatchQueueActive = false
         batchCompletionSummary = nil
-        if resetRestoration {
+        if resetRestoration && !ViewStereoSettings.shared.keepRecipeAcrossImages {
             resetVintageRestoration(renderPreview: false)
-        resetColorization(renderPreview: false)
+            resetColorization(renderPreview: false)
         }
         if cardTextMode != .manualTypeset {
             clearCardMountTexts()
         }
+        workspaceActiveItemID = url.path
+        workspaceItemStatuses[url.path] = .processing
         leftURL = url
         rightURL = url
         isSingleSBSInput = true
         isProcessing = true
         let cardMode = stereoCardMode
         let useCoreML = useCoreMLCardSegmentation
+        let interp = interpretationOverride ?? (workspaceMode == .convert2DTo3D ? .force2D : inputInterpretation)
         statusMessage = "Loading image..."
 
-        Task {
-            let loaded = await Task.detached(priority: .userInitiated) { () -> ([UInt8], [UInt8], Int, Int, [UInt8], [UInt8], Int, Int, Bool, Bool, StereoCardSegmenter.OriginalCardMountContext?)? in
+        currentImageLoadTask = Task {
+            struct LoadedSingleResult: Sendable {
+                let left: [UInt8]
+                let right: [UInt8]
+                let width: Int
+                let height: Int
+                let prevL: [UInt8]
+                let prevR: [UInt8]
+                let prevW: Int
+                let prevH: Int
+                let isContainerStereo: Bool
+                let preservedArch: Bool
+                let mountCtx: StereoCardSegmenter.OriginalCardMountContext?
+                let is2DPhoto: Bool
+            }
+
+            let loaded = await Task.detached(priority: .userInitiated) { () -> LoadedSingleResult? in
+                if Task.isCancelled { return nil }
                 // 1. MPO / Apple 空間写真 HEIC のマルチフレームステレオコンテナを優先判定
-                if let (lPair, rPair, pw0, ph0) = Self.loadStereoPairFromContainer(url: url) {
+                if interp != .force2D, let (lPair, rPair, pw0, ph0) = Self.loadStereoPairFromContainer(url: url) {
+                    if Task.isCancelled { return nil }
                     let (pL, pw, ph) = Self.downsampleForPreview(lPair, width: pw0, height: ph0, maxDim: Self.previewMaxDimension)
                     let (pR, _, _) = Self.downsampleForPreview(rPair, width: pw0, height: ph0, maxDim: Self.previewMaxDimension)
-                    return (lPair, rPair, pw0, ph0, pL, pR, pw, ph, true, false, nil)
+                    return LoadedSingleResult(
+                        left: lPair, right: rPair, width: pw0, height: ph0,
+                        prevL: pL, prevR: pR, prevW: pw, prevH: ph,
+                        isContainerStereo: true, preservedArch: false, mountCtx: nil, is2DPhoto: false
+                    )
                 }
 
-                // 2. 通常の単一画像（ステレオカード処理または SBS 分割）
+                // 2. 通常の単一画像（2D写真判定 / ステレオカード処理 / SBS分割）
                 guard let (rgb, fw, fh) = Self.loadNormalizedRGB(url: url), fw >= 64 else {
                     return nil
                 }
-                let l: [UInt8]
-                let r: [UInt8]
-                let w: Int
-                let h: Int
-                var preservedArch = false
-                var mountCtx: StereoCardSegmenter.OriginalCardMountContext? = nil
+                if Task.isCancelled { return nil }
+
+                // 強制 2D モード
+                if interp == .force2D {
+                    let (p2D, pw, ph) = Self.downsampleForPreview(rgb, width: fw, height: fh, maxDim: Self.previewMaxDimension)
+                    return LoadedSingleResult(
+                        left: rgb, right: rgb, width: fw, height: fh,
+                        prevL: p2D, prevR: p2D, prevW: pw, prevH: ph,
+                        isContainerStereo: false, preservedArch: false, mountCtx: nil, is2DPhoto: true
+                    )
+                }
+
+                // ステレオカード台紙検出
                 let extMode: StereoCardCropper.ExtractionMode = (cardMode == .keepArchBlack) ? .keepArchBlack : .cropInner
                 if cardMode != .off,
                    let card = (useCoreML ? StereoCardSegmenter.shared.extractPhotoPair(from: rgb, width: fw, height: fh, mode: extMode) : nil)
                            ?? StereoCardCropper.extractPhotoPair(from: rgb, width: fw, height: fh, mode: extMode) {
-                    l = card.leftRGB
-                    r = card.rightRGB
-                    w = card.width
-                    h = card.height
-                    preservedArch = card.preservedArch
-                    mountCtx = StereoCardSegmenter.shared.currentMountContext
-                } else {
-                    w = fw / 2
-                    h = fh
-                    var tmpL = [UInt8](repeating: 0, count: w * fh * 3)
-                    var tmpR = [UInt8](repeating: 0, count: w * fh * 3)
-                    for y in 0..<fh {
-                        let srcRow = y * fw * 3
-                        let dstRow = y * w * 3
-                        tmpL[dstRow..<(dstRow + w * 3)] = rgb[srcRow..<(srcRow + w * 3)]
-                        tmpR[dstRow..<(dstRow + w * 3)] = rgb[(srcRow + w * 3)..<(srcRow + w * 6)]
-                    }
-                    l = tmpL
-                    r = tmpR
+                    if Task.isCancelled { return nil }
+                    let (pL, pw, ph) = Self.downsampleForPreview(card.leftRGB, width: card.width, height: card.height, maxDim: Self.previewMaxDimension)
+                    let (pR, _, _) = Self.downsampleForPreview(card.rightRGB, width: card.width, height: card.height, maxDim: Self.previewMaxDimension)
+                    let mountCtx = StereoCardSegmenter.shared.currentMountContext
+                    return LoadedSingleResult(
+                        left: card.leftRGB, right: card.rightRGB, width: card.width, height: card.height,
+                        prevL: pL, prevR: pR, prevW: pw, prevH: ph,
+                        isContainerStereo: false, preservedArch: card.preservedArch, mountCtx: mountCtx, is2DPhoto: false
+                    )
                 }
-                let (pL, pw, ph) = Self.downsampleForPreview(l, width: w, height: h, maxDim: Self.previewMaxDimension)
-                let (pR, _, _) = Self.downsampleForPreview(r, width: w, height: h, maxDim: Self.previewMaxDimension)
-                return (l, r, w, h, pL, pR, pw, ph, false, preservedArch, mountCtx)
+
+                if Task.isCancelled { return nil }
+                // 自動判定モード時は、SBS か通常の 2D 写真かを判定する
+                if interp == .auto && Self.detectIs2DPhoto(rgb: rgb, width: fw, height: fh) {
+                    let (p2D, pw, ph) = Self.downsampleForPreview(rgb, width: fw, height: fh, maxDim: Self.previewMaxDimension)
+                    return LoadedSingleResult(
+                        left: rgb, right: rgb, width: fw, height: fh,
+                        prevL: p2D, prevR: p2D, prevW: pw, prevH: ph,
+                        isContainerStereo: false, preservedArch: false, mountCtx: nil, is2DPhoto: true
+                    )
+                }
+
+                // SBS 分割
+                let w = fw / 2
+                let h = fh
+                var tmpL = [UInt8](repeating: 0, count: w * fh * 3)
+                var tmpR = [UInt8](repeating: 0, count: w * fh * 3)
+                for y in 0..<fh {
+                    let srcRow = y * fw * 3
+                    let dstRow = y * w * 3
+                    tmpL[dstRow..<(dstRow + w * 3)] = rgb[srcRow..<(srcRow + w * 3)]
+                    tmpR[dstRow..<(dstRow + w * 3)] = rgb[(srcRow + w * 3)..<(srcRow + w * 6)]
+                }
+                let (pL, pw, ph) = Self.downsampleForPreview(tmpL, width: w, height: h, maxDim: Self.previewMaxDimension)
+                let (pR, _, _) = Self.downsampleForPreview(tmpR, width: w, height: h, maxDim: Self.previewMaxDimension)
+                return LoadedSingleResult(
+                    left: tmpL, right: tmpR, width: w, height: h,
+                    prevL: pL, prevR: pR, prevW: pw, prevH: ph,
+                    isContainerStereo: false, preservedArch: false, mountCtx: nil, is2DPhoto: false
+                )
             }.value
 
-            guard let (l, r, w, fh, pL, pR, pw, ph, isContainerStereo, preservedArch, mountCtx) = loaded else {
+            guard !Task.isCancelled, self.imageLoadGeneration == gen else { return }
+
+            guard let res = loaded else {
                 isProcessing = false
                 statusMessage = "Failed to load image."
+                workspaceItemStatuses[url.path] = .failed("Failed to load image")
                 return
             }
 
-            isSingleSBSInput = !isContainerStereo
-            hasPreservedArch = preservedArch
-            currentMountContext = mountCtx
+            isSingleSBSInput = !res.isContainerStereo && !res.is2DPhoto
+            hasPreservedArch = res.preservedArch
+            currentMountContext = res.mountCtx
             if cardTextMode == .ocrAuto {
                 clearCardMountTexts()
             }
-            rawLeftRGB = l
-            rawRightRGB = r
+            rawLeftRGB = res.left
+            rawRightRGB = res.right
             alignedLeftRGB = nil
             alignedRightRGB = nil
-            previewRawLeftRGB = pL
-            previewRawRightRGB = pR
+            previewRawLeftRGB = res.prevL
+            previewRawRightRGB = res.prevR
             previewAlignedLeftRGB = nil
             previewAlignedRightRGB = nil
             rectifiedPreviewLeftRGB = nil
             rectifiedPreviewRightRGB = nil
-            previewWidth = pw
-            previewHeight = ph
-            previewCroppedWidth = pw
-            previewCroppedHeight = ph
-            imageWidth = w
-            imageHeight = fh
-            croppedWidth = w
-            croppedHeight = fh
+            previewWidth = res.prevW
+            previewHeight = res.prevH
+            previewCroppedWidth = res.prevW
+            previewCroppedHeight = res.prevH
+            imageWidth = res.width
+            imageHeight = res.height
+            croppedWidth = res.width
+            croppedHeight = res.height
             isAligned = false
             lastMatches = []
             lastRectResult = nil
@@ -1283,11 +1656,22 @@ final class ViewStereoViewModel: ObservableObject {
             windowShiftX = 0
             autoOptimalShiftX = 0
             lastFullResShiftX = 0
-            isProcessing = false
-            statusMessage = isContainerStereo ? "Loaded Stereo Container (\(w)×\(fh))" : "Loaded SBS (\(w)×\(fh))"
+            salvageAdvisory = nil
+            isStereoMismatchSuspected = false
+            isPseudoscopicSuspected = false
+            stereoQualityWarning = nil
             appliedCardMountConfig = makeCardMountConfig()
             appliedRecipeConfig = currentRecipeConfig
-            if cardTextMode == .ocrAuto, mountCtx != nil {
+
+            if res.is2DPhoto {
+                statusMessage = "2D photo detected (\(res.width)×\(res.height)). Converting to 3D..."
+                convertFullFrame2DToDepth3D(rgb: res.left, width: res.width, height: res.height)
+                return
+            }
+
+            isProcessing = false
+            statusMessage = res.isContainerStereo ? "Loaded Stereo Container (\(res.width)×\(res.height))" : "Loaded SBS (\(res.width)×\(res.height))"
+            if cardTextMode == .ocrAuto, res.mountCtx != nil {
                 extractTextsFromOriginalCardMount()
             }
             if autoAlignOnLoad {
@@ -1299,29 +1683,48 @@ final class ViewStereoViewModel: ObservableObject {
     }
 
     func loadSeparateImages(left: URL, right: URL) {
+        currentImageLoadTask?.cancel()
+        imageLoadGeneration += 1
+        let gen = imageLoadGeneration
+
+        let activeID = left.path + right.path
+        if let prevID = workspaceActiveItemID,
+           prevID != activeID,
+           workspaceItemStatuses[prevID] == .processing {
+            workspaceItemStatuses[prevID] = .idle
+        }
+
         batchCompletionSummary = nil
-        resetVintageRestoration(renderPreview: false)
-        resetColorization(renderPreview: false)
+        if !ViewStereoSettings.shared.keepRecipeAcrossImages {
+            resetVintageRestoration(renderPreview: false)
+            resetColorization(renderPreview: false)
+        }
         if cardTextMode != .manualTypeset {
             clearCardMountTexts()
         }
+        workspaceActiveItemID = activeID
+        workspaceItemStatuses[activeID] = .processing
         leftURL = left
         rightURL = right
         isSingleSBSInput = false
         isProcessing = true
         statusMessage = "Loading L/R images..."
 
-        Task {
+        currentImageLoadTask = Task {
             let loaded = await Task.detached(priority: .userInitiated) { () -> ([UInt8], [UInt8], Int, Int, [UInt8], [UInt8], Int, Int)? in
+                if Task.isCancelled { return nil }
                 guard let (lRGB, lw, lh) = Self.loadNormalizedRGB(url: left),
                       let (rRGBRaw, rw, rh) = Self.loadNormalizedRGB(url: right) else {
                     return nil
                 }
+                if Task.isCancelled { return nil }
                 let rRGB = (lw == rw && lh == rh) ? rRGBRaw : Self.resizeBilinearRGB(rRGBRaw, sw: rw, sh: rh, dw: lw, dh: lh)
                 let (pL, pw, ph) = Self.downsampleForPreview(lRGB, width: lw, height: lh, maxDim: Self.previewMaxDimension)
                 let (pR, _, _) = Self.downsampleForPreview(rRGB, width: lw, height: lh, maxDim: Self.previewMaxDimension)
                 return (lRGB, rRGB, lw, lh, pL, pR, pw, ph)
             }.value
+
+            guard !Task.isCancelled, self.imageLoadGeneration == gen else { return }
 
             guard let (lRGB, rRGB, lw, lh, pL, pR, pw, ph) = loaded else {
                 isProcessing = false
@@ -1488,17 +1891,22 @@ final class ViewStereoViewModel: ObservableObject {
             switch result {
             case .failure(let err):
                 isProcessing = false
+                let errMsg: String
                 switch err {
                 case .notEnoughMatches(let count):
-                    statusMessage = "Not enough feature matches (\(count))."
+                    errMsg = "Not enough feature matches (\(count))."
                 case .rectificationFailed:
-                    statusMessage = "Rectification failed to converge."
+                    errMsg = "Rectification failed to converge."
                 case .projectionFailed:
-                    statusMessage = "Failed to project bounding corners."
+                    errMsg = "Failed to project bounding corners."
                 case .noValidInteriorRect:
-                    statusMessage = "No valid interior rectangle found."
+                    errMsg = "No valid interior rectangle found."
                 case .metalWarpFailed:
-                    statusMessage = "Metal warp failed."
+                    errMsg = "Metal warp failed."
+                }
+                statusMessage = errMsg
+                if let activeID = workspaceActiveItemID {
+                    workspaceItemStatuses[activeID] = .failed(errMsg)
                 }
             case .success(let out):
                 applyAlignmentOutput(out)
@@ -1548,8 +1956,14 @@ final class ViewStereoViewModel: ObservableObject {
         isProcessing = false
         if let warn = out.stereoQualityWarning {
             statusMessage = String(format: "Aligned in %.1f ms | vRMSE: %.3f px  %@", out.elapsedMs, out.rectRes.verticalRMSEPixels, warn)
+            if let activeID = workspaceActiveItemID {
+                workspaceItemStatuses[activeID] = .warning(warn)
+            }
         } else {
             statusMessage = String(format: "Aligned in %.1f ms | vRMSE: %.3f px", out.elapsedMs, out.rectRes.verticalRMSEPixels)
+            if let activeID = workspaceActiveItemID {
+                workspaceItemStatuses[activeID] = .completed
+            }
         }
         renderDisplayPreview()
     }
@@ -2247,11 +2661,19 @@ final class ViewStereoViewModel: ObservableObject {
         let samples = lastDisparitySamples
         let targetDispPct = virtualDepthBasePercent
         let gamma = depthGamma
+        let preferredEngine = ViewStereoSettings.shared.preferredDepthEngine
+        let releaseAfter = ViewStereoSettings.shared.releaseAIModelsAfterGeneration
 
         Task {
             let synth = ViewStereoDepthSynthesizer.shared
-            // AI 深度推論
-            guard let depthRes = synth.estimateDisparity(rgb: sourceRGB, width: srcW, height: srcH) else {
+            // AI 深度推論（優先エンジン＋自動メモリ解放設定を適用）
+            guard let depthRes = synth.estimateDisparity(
+                rgb: sourceRGB,
+                width: srcW,
+                height: srcH,
+                preferredEngine: preferredEngine,
+                releaseAfterInference: releaseAfter
+            ) else {
                 await MainActor.run {
                     self.isProcessing = false
                     self.statusMessage = String(localized: "Depth estimation failed.")
@@ -2318,15 +2740,191 @@ final class ViewStereoViewModel: ObservableObject {
                 self.autoOptimalShiftX = 0.0
                 self.maxDisparityPercent = targetDispPct
                 self.isProcessing = false
-                self.statusMessage = String(format: String(localized: "3D Conversion Done (%@) | Disp: %.1f%% | %.0f ms"), depthRes.engine.rawValue, targetDispPct, depthRes.elapsedMs)
+                self.statusMessage = String(format: String(localized: "3D Conversion Done (%@) | Disp: %.1f%% | %.0f ms"), depthRes.engineName, targetDispPct, depthRes.elapsedMs)
                 self.renderDisplayPreview()
             }
         }
     }
 
+    /// 2D 写真（フル画角）から AI 深度推定 + DIBR により 3D ステレオペアを生成する
+    func convertFullFrame2DToDepth3D(rgb sourceRGB: [UInt8], width srcW: Int, height srcH: Int) {
+        isProcessing = true
+        statusMessage = String(localized: "2D photo detected — Estimating depth & converting to 3D...")
+
+        let targetDispPct = virtualDepthBasePercent
+        let gamma = depthGamma
+        let preferredEngine = ViewStereoSettings.shared.preferredDepthEngine
+        let releaseAfter = ViewStereoSettings.shared.releaseAIModelsAfterGeneration
+        let activeID = workspaceActiveItemID
+
+        Task {
+            let synth = ViewStereoDepthSynthesizer.shared
+            guard let depthRes = synth.estimateDisparity(
+                rgb: sourceRGB,
+                width: srcW,
+                height: srcH,
+                preferredEngine: preferredEngine,
+                releaseAfterInference: releaseAfter
+            ) else {
+                await MainActor.run {
+                    self.isProcessing = false
+                    self.statusMessage = String(localized: "Depth estimation failed.")
+                    if let activeID {
+                        self.workspaceItemStatuses[activeID] = .failed("Depth estimation failed")
+                    }
+                }
+                return
+            }
+
+            let (fullL, fullR) = synth.synthesizeStereoPair(
+                baseRGB: sourceRGB,
+                width: srcW,
+                height: srcH,
+                disparityMap: depthRes.disparity,
+                depthW: depthRes.width,
+                depthH: depthRes.height,
+                targetDisparityPercent: targetDispPct,
+                depthGamma: gamma
+            )
+
+            let prevScale = min(1.0, Double(Self.previewMaxDimension) / Double(max(srcW, srcH)))
+            let prevW = max(1, Int(Double(srcW) * prevScale))
+            let prevH = max(1, Int(Double(srcH) * prevScale))
+            let prevL = ViewStereoDepthSynthesizer.resizeRGB(fullL, width: srcW, height: srcH, targetWidth: prevW, targetHeight: prevH)
+            let prevR = ViewStereoDepthSynthesizer.resizeRGB(fullR, width: srcW, height: srcH, targetWidth: prevW, targetHeight: prevH)
+
+            await MainActor.run {
+                self.cachedBaseSideRGB = sourceRGB
+                self.cachedBaseW = srcW
+                self.cachedBaseH = srcH
+                self.cachedDisparityMap = depthRes.disparity
+                self.cachedDepthW = depthRes.width
+                self.cachedDepthH = depthRes.height
+
+                self.alignedLeftRGB = fullL
+                self.alignedRightRGB = fullR
+                self.croppedWidth = srcW
+                self.croppedHeight = srcH
+                self.previewAlignedLeftRGB = prevL
+                self.previewAlignedRightRGB = prevR
+                self.previewCroppedWidth = prevW
+                self.previewCroppedHeight = prevH
+                self.rectifiedPreviewLeftRGB = prevL
+                self.rectifiedPreviewRightRGB = prevR
+                self.rectifiedPreviewWidth = prevW
+                self.rectifiedPreviewHeight = prevH
+
+                self.isAligned = true
+                self.stereoReconstructionMode = .fullFrame2DDepth
+                self.isSwapped = false
+                self.windowShiftX = 0.0
+                self.autoOptimalShiftX = 0.0
+                self.maxDisparityPercent = targetDispPct
+                self.verticalRMSE = 0.0
+                self.lastDepthEngineLabel = depthRes.engineName
+                self.lastDepthInferenceMs = depthRes.elapsedMs
+                self.isProcessing = false
+                self.statusMessage = String(format: String(localized: "2D→3D Conversion Done (%@) | Disp: %.1f%% | %.0f ms"), depthRes.engineName, targetDispPct, depthRes.elapsedMs)
+                if let activeID {
+                    self.workspaceItemStatuses[activeID] = .aiConverted("2D→3D")
+                }
+                self.renderDisplayPreview()
+            }
+        }
+    }
+
+    /// 単一画像が SBS ステレオ画像ではなく通常の 2D 写真であるかを多段階で自動判定する
+    nonisolated static func detectIs2DPhoto(rgb: [UInt8], width fw: Int, height fh: Int) -> Bool {
+        guard fw >= 64, fh >= 32, rgb.count >= fw * fh * 3 else { return true }
+        let aspect = Double(fw) / Double(fh)
+        // 縦長・正方形（< 1.15）は SBS の可能性がないため即 2D 判定
+        if aspect < 1.15 {
+            return true
+        }
+
+        let halfW = fw / 2
+        var leftHalf = [UInt8](repeating: 0, count: halfW * fh * 3)
+        var rightHalf = [UInt8](repeating: 0, count: halfW * fh * 3)
+        for y in 0..<fh {
+            let srcRow = y * fw * 3
+            let dstRow = y * halfW * 3
+            leftHalf[dstRow..<(dstRow + halfW * 3)] = rgb[srcRow..<(srcRow + halfW * 3)]
+            rightHalf[dstRow..<(dstRow + halfW * 3)] = rgb[(srcRow + halfW * 3)..<(srcRow + halfW * 6)]
+        }
+
+        // 1. 左右半分の低解像度 SIFT 特徴点一致を評価（SBS / ハーフSBS なら水平一致が多数発生）
+        let (sL, sw, sh) = downsampleForPreview(leftHalf, width: halfW, height: fh, maxDim: 320)
+        let (sR, _, _) = downsampleForPreview(rightHalf, width: halfW, height: fh, maxDim: 320)
+        let matches = SiftFeatureMatcher.detectAndMatch(leftRGB: sL, rightRGB: sR, width: sw, height: sh)
+        let dyTol = max(12.0, Double(sh) * 0.08)
+        let dxTol = max(24.0, Double(sw) * 0.28)
+        let horizMatches = matches.filter {
+            abs($0.y2 - $0.y1) <= dyTol && abs($0.x2 - $0.x1) <= dxTol
+        }
+        if horizMatches.count >= 10 {
+            return false // SBS と判定
+        }
+
+        // 2. 低テクスチャ時の補助判定：中央境界 (x = halfW) の垂直スパイク + 左右 NCC 相関
+        let midX = halfW
+        let stepY = max(1, fh / 128)
+        var seamDiff = 0.0
+        var neighborDiff = 0.0
+        var seamSamples = 0
+        let offset = max(4, min(16, fw / 60))
+
+        func lumaAt(_ x: Int, _ y: Int) -> Double {
+            let idx = (y * fw + x) * 3
+            return Double(rgb[idx]) * 0.299 + Double(rgb[idx + 1]) * 0.587 + Double(rgb[idx + 2]) * 0.114
+        }
+
+        var y = 0
+        while y < fh {
+            if midX - 2 >= 0 && midX + 2 < fw {
+                seamDiff += abs(lumaAt(midX - 1, y) - lumaAt(midX + 1, y))
+                let lX = max(1, midX - offset)
+                let rX = min(fw - 2, midX + offset)
+                neighborDiff += 0.5 * (abs(lumaAt(lX - 1, y) - lumaAt(lX + 1, y)) + abs(lumaAt(rX - 1, y) - lumaAt(rX + 1, y)))
+                seamSamples += 1
+            }
+            y += stepY
+        }
+
+        let avgSeam = seamSamples > 0 ? seamDiff / Double(seamSamples) : 0.0
+        let avgNeigh = seamSamples > 0 ? max(1.0, neighborDiff / Double(seamSamples)) : 1.0
+        let spikeRatio = avgSeam / avgNeigh
+
+        // 左右低解像度 NCC
+        let n = sw * sh
+        var sumL = 0.0, sumR = 0.0
+        for i in 0..<n {
+            let idx = i * 3
+            sumL += Double(sL[idx]) * 0.299 + Double(sL[idx + 1]) * 0.587 + Double(sL[idx + 2]) * 0.114
+            sumR += Double(sR[idx]) * 0.299 + Double(sR[idx + 1]) * 0.587 + Double(sR[idx + 2]) * 0.114
+        }
+        let meanL = sumL / Double(max(1, n))
+        let meanR = sumR / Double(max(1, n))
+        var cov = 0.0, varL = 0.0, varR = 0.0
+        for i in 0..<n {
+            let idx = i * 3
+            let l = (Double(sL[idx]) * 0.299 + Double(sL[idx + 1]) * 0.587 + Double(sL[idx + 2]) * 0.114) - meanL
+            let r = (Double(sR[idx]) * 0.299 + Double(sR[idx + 1]) * 0.587 + Double(sR[idx + 2]) * 0.114) - meanR
+            cov += l * r
+            varL += l * l
+            varR += r * r
+        }
+        let ncc = (varL > 0 && varR > 0) ? (cov / sqrt(varL * varR)) : 0.0
+
+        if spikeRatio >= 2.2 && ncc >= 0.35 {
+            return false // ハーフSBS等の境界ありステレオと判定
+        }
+
+        return true
+    }
+
     /// 深度マップキャッシュを用いたリアルタイム高速再ワーピング（スライダー操作時）
     func reapplyDepthSynthesis() {
-        guard stereoReconstructionMode.isSingleEyeDepth,
+        guard stereoReconstructionMode.isDepthSynthesized,
               let dispMap = cachedDisparityMap,
               let baseRGB = cachedBaseSideRGB,
               cachedBaseW > 0, cachedBaseH > 0 else { return }
@@ -3127,7 +3725,8 @@ final class ViewStereoViewModel: ObservableObject {
             panel.canCreateDirectories = true
             panel.prompt = "Export L/R Here"
             if panel.runModal() == .OK, let dir = panel.url {
-                let base = leftURL?.deletingPathExtension().lastPathComponent ?? "stereo"
+                let rawBase = leftURL?.deletingPathExtension().lastPathComponent ?? "stereo"
+                let base = stereoReconstructionMode.isDepthSynthesized ? "\(rawBase)_2D3D" : rawBase
                 let outL = dir.appendingPathComponent("\(base)_L.\(ext)")
                 let outR = dir.appendingPathComponent("\(base)_R.\(ext)")
                 isProcessing = true
@@ -3164,7 +3763,8 @@ final class ViewStereoViewModel: ObservableObject {
         }
 
         let panel = NSSavePanel()
-        let base = leftURL?.deletingPathExtension().lastPathComponent ?? "ViewStereo_Output"
+        let rawBase = leftURL?.deletingPathExtension().lastPathComponent ?? "ViewStereo_Output"
+        let base = stereoReconstructionMode.isDepthSynthesized ? "\(rawBase)_2D3D" : rawBase
         switch layout {
         case .twoD:
             panel.allowedContentTypes = [imgFormat.utType]
@@ -3264,6 +3864,256 @@ final class ViewStereoViewModel: ObservableObject {
         }
     }
 
+    /// 作業フォルダ内の出力先（ViewStereo_Output）へダイアログなしで即座に書き出す
+    func quickExportToWorkspaceOutput() {
+        guard hasLoadedImages, !isProcessing, !isBatchRunning else { return }
+        let baseDir: URL
+        if let out = batchOutputFolder, !isTemporaryLocation(out) {
+            baseDir = out
+        } else if browserStore.isVirtualSelection || leftURL.map(isTemporaryLocation) == true {
+            guard let chosen = promptOutputFolderForSelection() else {
+                statusMessage = String(localized: "Export cancelled (no output folder selected).")
+                return
+            }
+            baseDir = chosen
+        } else if let root = workspaceRootFolder {
+            baseDir = root.appendingPathComponent("ViewStereo_Output", isDirectory: true)
+        } else if let leftParent = leftURL?.deletingLastPathComponent() {
+            baseDir = leftParent.appendingPathComponent("ViewStereo_Output", isDirectory: true)
+        } else {
+            exportImage()
+            return
+        }
+
+        do {
+            try FileManager.default.createDirectory(at: baseDir, withIntermediateDirectories: true)
+        } catch {
+            statusMessage = "Failed to create output folder."
+            return
+        }
+
+        let layout = exportLayout
+        let imgFormat = exportImageFormat
+        let style = frameStyle
+        let swapped = isSwapped
+        let cardCfg = makeCardMountConfig()
+        let mountCtx = currentMountContext
+        let restOpts = isRestorationEnabled ? buildPendingVintageRestorationOptions() : VintageRestorationOptions()
+        let detailOpts = isRestorationEnabled ? buildPendingDetailRestorationOptions() : StereoDetailRestorationOptions(deblurStrength: 0.0, textureProtection: 0.60)
+        let colorOpts = buildPendingColorizationOptions()
+        let ext = imgFormat.fileExtension
+        let rawBase = leftURL?.deletingPathExtension().lastPathComponent ?? "ViewStereo_Output"
+        let base = stereoReconstructionMode.isDepthSynthesized ? "\(rawBase)_2D3D" : rawBase
+        let activeID = workspaceActiveItemID
+
+        isProcessing = true
+        statusMessage = "Quick exporting to \(baseDir.lastPathComponent)/..."
+
+        Task {
+            if isAligned {
+                _ = await ensureFullResAlignedSynced()
+            }
+            guard let lRaw = activeLeftRGB, let rRaw = activeRightRGB else {
+                isProcessing = false
+                statusMessage = "Quick export failed."
+                return
+            }
+            let w = activeWidth, h = activeHeight
+            let ok: Bool
+            if layout == .separateLR {
+                let outL = baseDir.appendingPathComponent("\(base)_L.\(ext)")
+                let outR = baseDir.appendingPathComponent("\(base)_R.\(ext)")
+                ok = await Task.detached(priority: .userInitiated) {
+                    Self.renderAndSaveSeparateLR(
+                        left: swapped ? rRaw : lRaw,
+                        right: swapped ? lRaw : rRaw,
+                        width: w, height: h,
+                        style: style, imageFormat: imgFormat,
+                        restorationOptions: restOpts,
+                        detailOptions: detailOpts,
+                        colorOptions: colorOpts,
+                        outL: outL, outR: outR
+                    )
+                }.value
+            } else {
+                let suffix: String
+                let targetExt: String
+                switch layout {
+                case .twoD: suffix = "_2D"; targetExt = ext
+                case .sbs: suffix = "_SBS"; targetExt = ext
+                case .lrrl: suffix = "_LRRL"; targetExt = ext
+                case .dubois: suffix = "_Dubois"; targetExt = ext
+                case .colorAnaglyph: suffix = "_ColorAnaglyph"; targetExt = ext
+                case .grayAnaglyph: suffix = "_GrayAnaglyph"; targetExt = ext
+                case .polarized: suffix = "_Polarized"; targetExt = ext
+                case .stereoviewCard: suffix = "_Card"; targetExt = ext
+                case .spatialPhoto: suffix = "_Spatial"; targetExt = "heic"
+                case .mpo: suffix = ""; targetExt = "mpo"
+                case .separateLR: suffix = ""; targetExt = ext
+                }
+                let outURL = baseDir.appendingPathComponent("\(base)\(suffix).\(targetExt)")
+                ok = await Task.detached(priority: .userInitiated) {
+                    Self.renderAndSaveSingleFile(
+                        left: lRaw, right: rRaw, width: w, height: h,
+                        style: style, layout: layout, imageFormat: imgFormat, isSwapped: swapped,
+                        cardConfig: cardCfg, mountContext: mountCtx,
+                        restorationOptions: restOpts,
+                        detailOptions: detailOpts,
+                        colorOptions: colorOpts,
+                        to: outURL
+                    )
+                }.value
+            }
+            isProcessing = false
+            if ok {
+                statusMessage = "Quick exported \(base) → \(baseDir.lastPathComponent)/"
+                if let activeID {
+                    workspaceItemStatuses[activeID] = .completed
+                }
+                refreshWorkspaceBrowser()
+            } else {
+                statusMessage = "Quick export failed."
+            }
+        }
+    }
+
+    // MARK: - Workspace File Browser Management
+
+    func presentStartupFolderPromptIfNeeded(in window: NSWindow?) {
+        guard !hasHandledStartupWorkspacePrompt else { return }
+        hasHandledStartupWorkspacePrompt = true
+
+        let settings = ViewStereoSettings.shared
+        switch settings.startupFolderAction {
+        case .doNothing:
+            return
+        case .reopenLastFolder:
+            if let lastPath = settings.lastWorkspaceFolderPath,
+               FileManager.default.fileExists(atPath: lastPath) {
+                setWorkspaceRootFolder(URL(fileURLWithPath: lastPath, isDirectory: true))
+                return
+            }
+            openWorkspaceFolderPanel(in: window)
+        case .showSheet:
+            openWorkspaceFolderPanel(in: window)
+        }
+    }
+
+    func openWorkspaceFolderPanel(in window: NSWindow? = nil, initialMode: ViewStereoWorkspaceMode? = nil) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = false
+        panel.prompt = String(localized: "Open Workspace Folder")
+        panel.message = String(localized: "Select a working folder and choose the processing mode.")
+        if let lastPath = ViewStereoSettings.shared.lastWorkspaceFolderPath,
+           FileManager.default.fileExists(atPath: lastPath) {
+            panel.directoryURL = URL(fileURLWithPath: lastPath, isDirectory: true)
+        } else if let pics = FileManager.default.urls(for: .picturesDirectory, in: .userDomainMask).first {
+            panel.directoryURL = pics
+        }
+
+        let modeSelection = WorkspacePanelModeSelection(selectedMode: initialMode ?? workspaceMode)
+        let accessoryHost = NSHostingView(rootView: WorkspacePanelModeAccessoryView(selection: modeSelection))
+        accessoryHost.frame = NSRect(origin: .zero, size: accessoryHost.fittingSize)
+        panel.accessoryView = accessoryHost
+        panel.isAccessoryViewDisclosed = true
+
+        let handleResult: (NSApplication.ModalResponse) -> Void = { [weak self] response in
+            guard let self else { return }
+            if response == .OK, let dir = panel.url {
+                if self.workspaceMode != modeSelection.selectedMode {
+                    self.workspaceMode = modeSelection.selectedMode
+                }
+                self.setWorkspaceRootFolder(dir)
+                self.isShowingFileBrowser = true
+            }
+        }
+
+        if let win = window ?? NSApp.keyWindow ?? NSApp.mainWindow {
+            panel.beginSheetModal(for: win, completionHandler: handleResult)
+        } else {
+            handleResult(panel.runModal())
+        }
+    }
+
+    func setWorkspaceRootFolder(_ folder: URL) {
+        let stdFolder = folder.standardizedFileURL
+        let outDir = stdFolder.appendingPathComponent("ViewStereo_Output", isDirectory: true)
+        batchInputFolder = stdFolder
+        batchOutputFolder = outDir
+        ViewStereoSettings.shared.recordWorkspaceFolder(stdFolder)
+        browserStore.setRootFolder(
+            stdFolder,
+            pairingMode: effectiveBrowserPairingMode,
+            outputFolder: outDir,
+            includeSubfolders: batchIncludeSubfolders
+        )
+        statusMessage = "Workspace: \(stdFolder.lastPathComponent)"
+    }
+
+    func refreshWorkspaceBrowser() {
+        browserStore.configureOptions(
+            pairingMode: effectiveBrowserPairingMode,
+            includeSubfolders: batchIncludeSubfolders,
+            outputFolder: batchOutputFolder
+        )
+        browserStore.refreshAsync()
+    }
+
+    func openBrowserItem(_ item: StereoBatchItem) {
+        guard !isBatchRunning else { return }
+        if let rURL = item.rightURL {
+            loadSeparateImages(left: item.leftURL, right: rURL)
+        } else {
+            loadSingleSBSImage(url: item.leftURL)
+        }
+    }
+
+    func twoSelectedUnpairedFiles() -> (URL, URL)? {
+        browserStore.twoSelectedUnpairedFiles()
+    }
+
+    func openTwoSelectedAsLRPair() {
+        guard !isBatchRunning,
+              let (l, r) = twoSelectedUnpairedFiles() else { return }
+        loadSeparateImages(left: l, right: r)
+    }
+
+    func resolveSelectedBatchItems() -> [StereoBatchItem] {
+        browserStore.resolveBatchItems()
+    }
+
+    func startBatchProcessingFromBrowser() {
+        let items = resolveSelectedBatchItems()
+        guard !items.isEmpty else {
+            statusMessage = String(localized: "No stereo images found in selection.")
+            return
+        }
+        let targetDir = workspaceRootFolder ?? items[0].leftURL.deletingLastPathComponent()
+        startBatchProcessing(inputDir: targetDir, itemsOverride: items, verifyOnly: false)
+    }
+
+    func startStereoVerificationFromBrowser() {
+        let items = resolveSelectedBatchItems()
+        guard !items.isEmpty else {
+            statusMessage = String(localized: "No stereo images found in selection.")
+            return
+        }
+        let targetDir = workspaceRootFolder ?? items[0].leftURL.deletingLastPathComponent()
+        startBatchProcessing(inputDir: targetDir, itemsOverride: items, verifyOnly: true)
+    }
+
+    /// 現在のブラウザで展開・表示中の全ファイル項目を選択する
+    func selectAllBrowserFiles() {
+        browserStore.selectAllVisibleFiles()
+    }
+
+    func deselectAllBrowserNodes() {
+        browserStore.deselectAll()
+    }
+
     // MARK: - Folder Batch Auto-Alignment
 
     func openBatchFolderPanel() {
@@ -3278,14 +4128,7 @@ final class ViewStereoViewModel: ObservableObject {
     }
 
     func chooseBatchOutputFolderPanel() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.canCreateDirectories = true
-        panel.prompt = "Select Output Folder"
-        if panel.runModal() == .OK, let dir = panel.url {
-            batchOutputFolder = dir
-        }
+        _ = promptOutputFolderForSelection()
     }
 
     func dismissBatchCompletionNotice() {
@@ -3305,24 +4148,58 @@ final class ViewStereoViewModel: ObservableObject {
         statusMessage = "Batch processing cancelled."
     }
 
-    func startBatchProcessing(inputDir: URL? = nil) {
+    func startBatchProcessing(inputDir: URL? = nil, itemsOverride: [StereoBatchItem]? = nil, verifyOnly: Bool = false) {
         guard !isBatchRunning else { return }
-        let targetDir = inputDir ?? batchInputFolder
+        let targetDir = inputDir ?? batchInputFolder ?? workspaceRootFolder ?? itemsOverride?.first?.leftURL.deletingLastPathComponent()
         guard let targetDir else {
-            openBatchFolderPanel()
+            openWorkspaceFolderPanel()
             return
         }
 
+        if browserStore.isVirtualSelection && !verifyOnly {
+            let needsPrompt = (batchOutputFolder == nil) || batchOutputFolder.map(isTemporaryLocation) == true
+            if needsPrompt {
+                guard promptOutputFolderForSelection() != nil else {
+                    statusMessage = String(localized: "Export cancelled (no output folder selected).")
+                    return
+                }
+            }
+        }
+
         let outDir = batchOutputFolder ?? targetDir.appendingPathComponent("ViewStereo_Output", isDirectory: true)
-        batchInputFolder = targetDir
+        if !browserStore.isVirtualSelection {
+            batchInputFolder = targetDir
+        }
         batchOutputFolder = outDir
 
-        let pairingMode = batchPairingMode
-        let items = (!batchQueueItems.isEmpty && (inputDir == nil || inputDir == batchInputFolder)) ? batchQueueItems : Self.discoverBatchItems(in: targetDir, mode: pairingMode)
+        let pairingMode = effectiveBrowserPairingMode
+        let items: [StereoBatchItem]
+        if let itemsOverride {
+            items = itemsOverride
+        } else if !batchQueueItems.isEmpty && (inputDir == nil || inputDir == batchInputFolder) {
+            items = batchQueueItems
+        } else {
+            items = WorkspaceScanner.collectBatchItems(
+                from: [],
+                rootFolder: targetDir,
+                pairingMode: pairingMode,
+                includeSubfolders: batchIncludeSubfolders,
+                customOutputFolder: outDir
+            )
+        }
         guard !items.isEmpty else {
             statusMessage = "No stereo images found in \(targetDir.lastPathComponent)."
             return
         }
+
+        // 未適用（Pending）のスライダーや設定もバッチ実行時に確実に反映する
+        if hasLoadedImages {
+            appliedRecipeConfig = currentRecipeConfig
+            appliedCardMountConfig = makeCardMountConfig()
+        }
+        let restOpts = isRestorationEnabled ? buildPendingVintageRestorationOptions() : VintageRestorationOptions()
+        let detailOpts = isRestorationEnabled ? buildPendingDetailRestorationOptions() : StereoDetailRestorationOptions(deblurStrength: 0.0, textureProtection: 0.60)
+        let colorOpts = buildPendingColorizationOptions()
 
         let useMask = usePersonMotionMask
         let useSaliency = useAttentionSaliency
@@ -3337,65 +4214,206 @@ final class ViewStereoViewModel: ObservableObject {
         let swapped = isSwapped
         let autoSwapPseudo = ViewStereoSettings.shared.autoSwapPseudoscopic
         let saveReport = batchSaveReport
-        let restOpts = makeVintageRestorationOptions(ignorePreviewToggle: true)
-        let detailOpts = makeDetailRestorationOptions(ignorePreviewToggle: true)
-        let colorOpts = makeColorizationOptions(ignorePreviewToggle: true)
+        let isDedicated2D3D = (workspaceMode == .convert2DTo3D)
+        let warningPolicy: BatchWarningPolicy = isDedicated2D3D ? .exportAll : batchWarningPolicy
+        let interp: StereoInputInterpretation = isDedicated2D3D ? .force2D : inputInterpretation
+        let preferredEngine = ViewStereoSettings.shared.preferredDepthEngine
+        let targetDispPct = virtualDepthBasePercent
+        let gamma = depthGamma
+        let releaseAfterBatch = ViewStereoSettings.shared.releaseAIModelsAfterGeneration
         if cardTextMode != .manualTypeset {
             clearCardMountTexts()
         }
         let baseCardCfg = makeCardMountConfig()
         let renderer = metalRenderer
 
+        isBatchQueueActive = false
+        isBatchVerifyOnly = verifyOnly
         isBatchRunning = true
         batchCompletionSummary = nil
         batchTotalCount = items.count
         batchCompletedCount = 0
         batchFailedCount = 0
+        verifyWarningCount = 0
         batchProgress = 0.0
         batchCurrentFile = ""
-        statusMessage = "Batch starting (\(items.count) items)..."
+        statusMessage = verifyOnly ? "Stereo verification starting (\(items.count) items)..." : "Batch starting (\(items.count) items)..."
 
         batchTask = Task {
-            do {
-                try FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
-            } catch {
-                isBatchRunning = false
-                statusMessage = "Failed to create output folder."
-                return
+            if !verifyOnly {
+                do {
+                    try FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
+                } catch {
+                    isBatchRunning = false
+                    statusMessage = "Failed to create output folder."
+                    return
+                }
+            }
+
+            enum BatchStepOutcome: Sendable {
+                case alignedSuccess(AlignmentPipelineOutput, Int, Int, Bool, StereoCardSegmenter.OriginalCardMountContext?, StereoCardMountConfig)
+                case aiConverted2D3D(left: [UInt8], right: [UInt8], width: Int, height: Int, is2DSource: Bool, preservedArch: Bool, mountCtx: StereoCardSegmenter.OriginalCardMountContext?, cardCfg: StereoCardMountConfig)
+                case skippedWarning(String)
+                case skippedClean
+                case failed(String)
             }
 
             var successCnt = 0
             var failCnt = 0
+            var warnCnt = 0
 
             for (idx, item) in items.enumerated() {
                 if Task.isCancelled { break }
                 batchCurrentFile = item.displayLabel
-                statusMessage = "Batch [\(idx + 1)/\(items.count)]: \(item.displayLabel)"
 
-                let stepResult = await Task.detached(priority: .userInitiated) { () -> Result<(AlignmentPipelineOutput, Int, Int, Bool, StereoCardSegmenter.OriginalCardMountContext?, StereoCardMountConfig), AlignmentPipelineError>? in
-                    guard let (lRGB, rRGB, w, h, preservedArch, mountCtx) = Self.loadBatchPair(item: item, cardMode: cardMode, useCoreML: useCoreML) else {
-                        return nil
+                // 事前ステレオ検証済みの結果がキャッシュされている場合、対象外アイテムを高速スキップ
+                let cachedStatus = workspaceItemStatuses[item.id]
+                if !verifyOnly, let cachedStatus {
+                    if warningPolicy == .skipWarnings && cachedStatus.isWarningOrError {
+                        batchCompletedCount = idx + 1
+                        batchProgress = Double(idx + 1) / Double(items.count)
+                        continue
                     }
+                    if warningPolicy == .onlyConvertWarningsTo3D && cachedStatus == .completed {
+                        batchCompletedCount = idx + 1
+                        batchProgress = Double(idx + 1) / Double(items.count)
+                        continue
+                    }
+                }
+
+                workspaceItemStatuses[item.id] = .processing
+                statusMessage = verifyOnly
+                    ? "Verifying [\(idx + 1)/\(items.count)]: \(item.displayLabel)"
+                    : "Batch [\(idx + 1)/\(items.count)]: \(item.displayLabel)"
+
+                let stepOutcome = await Task.detached(priority: .userInitiated) { () -> BatchStepOutcome in
+                    guard let loaded = Self.loadBatchPair(item: item, cardMode: cardMode, useCoreML: useCoreML, interpretation: interp) else {
+                        return .failed("Failed to load image")
+                    }
+                    let lRGB = loaded.left
+                    let rRGB = loaded.right
+                    let w = loaded.width
+                    let h = loaded.height
+                    let preservedArch = loaded.preservedArch
+                    let mountCtx = loaded.mountContext
+
+                    var itemCardCfg = baseCardCfg
+                    itemCardCfg.sourceFilename = item.leftURL.lastPathComponent
+                    itemCardCfg.preservedArchFromAI = preservedArch
+
+                    // A. 通常の 2D 写真と判定された場合
+                    if loaded.is2DPhoto {
+                        if verifyOnly {
+                            let synth = ViewStereoDepthSynthesizer.shared
+                            guard let depthRes = synth.estimateDisparity(
+                                rgb: lRGB, width: w, height: h,
+                                preferredEngine: preferredEngine, releaseAfterInference: false
+                            ) else {
+                                return .failed("Depth estimation failed")
+                            }
+                            let (fullL, fullR) = synth.synthesizeStereoPair(
+                                baseRGB: lRGB, width: w, height: h,
+                                disparityMap: depthRes.disparity, depthW: depthRes.width, depthH: depthRes.height,
+                                targetDisparityPercent: targetDispPct, depthGamma: gamma
+                            )
+                            return .aiConverted2D3D(left: fullL, right: fullR, width: w, height: h, is2DSource: true, preservedArch: false, mountCtx: nil, cardCfg: itemCardCfg)
+                        }
+                        if warningPolicy == .onlyConvertWarningsTo3D {
+                            return .skippedClean
+                        }
+                        let synth = ViewStereoDepthSynthesizer.shared
+                        guard let depthRes = synth.estimateDisparity(
+                            rgb: lRGB, width: w, height: h,
+                            preferredEngine: preferredEngine, releaseAfterInference: false
+                        ) else {
+                            return .failed("Depth estimation failed")
+                        }
+                        let (fullL, fullR) = synth.synthesizeStereoPair(
+                            baseRGB: lRGB, width: w, height: h,
+                            disparityMap: depthRes.disparity, depthW: depthRes.width, depthH: depthRes.height,
+                            targetDisparityPercent: targetDispPct, depthGamma: gamma
+                        )
+                        let savedOK = Self.saveBatchRGBPair(
+                            left: fullL, right: fullR, width: w, height: h,
+                            baseName: "\(item.baseName)_2D3D",
+                            item: item, srcWidth: w, srcHeight: h, outDir: outDir,
+                            layout: layout, imageFormat: imgFormat, isSwapped: false,
+                            frameStyle: style, cardConfig: itemCardCfg, mountContext: nil,
+                            restorationOptions: restOpts, detailOptions: detailOpts, colorOptions: colorOpts,
+                            saveReport: saveReport, alignmentOutput: nil
+                        )
+                        return savedOK
+                            ? .aiConverted2D3D(left: fullL, right: fullR, width: w, height: h, is2DSource: true, preservedArch: false, mountCtx: nil, cardCfg: itemCardCfg)
+                            : .failed("Failed to save output")
+                    }
+
+                    // B. ステレオ画像（カード / SBS / L+Rペア）
                     let res = Self.executeAlignmentPipeline(
-                        lRGB: lRGB,
-                        rRGB: rRGB,
-                        width: w,
-                        height: h,
-                        useMask: useMask,
-                        useSaliency: useSaliency,
-                        keepAR: keepAR,
-                        colorMode: colorMode,
-                        removeNoise: removeNoise,
-                        preserveArch: preservedArch,
+                        lRGB: lRGB, rRGB: rRGB, width: w, height: h,
+                        useMask: useMask, useSaliency: useSaliency, keepAR: keepAR,
+                        colorMode: colorMode, removeNoise: removeNoise, preserveArch: preservedArch,
                         renderer: renderer
                     )
+
+                    // ヘルパー：片側から AI 2D-3D サルベージして保存
+                    func salvageTo2D3D(preferredSide: StereoSingleEyeSide, samples: [DisparitySample] = []) -> BatchStepOutcome {
+                        let baseRGB = (preferredSide == .left) ? lRGB : rRGB
+                        let synth = ViewStereoDepthSynthesizer.shared
+                        guard let depthRes = synth.estimateDisparity(
+                            rgb: baseRGB, width: w, height: h,
+                            preferredEngine: preferredEngine, releaseAfterInference: false
+                        ) else {
+                            return .failed("Depth estimation failed")
+                        }
+                        var dispMap = depthRes.disparity
+                        if !samples.isEmpty {
+                            dispMap = ViewStereoDepthSynthesizer.calibrateWithSparseStereo(
+                                disparityMap: dispMap, depthW: depthRes.width, depthH: depthRes.height,
+                                sparseSamples: samples, imageWidth: Double(w), imageHeight: Double(h)
+                            )
+                        }
+                        let (fullL, fullR) = synth.synthesizeStereoPair(
+                            baseRGB: baseRGB, width: w, height: h,
+                            disparityMap: dispMap, depthW: depthRes.width, depthH: depthRes.height,
+                            targetDisparityPercent: targetDispPct, depthGamma: gamma
+                        )
+                        let savedOK = Self.saveBatchRGBPair(
+                            left: fullL, right: fullR, width: w, height: h,
+                            baseName: "\(item.baseName)_2D3D",
+                            item: item, srcWidth: w, srcHeight: h, outDir: outDir,
+                            layout: layout, imageFormat: imgFormat, isSwapped: false,
+                            frameStyle: style, cardConfig: itemCardCfg, mountContext: mountCtx,
+                            restorationOptions: restOpts, detailOptions: detailOpts, colorOptions: colorOpts,
+                            saveReport: saveReport, alignmentOutput: nil
+                        )
+                        return savedOK
+                            ? .aiConverted2D3D(left: fullL, right: fullR, width: w, height: h, is2DSource: false, preservedArch: preservedArch, mountCtx: mountCtx, cardCfg: itemCardCfg)
+                            : .failed("Failed to save 2D-3D output")
+                    }
+
                     switch res {
-                    case .failure(let e):
-                        return .failure(e)
+                    case .failure(let err):
+                        let errMsg = "Alignment failed (\(err))"
+                        if verifyOnly {
+                            return .failed(errMsg)
+                        }
+                        switch warningPolicy {
+                        case .exportAll, .skipWarnings:
+                            return .failed(errMsg)
+                        case .convertWarningsTo3D, .onlyConvertWarningsTo3D:
+                            if layout == .stereoviewCard && itemCardCfg.textMode == .ocrAuto, let ctx = mountCtx {
+                                let rec = await StereoCardMountRenderer.recognizeTextsFromOriginalMount(ctx: ctx)
+                                itemCardCfg.bottomCaption = rec.bottomCaption
+                                itemCardCfg.topCenterText = rec.topCenter
+                                itemCardCfg.leftMarginText = rec.leftMargin
+                                itemCardCfg.rightMarginText = rec.rightMargin
+                            }
+                            let dmg = Self.evaluateUnilateralDamage(leftRGB: lRGB, rightRGB: rRGB, width: w, height: h)
+                            let side: StereoSingleEyeSide = (dmg.damagedSide == .left) ? .right : (dmg.damagedSide == .right ? .left : (dmg.leftSharp >= dmg.rightSharp ? .left : .right))
+                            return salvageTo2D3D(preferredSide: side)
+                        }
+
                     case .success(let out):
-                        var itemCardCfg = baseCardCfg
-                        itemCardCfg.sourceFilename = item.leftURL.lastPathComponent
-                        itemCardCfg.preservedArchFromAI = preservedArch
                         if layout == .stereoviewCard && itemCardCfg.textMode == .ocrAuto, let ctx = mountCtx {
                             let rec = await StereoCardMountRenderer.recognizeTextsFromOriginalMount(ctx: ctx)
                             itemCardCfg.bottomCaption = rec.bottomCaption
@@ -3403,36 +4421,80 @@ final class ViewStereoViewModel: ObservableObject {
                             itemCardCfg.leftMarginText = rec.leftMargin
                             itemCardCfg.rightMarginText = rec.rightMargin
                         }
-                        // 左右逆(偽視)検知 + 自動修正ON の場合は、そのアイテムのみ自動スワップして書き出す
+                        if verifyOnly {
+                            return .alignedSuccess(out, w, h, preservedArch, mountCtx, itemCardCfg)
+                        }
+
+                        let hasWarning = (out.stereoQualityWarning != nil) || out.salvageAdvisory.shouldShowSalvagePrompt
+                        if hasWarning {
+                            let warnMsg = out.stereoQualityWarning
+                                ?? (out.salvageAdvisory.isMismatchSuspected ? String(localized: "Stereo Mismatch Detected")
+                                    : (out.salvageAdvisory.isUnilateralDamageSuspected ? String(localized: "Unilateral Damage Detected")
+                                        : String(localized: "Excessive Stereo Baseline")))
+                            switch warningPolicy {
+                            case .skipWarnings:
+                                return .skippedWarning(warnMsg)
+                            case .convertWarningsTo3D, .onlyConvertWarningsTo3D:
+                                return salvageTo2D3D(preferredSide: out.salvageAdvisory.suggestedSide, samples: out.samples)
+                            case .exportAll:
+                                break
+                            }
+                        } else if warningPolicy == .onlyConvertWarningsTo3D {
+                            return .skippedClean
+                        }
+
+                        // 通常 True Stereo 書き出し
                         let itemSwapped = (out.isPseudoscopicSuspected && autoSwapPseudo) ? true : swapped
                         let savedOK = Self.saveBatchOutput(
-                            out: out,
-                            item: item,
-                            srcWidth: w,
-                            srcHeight: h,
-                            outDir: outDir,
-                            layout: layout,
-                            imageFormat: imgFormat,
-                            isSwapped: itemSwapped,
-                            frameStyle: style,
-                            cardConfig: itemCardCfg,
-                            mountContext: mountCtx,
-                            restorationOptions: restOpts,
-                            detailOptions: detailOpts,
-                            colorOptions: colorOpts,
+                            out: out, item: item, srcWidth: w, srcHeight: h, outDir: outDir,
+                            layout: layout, imageFormat: imgFormat, isSwapped: itemSwapped,
+                            frameStyle: style, cardConfig: itemCardCfg, mountContext: mountCtx,
+                            restorationOptions: restOpts, detailOptions: detailOpts, colorOptions: colorOpts,
                             saveReport: saveReport
                         )
-                        return savedOK ? .success((out, w, h, preservedArch, mountCtx, itemCardCfg)) : nil
+                        return savedOK
+                            ? .alignedSuccess(out, w, h, preservedArch, mountCtx, itemCardCfg)
+                            : .failed("Failed to save output")
                     }
                 }.value
 
                 if Task.isCancelled { break }
 
-                if case .success(let (out, w, h, preservedArch, mountCtx, itemCfg)) = stepResult {
+                switch stepOutcome {
+                case .alignedSuccess(let out, let w, let h, let preservedArch, let mountCtx, let itemCfg):
                     successCnt += 1
+                    workspaceActiveItemID = item.id
                     leftURL = item.leftURL
                     rightURL = item.rightURL ?? item.leftURL
                     isSingleSBSInput = (item.rightURL == nil)
+                    hasPreservedArch = preservedArch
+                    currentMountContext = mountCtx
+                    if !verifyOnly && baseCardCfg.textMode == .ocrAuto {
+                        cardBottomCaption = itemCfg.bottomCaption
+                        cardTopCenterText = itemCfg.topCenterText
+                        cardLeftMarginText = itemCfg.leftMarginText
+                        cardRightMarginText = itemCfg.rightMarginText
+                    }
+                    imageWidth = w
+                    imageHeight = h
+                    isSwapped = swapped
+                    applyAlignmentOutput(out)
+
+                    if out.stereoQualityWarning != nil || out.salvageAdvisory.shouldShowSalvagePrompt {
+                        warnCnt += 1
+                        let warnMsg = out.stereoQualityWarning
+                            ?? (out.salvageAdvisory.isMismatchSuspected ? String(localized: "Stereo Mismatch Detected")
+                                : (out.salvageAdvisory.isUnilateralDamageSuspected ? String(localized: "Unilateral Damage Detected")
+                                    : String(localized: "Excessive Stereo Baseline")))
+                        workspaceItemStatuses[item.id] = .warning(warnMsg)
+                    }
+
+                case .aiConverted2D3D(let fullL, let fullR, let w, let h, let is2DSource, let preservedArch, let mountCtx, let itemCfg):
+                    successCnt += 1
+                    workspaceActiveItemID = item.id
+                    leftURL = item.leftURL
+                    rightURL = item.rightURL ?? item.leftURL
+                    isSingleSBSInput = false
                     hasPreservedArch = preservedArch
                     currentMountContext = mountCtx
                     if baseCardCfg.textMode == .ocrAuto {
@@ -3441,155 +4503,125 @@ final class ViewStereoViewModel: ObservableObject {
                         cardLeftMarginText = itemCfg.leftMarginText
                         cardRightMarginText = itemCfg.rightMarginText
                     }
+                    let (pL, pw, ph) = Self.downsampleForPreview(fullL, width: w, height: h, maxDim: Self.previewMaxDimension)
+                    let (pR, _, _) = Self.downsampleForPreview(fullR, width: w, height: h, maxDim: Self.previewMaxDimension)
+                    rawLeftRGB = fullL
+                    rawRightRGB = fullR
+                    alignedLeftRGB = fullL
+                    alignedRightRGB = fullR
+                    previewRawLeftRGB = pL
+                    previewRawRightRGB = pR
+                    previewAlignedLeftRGB = pL
+                    previewAlignedRightRGB = pR
+                    rectifiedPreviewLeftRGB = pL
+                    rectifiedPreviewRightRGB = pR
                     imageWidth = w
                     imageHeight = h
-                    isSwapped = swapped  // 前アイテムの自動スワップ状態を持ち越さない
-                    applyAlignmentOutput(out)
-                } else {
+                    croppedWidth = w
+                    croppedHeight = h
+                    previewWidth = pw
+                    previewHeight = ph
+                    previewCroppedWidth = pw
+                    previewCroppedHeight = ph
+                    rectifiedPreviewWidth = pw
+                    rectifiedPreviewHeight = ph
+                    isAligned = true
+                    stereoReconstructionMode = is2DSource ? .fullFrame2DDepth : .singleEyeDepth(.left)
+                    salvageAdvisory = nil
+                    isStereoMismatchSuspected = false
+                    isPseudoscopicSuspected = false
+                    stereoQualityWarning = nil
+                    isSwapped = false
+                    workspaceItemStatuses[item.id] = .aiConverted(is2DSource ? "2D→3D" : "AI 3D")
+                    renderDisplayPreview()
+
+                case .skippedWarning(let warnMsg):
+                    warnCnt += 1
+                    workspaceItemStatuses[item.id] = .warning(warnMsg)
+
+                case .skippedClean:
+                    if cachedStatus == nil {
+                        workspaceItemStatuses[item.id] = .completed
+                    }
+
+                case .failed(let msg):
                     failCnt += 1
+                    workspaceItemStatuses[item.id] = .failed(msg)
                 }
 
                 batchCompletedCount = idx + 1
                 batchFailedCount = failCnt
+                verifyWarningCount = warnCnt
                 batchProgress = Double(idx + 1) / Double(items.count)
+            }
+
+            if releaseAfterBatch {
+                ViewStereoDepthSynthesizer.shared.releaseCachedModels()
             }
 
             let cancelled = Task.isCancelled
             isBatchRunning = false
             batchTask = nil
+            if !verifyOnly {
+                refreshWorkspaceBrowser()
+            }
             batchCompletionSummary = BatchCompletionSummary(
                 succeeded: successCnt,
                 failed: failCnt,
+                warningCount: warnCnt,
                 total: items.count,
                 wasCancelled: cancelled,
+                isVerifyOnly: verifyOnly,
                 outputDirectory: outDir
             )
             if cancelled {
-                statusMessage = "Batch cancelled (\(successCnt)/\(items.count) completed)."
+                statusMessage = verifyOnly
+                    ? "Verification cancelled (\(successCnt)/\(items.count) checked)."
+                    : "Batch cancelled (\(successCnt)/\(items.count) completed)."
+            } else if verifyOnly {
+                statusMessage = "Verification finished: \(successCnt - warnCnt) OK, \(warnCnt) warning(s), \(failCnt) failed."
             } else {
                 statusMessage = "Batch finished: \(successCnt) succeeded, \(failCnt) failed → \(outDir.lastPathComponent)/"
             }
         }
     }
 
-    nonisolated private static func discoverBatchItems(in dir: URL, mode: StereoBatchPairingMode) -> [StereoBatchItem] {
-        let exts = supportedImageExtensions
-        guard let contents = try? FileManager.default.contentsOfDirectory(
-            at: dir,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles]
-        ) else {
-            return []
-        }
-
-        let files = contents
-            .filter { url in
-                let isFile = (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) ?? false
-                return isFile && exts.contains(url.pathExtension.lowercased())
-            }
-            .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
-
-        switch mode {
-        case .sbsOnly:
-            return files.map { url in
-                let stem = url.deletingPathExtension().lastPathComponent
-                return StereoBatchItem(baseName: stem, displayLabel: url.lastPathComponent, leftURL: url, rightURL: nil)
-            }
-
-        case .consecutiveLR:
-            var items: [StereoBatchItem] = []
-            var i = 0
-            while i + 1 < files.count {
-                let l = files[i], r = files[i + 1]
-                let stem = l.deletingPathExtension().lastPathComponent
-                items.append(StereoBatchItem(baseName: stem, displayLabel: "\(l.lastPathComponent) + \(r.lastPathComponent)", leftURL: l, rightURL: r))
-                i += 2
-            }
-            return items
-
-        case .auto:
-            let suffixPairs: [(String, String)] = [
-                ("_L", "_R"), ("_l", "_r"),
-                ("-L", "-R"), ("-l", "-r"),
-                ("_left", "_right"), ("_LEFT", "_RIGHT"), ("_Left", "_Right"),
-                ("Left", "Right")
-            ]
-            var byKey: [String: URL] = [:]
-            for f in files {
-                let key = "\(f.deletingPathExtension().lastPathComponent).\(f.pathExtension.lowercased())"
-                byKey[key] = f
-            }
-
-            var used = Set<URL>()
-            var items: [StereoBatchItem] = []
-
-            for f in files {
-                if used.contains(f) { continue }
-                let stem = f.deletingPathExtension().lastPathComponent
-                let ext = f.pathExtension.lowercased()
-                var matchedRight: URL? = nil
-                var cleanBase = stem
-
-                for (lSuf, rSuf) in suffixPairs {
-                    if stem.hasSuffix(lSuf) {
-                        let base = String(stem.dropLast(lSuf.count))
-                        let rKey = "\(base)\(rSuf).\(ext)"
-                        if let rURL = byKey[rKey], !used.contains(rURL), rURL != f {
-                            matchedRight = rURL
-                            cleanBase = base.isEmpty ? stem : base
-                            break
-                        }
-                    }
-                }
-
-                if let rURL = matchedRight {
-                    used.insert(f)
-                    used.insert(rURL)
-                    items.append(StereoBatchItem(
-                        baseName: cleanBase,
-                        displayLabel: "\(f.lastPathComponent) + \(rURL.lastPathComponent)",
-                        leftURL: f,
-                        rightURL: rURL
-                    ))
-                }
-            }
-
-            // ペアにならなかった単体ファイルは SBS として追加（ただし相手側の R ファイル単体は除く）
-            for f in files where !used.contains(f) {
-                let stem = f.deletingPathExtension().lastPathComponent
-                items.append(StereoBatchItem(
-                    baseName: stem,
-                    displayLabel: f.lastPathComponent,
-                    leftURL: f,
-                    rightURL: nil
-                ))
-            }
-
-            return items.sorted { $0.baseName.localizedStandardCompare($1.baseName) == .orderedAscending }
-        }
+    nonisolated static func discoverBatchItems(in dir: URL, mode: StereoBatchPairingMode) -> [StereoBatchItem] {
+        WorkspaceScanner.scanDirectory(dir, pairingMode: mode, customOutputFolder: nil).compactMap(\.item)
     }
 
-    nonisolated private static func loadBatchPair(item: StereoBatchItem, cardMode: StereoCardMode, useCoreML: Bool) -> ([UInt8], [UInt8], Int, Int, Bool, StereoCardSegmenter.OriginalCardMountContext?)? {
+    nonisolated private static func loadBatchPair(
+        item: StereoBatchItem,
+        cardMode: StereoCardMode,
+        useCoreML: Bool,
+        interpretation: StereoInputInterpretation = .auto
+    ) -> (left: [UInt8], right: [UInt8], width: Int, height: Int, preservedArch: Bool, mountContext: StereoCardSegmenter.OriginalCardMountContext?, is2DPhoto: Bool)? {
         if let rURL = item.rightURL {
             guard let (lRGB, lw, lh) = loadNormalizedRGB(url: item.leftURL),
                   let (rRGBRaw, rw, rh) = loadNormalizedRGB(url: rURL) else {
                 return nil
             }
             let rRGB = (lw == rw && lh == rh) ? rRGBRaw : resizeBilinearRGB(rRGBRaw, sw: rw, sh: rh, dw: lw, dh: lh)
-            return (lRGB, rRGB, lw, lh, false, nil)
+            return (lRGB, rRGB, lw, lh, false, nil, false)
         } else {
-            if let pair = loadStereoPairFromContainer(url: item.leftURL) {
-                return (pair.0, pair.1, pair.2, pair.3, false, nil)
+            if interpretation != .force2D, let pair = loadStereoPairFromContainer(url: item.leftURL) {
+                return (pair.0, pair.1, pair.2, pair.3, false, nil, false)
             }
             guard let (rgb, fw, fh) = loadNormalizedRGB(url: item.leftURL), fw >= 64 else {
                 return nil
+            }
+            if interpretation == .force2D {
+                return (rgb, rgb, fw, fh, false, nil, true)
             }
             let extMode: StereoCardCropper.ExtractionMode = (cardMode == .keepArchBlack) ? .keepArchBlack : .cropInner
             if cardMode != .off,
                let card = (useCoreML ? StereoCardSegmenter.shared.extractPhotoPair(from: rgb, width: fw, height: fh, mode: extMode) : nil)
                        ?? StereoCardCropper.extractPhotoPair(from: rgb, width: fw, height: fh, mode: extMode) {
                 let mountCtx = StereoCardSegmenter.shared.currentMountContext
-                return (card.leftRGB, card.rightRGB, card.width, card.height, card.preservedArch, mountCtx)
+                return (card.leftRGB, card.rightRGB, card.width, card.height, card.preservedArch, mountCtx, false)
+            }
+            if interpretation == .auto && detectIs2DPhoto(rgb: rgb, width: fw, height: fh) {
+                return (rgb, rgb, fw, fh, false, nil, true)
             }
             let w = fw / 2
             var l = [UInt8](repeating: 0, count: w * fh * 3)
@@ -3600,7 +4632,7 @@ final class ViewStereoViewModel: ObservableObject {
                 l[dstRow..<(dstRow + w * 3)] = rgb[srcRow..<(srcRow + w * 3)]
                 r[dstRow..<(dstRow + w * 3)] = rgb[(srcRow + w * 3)..<(srcRow + w * 6)]
             }
-            return (l, r, w, fh, false, nil)
+            return (l, r, w, fh, false, nil, false)
         }
     }
 
@@ -3763,12 +4795,56 @@ final class ViewStereoViewModel: ObservableObject {
         colorOptions: StereoColorizationOptions = StereoColorizationOptions(),
         saveReport: Bool
     ) -> Bool {
-        let base = item.baseName
-        let w = out.cw, h = out.ch
+        saveBatchRGBPair(
+            left: out.warpedL,
+            right: out.warpedR,
+            width: out.cw,
+            height: out.ch,
+            baseName: item.baseName,
+            item: item,
+            srcWidth: srcWidth,
+            srcHeight: srcHeight,
+            outDir: outDir,
+            layout: layout,
+            imageFormat: imageFormat,
+            isSwapped: isSwapped,
+            frameStyle: frameStyle,
+            cardConfig: cardConfig,
+            mountContext: mountContext,
+            restorationOptions: restorationOptions,
+            detailOptions: detailOptions,
+            colorOptions: colorOptions,
+            saveReport: saveReport,
+            alignmentOutput: out
+        )
+    }
+
+    nonisolated private static func saveBatchRGBPair(
+        left: [UInt8],
+        right: [UInt8],
+        width w: Int,
+        height h: Int,
+        baseName base: String,
+        item: StereoBatchItem,
+        srcWidth: Int,
+        srcHeight: Int,
+        outDir: URL,
+        layout: StereoExportLayout,
+        imageFormat: StereoExportImageFormat,
+        isSwapped: Bool,
+        frameStyle: StereoFrameStyle,
+        cardConfig: StereoCardMountConfig = StereoCardMountConfig(),
+        mountContext: StereoCardSegmenter.OriginalCardMountContext? = nil,
+        restorationOptions: VintageRestorationOptions = VintageRestorationOptions(),
+        detailOptions: StereoDetailRestorationOptions = StereoDetailRestorationOptions(),
+        colorOptions: StereoColorizationOptions = StereoColorizationOptions(),
+        saveReport: Bool,
+        alignmentOutput out: AlignmentPipelineOutput? = nil
+    ) -> Bool {
         let ext = imageFormat.fileExtension
         let restored = (restorationOptions.isIdentity && detailOptions.isIdentity && colorOptions.isIdentity)
-            ? (left: out.warpedL, right: out.warpedR)
-            : applyVintagePipeline(left: out.warpedL, right: out.warpedR, width: w, height: h, toneOptions: restorationOptions, detailOptions: detailOptions, colorOptions: colorOptions)
+            ? (left: left, right: right)
+            : applyVintagePipeline(left: left, right: right, width: w, height: h, toneOptions: restorationOptions, detailOptions: detailOptions, colorOptions: colorOptions)
         let wL = restored.left
         let wR = restored.right
         let ok: Bool
@@ -3847,24 +4923,35 @@ final class ViewStereoViewModel: ObservableObject {
         }
 
         if ok && saveReport {
-            let p = out.rectRes.params
-            let report = """
-            ViewStereo Batch Alignment Report
-            Left File       : \(item.leftURL.path)
-            Right File      : \(item.rightURL?.path ?? item.leftURL.path)
-            Original Size   : \(srcWidth) x \(srcHeight)
-            Cropped Size    : \(w) x \(h)
-            Matches / Inliers: \(out.matches.count) / \(out.rectRes.inlierCount)
-            Vertical RMSE   : \(String(format: "%.4f px", out.rectRes.verticalRMSEPixels))
-            Window Shift X  : \(String(format: "%.3f px", out.windowDecision.optimalShiftX))
-            Auto-Swap       : \(isSwapped ? "Applied (Left <-> Right swapped for pseudoscopic correction)" : "None")
-            Stereo Status   : \(out.stereoReportText)
-            Log Scale (u_s) : \(p.logScale)
-            Roll L / R (rad): \(p.rollL) / \(p.rollR)
-            Keystone H L/R  : \(p.keystoneXL) / \(p.keystoneXR)
-            Keystone V (k_y): \(p.keystoneY)
-            Shift V (t_y)   : \(p.shiftY)
-            """
+            let report: String
+            if let out {
+                let p = out.rectRes.params
+                report = """
+                ViewStereo Batch Alignment Report
+                Left File       : \(item.leftURL.path)
+                Right File      : \(item.rightURL?.path ?? item.leftURL.path)
+                Original Size   : \(srcWidth) x \(srcHeight)
+                Cropped Size    : \(w) x \(h)
+                Matches / Inliers: \(out.matches.count) / \(out.rectRes.inlierCount)
+                Vertical RMSE   : \(String(format: "%.4f px", out.rectRes.verticalRMSEPixels))
+                Window Shift X  : \(String(format: "%.3f px", out.windowDecision.optimalShiftX))
+                Auto-Swap       : \(isSwapped ? "Applied (Left <-> Right swapped for pseudoscopic correction)" : "None")
+                Stereo Status   : \(out.stereoReportText)
+                Log Scale (u_s) : \(p.logScale)
+                Roll L / R (rad): \(p.rollL) / \(p.rollR)
+                Keystone H L/R  : \(p.keystoneXL) / \(p.keystoneXR)
+                Keystone V (k_y): \(p.keystoneY)
+                Shift V (t_y)   : \(p.shiftY)
+                """
+            } else {
+                report = """
+                ViewStereo Batch 2D-3D Conversion Report
+                Source File     : \(item.leftURL.path)
+                Original Size   : \(srcWidth) x \(srcHeight)
+                Output Size     : \(w) x \(h)
+                Mode            : AI Depth 2D-to-3D Conversion (_2D3D)
+                """
+            }
             try? report.write(to: outDir.appendingPathComponent("\(base)_adj.txt"), atomically: true, encoding: .utf8)
         }
         return ok

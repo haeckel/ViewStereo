@@ -88,7 +88,12 @@ final class StereoCardSegmenter: @unchecked Sendable {
                 compiledURL = url
             }
             let config = MLModelConfiguration()
-            config.computeUnits = .all
+            if name == "SAM2_1TinyMaskDecoderFLOAT16" {
+                // MIL conv_transpose の ANE コンパイル失敗＋フォールバック遅延を回避
+                config.computeUnits = .cpuAndGPU
+            } else {
+                config.computeUnits = .all
+            }
             let model = try MLModel(contentsOf: compiledURL, configuration: config)
             cache = model
             return model

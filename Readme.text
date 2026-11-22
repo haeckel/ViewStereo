@@ -4,6 +4,42 @@ ViewStereo は現在開発中であり、特に開発初期段階のアプリケ
 
 ==================================================
 
+ViewStereo v0.1.7 リリースノート / Release Notes (2026.11.22)
+
+==================================================
+【ViewStereo v0.1.7 新機能・改善点 / New Features & Improvements】
+==================================================
+- 3ペイン・スタジオ型ファイルブラウザワークフローの導入:
+  - 基本UIを「左：ツリー型ファイルブラウザ（⌥⌘L）｜ 中央：映像プレビュー ｜ 右：ツールパレット（⌥⌘0）」の 3 ペイン構成に再設計。
+  - アプリ起動時の作業フォルダ選択シート（NSOpenPanel）を新設。フォルダ指定と同時に処理モード（Stereo修復 / 2D→3D高速変換）を選択可能。
+  - 命名規則（_L/_R, -L/-R, _left/_right 等）に基づく L/R 独立ファイルペアの自動統合表示に対応。
+  - 各ファイル行に処理ステータスバッジ（処理中 / ✓ 完了 / ⚠️ 警告［偽視・片側損傷・不一致・視差過大］ / ✕ 失敗）を表示し、検品と個別修正へ直結。
+  - 出力先フォルダ（ViewStereo_Output）を専用アイコンで識別表示し、バッチ処理の入力スキャンから常に自動除外して二重処理事故を防止。
+- AI 深度モデルマネージャー ＆ 全9種マルチエンジン対応:
+  - 共通基盤「StereoStudioCore」との統合により、全9種の Core ML 深度推定エンジンに対応:
+    Apple Depth Pro、Depth Pro 2（Small / Base / Large）、Depth Anything V2（Small / Large）、Depth Anything 3 Mono、MoGe-2（ViT-B / ViT-L）。
+  - 環境設定（Preferences）に「AI モデル」タブを新設。Hugging Face からのオンデマンドダウンロード・進捗表示・優先エンジン切替に対応。
+  - Stereo Studio シリーズ（DepthStereo / PanorStereo / SplatStereo）間でローカルモデルフォルダを相互共有し、ディスク容量の重複消費を完全排除。
+  - 単眼 3D サルベージ（ViewStereoDepthSynthesizer）でユーザー優先エンジンによる高品質 2D-3D 立体視生成と自動メモリ解放を実現。
+
+==================================================
+[v0.1.7 New Features & Highlights]
+==================================================
+- 3-Pane Studio Workflow with Tree-Style File Browser:
+  - Redesigned interface into a unified 3-pane studio architecture (Left: Tree File Browser [⌥⌘L] | Center: Viewport Preview | Right: Inspector Palette [⌥⌘0]).
+  - Launch folder modal sheet allows selecting working directories with dual processing modes (Stereo Restoration vs 2D-to-3D Fast Conversion).
+  - Automatically identifies and groups split L/R file naming conventions (_L/_R, -L/-R, etc.) into singular consolidated tree entries.
+  - Real-time status badges (Processing, ✓ Success, ⚠️ Advisory [Reversed, Damage, Disparity], ✕ Error) for streamlined quality inspection.
+  - Automatic isolation and protection of the ViewStereo_Output folder from batch input scans.
+- AI Depth Model Manager & 9 Multi-Engine Architecture:
+  - Integrated with StereoStudioCore supporting 9 modern Core ML depth engines:
+    Apple Depth Pro, Depth Pro 2 (Small / Base / Large), Depth Anything V2 (Small / Large), Depth Anything 3 Mono, and MoGe-2 (ViT-B / ViT-L).
+  - New dedicated "AI Models" Preferences tab with direct on-demand Hugging Face downloading, status telemetry, and active engine selection.
+  - Zero-duplicate storage locator sharing downloaded models seamlessly across DepthStereo, PanorStereo, SplatStereo, and ViewStereo.
+  - Production-grade Single-Eye Depth 3D pipeline powered by your preferred depth engine with automatic peak memory reclamation.
+
+==================================================
+
 ViewStereo v0.1.6 リリースノート / Release Notes (2026.11.22)
 
 ==================================================

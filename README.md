@@ -1,6 +1,6 @@
 # ViewStereo 🎞️✨
 
-[![Version](https://img.shields.io/badge/version-0.1.6-brightgreen.svg)](https://viewstereo.p-media.jp/)
+[![Version](https://img.shields.io/badge/version-0.1.7-brightgreen.svg)](https://viewstereo.p-media.jp/)
 [![Status](https://img.shields.io/badge/status-Early%20Development-amber.svg)](#development-status)
 [![Platform](https://img.shields.io/badge/platform-macOS%2014.0+-lightgrey.svg)](https://apple.co/macos)
 [![Technology](https://img.shields.io/badge/tech-Card%20Segmentation%20%7C%207--DoF%20Homography%20%7C%20Stereo%20Window%20%7C%20Digital%20Remount-orange.svg)](https://viewstereo.p-media.jp/)
@@ -17,7 +17,12 @@ Designed as the archival restoration and geometric alignment companion to **Spla
 
 ## 🚀 Key Features
 
-### 🛟 v0.1.6 New: Single-Eye Depth 3D Salvage & Anomaly Diagnostics
+### 🗂️ v0.1.7 New: 3-Pane Studio Workflow & 9-Engine AI Depth Model Manager
+- **3-Pane Studio Workspace & Tree-Style File Browser**: Redesigned workflow around a workspace directory with a persistent left tree browser (`⌥⌘L`). Features initial launch folder selection sheet (`NSOpenPanel`), automatic L/R pair grouping (`_L`/`_R`, `-L`/`-R`), per-item processing status badges (`✓`/`⚠️`/`✕`), and output directory protection (`ViewStereo_Output`).
+- **AI Depth Model Manager (StereoStudioCore Integration)**: Unified model management supporting 9 Core ML depth engines—Apple Depth Pro, Depth Pro 2 (Small/Base/Large), Depth Anything V2/V3, and MoGe-2 (ViT-B/L). Features on-demand Hugging Face downloading directly within Preferences and zero-duplicate shared model storage across the Stereo Studio app family.
+- **Production-Grade Single-Eye Depth 3D Salvage**: Fully wired the Single-Eye Depth 3D pipeline to the user's preferred Core ML depth engine, delivering pristine 2D-to-3D stereoscopic conversion with automatic peak memory reclamation.
+
+### 🛟 v0.1.6: Single-Eye Depth 3D Salvage & Anomaly Diagnostics
 - **Automated Stereoscopic Anomaly Diagnostics**: Automatically diagnoses mismatched pairs (different takes/misplaced prints), unilateral damage/scratches, and excessive stereoscopic disparity during 7-DoF alignment.
 - **Human-in-the-Loop Single-Eye Depth 3D Salvage**: Provides 1-click action buttons directly under the status alert banner to convert the undamaged left or right image into a pristine AI Depth 3D stereo pair, complete with smart recommendation hints (✨ Recommended) based on defect rates and sharpness scores.
 - **Stereo Source Controls in Stereo Window (⌥⌘2)**: Adds persistent Stereo Source selection (Original L+R / Left Depth 3D / Right Depth 3D), virtual stereo base slider (0.5% - 6.0%), and depth curve gamma controls for real-time 60fps adjustment.

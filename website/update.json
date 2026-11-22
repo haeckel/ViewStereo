@@ -1,10 +1,10 @@
 {
-  "latest_version": "0.1.6",
+  "latest_version": "0.1.7",
   "release_date": "2026/11/22",
   "download_url": "https://viewstereo.p-media.jp/ViewStereo.dmg",
   "changelog": {
-    "ja": "【ViewStereo 0.1.6 アップデート】\n・ステレオ異常自動診断 ＆ 片側救済（Single-Eye Depth 3D Salvage）：貼り間違い・別テイク・片側損傷・過大視差などの異常を自動検出し、ステータス画面から状態の良い片側（左または右）を選択して AI Depth 3D（2D-3D立体視）にワンクリック変換・救済可能に。\n・ステレオウィンドウ（⌥⌘2）への立体ソース切替搭載：常設の「オリジナル L+R / 左眼 Depth 3D / 右眼 Depth 3D」切替、仮想ステレオベース（0.5%〜6.0%）、深度カーブ調整に対応。\n・台紙セグメンテーション（StereoCardSegmenter）の更なる高精度化：空や富士山頂などのグラデーション領域が誤って削られるのを防止するセーフティガードおよび上端復元処理を強化。",
-    "en": "[ViewStereo 0.1.6 Update]\n- Single-Eye Depth 3D Salvage & Anomaly Diagnostics: Automatically diagnoses mismatched pairs, unilateral damage, and excessive disparity, offering 1-click AI Depth 3D conversion using either the pristine left or right image.\n- Stereo Source Controls in Stereo Window (⌥⌘2): Added persistent Stereo Source switcher (Original L+R / Left Depth 3D / Right Depth 3D), virtual stereo base slider (0.5% - 6.0%), and depth curve gamma controls.\n- Enhanced Stereo Card Segmentation: Introduced top-edge gradient protection safety guards and overcrop recovery to preserve sky and mountain peak contours without card border clipping."
+    "ja": "【ViewStereo 0.1.7 アップデート】\n・3ペイン・スタジオ型ファイルブラウザワークフローの導入：左ペインにツリー型ファイルブラウザ（⌥⌘L）を新設。起動時フォルダ指定、L/Rペア自動統合（_L/_R等）、処理ステータスバッジ（✓/⚠️/✕）、出力先フォルダ自動除外に対応し、Finder不要のシームレスな作業を実現。\n・AI 深度モデルマネージャー ＆ 全9種マルチエンジン対応：Apple Depth Pro、Depth Pro 2（Small/Base/Large）、Depth Anything V2/V3、MoGe-2（ViT-B/L）に対応。環境設定からオンデマンド導入および優先エンジン切替が可能になり、Stereo Studio シリーズ間でモデルをゼロ重複共有。\n・ステレオ異常救済（Single-Eye Depth 3D）パイプラインの本格強化：選択した優先 Core ML 深度エンジンによる高品質な2D-3D立体視生成と自動メモリ解放に対応。",
+    "en": "[ViewStereo 0.1.7 Update]\n- 3-Pane Studio Workflow with Tree-Style File Browser: Introduced persistent left sidebar file browser (⌥⌘L) with launch folder prompt, automatic L/R pair grouping (_L/_R), real-time status badges (✓/⚠️/✕), and output folder protection.\n- AI Depth Model Manager & 9 Multi-Engine Architecture: Full support for Apple Depth Pro, Depth Pro 2 (Small/Base/Large), Depth Anything V2/V3, and MoGe-2 (ViT-B/L) with on-demand downloading in Preferences and zero-duplicate shared storage across Stereo Studio apps.\n- Production-Grade Single-Eye Depth 3D Salvage Pipeline: High-fidelity 2D-to-3D stereoscopic synthesis powered by your preferred Core ML depth engine with automatic peak memory reclamation."
   },
   "minimum_supported_version": "0.0.1"
 }

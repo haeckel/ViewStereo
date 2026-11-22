@@ -25,6 +25,9 @@
 		SW0100170000000000000001 /* WelcomeIcon.png in Resources */ = {isa = PBXBuildFile; fileRef = SW0200170000000000000001 /* WelcomeIcon.png */; };
 		SW0100180000000000000001 /* NAFNetDeblur.mlmodelc in Resources */ = {isa = PBXBuildFile; fileRef = SW0200180000000000000001 /* NAFNetDeblur.mlmodelc */; };
 		SW0100190000000000000001 /* StereoColorizer.mlmodelc in Resources */ = {isa = PBXBuildFile; fileRef = SW0200190000000000000001 /* StereoColorizer.mlmodelc */; };
+		SW0100210000000000000001 /* WorkspaceBrowserModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = SW0200210000000000000001 /* WorkspaceBrowserModels.swift */; };
+		SW0100220000000000000001 /* WorkspaceFileBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SW0200220000000000000001 /* WorkspaceFileBrowserView.swift */; };
+		SW0100230000000000000001 /* WorkspaceOutlineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SW0200230000000000000001 /* WorkspaceOutlineView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -46,6 +49,9 @@
 		SW0200170000000000000001 /* WelcomeIcon.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = WelcomeIcon.png; sourceTree = "<group>"; };
 		SW0200180000000000000001 /* NAFNetDeblur.mlmodelc */ = {isa = PBXFileReference; lastKnownFileType = folder; path = NAFNetDeblur.mlmodelc; sourceTree = "<group>"; };
 		SW0200190000000000000001 /* StereoColorizer.mlmodelc */ = {isa = PBXFileReference; lastKnownFileType = folder; path = StereoColorizer.mlmodelc; sourceTree = "<group>"; };
+		SW0200210000000000000001 /* WorkspaceBrowserModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceBrowserModels.swift; sourceTree = "<group>"; };
+		SW0200220000000000000001 /* WorkspaceFileBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceFileBrowserView.swift; sourceTree = "<group>"; };
+		SW0200230000000000000001 /* WorkspaceOutlineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceOutlineView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -102,6 +108,7 @@
 				SW0200020000000000000001 /* ViewStereoModels.swift */,
 				SW0200090000000000000001 /* StereoCardSegmenter.swift */,
 				SW0200200000000000000001 /* ViewStereoDepthSynthesizer.swift */,
+				SW0200210000000000000001 /* WorkspaceBrowserModels.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -110,6 +117,8 @@
 			isa = PBXGroup;
 			children = (
 				SW0200030000000000000001 /* ContentView.swift */,
+				SW0200220000000000000001 /* WorkspaceFileBrowserView.swift */,
+				SW0200230000000000000001 /* WorkspaceOutlineView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -232,6 +241,9 @@
 				SW0100030000000000000001 /* ContentView.swift in Sources */,
 				SW0100090000000000000001 /* StereoCardSegmenter.swift in Sources */,
 				SW0100200000000000000001 /* ViewStereoDepthSynthesizer.swift in Sources */,
+				SW0100210000000000000001 /* WorkspaceBrowserModels.swift in Sources */,
+				SW0100220000000000000001 /* WorkspaceFileBrowserView.swift in Sources */,
+				SW0100230000000000000001 /* WorkspaceOutlineView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -292,7 +304,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.1.6;
+				MARKETING_VERSION = 0.1.7;
 				PRODUCT_BUNDLE_IDENTIFIER = jp.p-media.ViewStereo;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -315,7 +327,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.1.6;
+				MARKETING_VERSION = 0.1.7;
 				PRODUCT_BUNDLE_IDENTIFIER = jp.p-media.ViewStereo;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

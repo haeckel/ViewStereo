@@ -10,24 +10,64 @@ struct ContentView: View {
     @State private var isDropTargeted = false
     @State private var isShowingUpdateSheet = false
     @State private var isHoveringWelcomeIcon = false
+    @State private var isShowingBatchSettingsPopover = false
 
     private var inspectorWidth: CGFloat {
         settings.useLargeTextMode ? 450 : 400
     }
 
+    private var effectiveBrowserWidth: CGFloat {
+        let base = settings.useLargeTextMode ? max(vm.fileBrowserWidth, 290) : vm.fileBrowserWidth
+        return min(360, max(220, base))
+    }
+
     var body: some View {
-        HStack(spacing: 0) {
+        VStack(spacing: 0) {
+            topWorkspaceModeBar
+            Divider().opacity(0.35)
+
+            HStack(spacing: 0) {
+                if vm.isShowingFileBrowser {
+                WorkspaceFileBrowserView(vm: vm, store: vm.browserStore, width: effectiveBrowserWidth)
+                    .frame(width: effectiveBrowserWidth, alignment: .topLeading)
+                    .layoutPriority(2)
+                    .clipped()
+                    .background(Color(red: 0.09, green: 0.09, blue: 0.11))
+                    .zIndex(2)
+                    .transition(.move(edge: .leading).combined(with: .opacity))
+
+                // ドラッグリサイズ可能な境界線
+                Rectangle()
+                    .fill(Color.white.opacity(0.08))
+                    .frame(width: 4)
+                    .contentShape(Rectangle())
+                    .zIndex(2)
+                    .onHover { hovering in
+                        if hovering { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+                    }
+                    .gesture(
+                        DragGesture(minimumDistance: 1)
+                            .onChanged { value in
+                                let next = vm.fileBrowserWidth + value.translation.width
+                                vm.fileBrowserWidth = min(360, max(220, next))
+                            }
+                    )
+            }
+
             // メインプレビュー領域（Drop 対応）
             mainCanvasView
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
                 .layoutPriority(1)
                 .background(Color(red: 0.06, green: 0.06, blue: 0.07))
+                .zIndex(0)
                 .onDrop(of: [.fileURL], isTargeted: $isDropTargeted) { providers in
                     handleDrop(providers: providers)
                 }
 
             if vm.isShowingInspector {
                 Divider()
+                    .zIndex(2)
 
                 // 右サイドバー（Anti-Jitter 4層固定幅インスペクター）
                 inspectorPanel
@@ -35,27 +75,37 @@ struct ContentView: View {
                     .layoutPriority(2)
                     .clipped()
                     .background(Color(red: 0.11, green: 0.11, blue: 0.13))
+                    .zIndex(2)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
             }
         }
         .preferredColorScheme(.dark)
-        .frame(minWidth: 1024, minHeight: 680)
+        .frame(minWidth: 1180, minHeight: 680)
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 Button {
                     withAnimation(.easeInOut(duration: 0.2)) {
-                        vm.isShowingInspector.toggle()
+                        vm.isShowingFileBrowser.toggle()
                     }
                 } label: {
-                    Label("Sidebar", systemImage: "sidebar.right")
+                    Label("File Browser", systemImage: "sidebar.left")
                 }
-                .customTooltip(String(localized: "Toggle Sidebar") + " (⌥⌘0)")
+                .customTooltip(String(localized: "Toggle File Browser") + " (⌥⌘L)")
             }
 
             ToolbarItem(placement: .principal) {
                 HStack(spacing: 8) {
-                    // Zone 1: ファイル・入力
+                    // Zone 1: フォルダ・セッション
                     ControlGroup {
+                        Button {
+                            vm.openWorkspaceFolderPanel()
+                        } label: {
+                            Label("Toolbar Open Folder", systemImage: "folder.badge.plus")
+                        }
+                        .customTooltip(String(localized: "Open Workspace Folder...") + " (⇧⌘O)")
+                        .disabled(vm.isBatchRunning)
+
                         Button {
                             vm.resetToInitialState()
                         } label: {
@@ -63,38 +113,35 @@ struct ContentView: View {
                         }
                         .customTooltip(String(localized: "New Session") + " (⌘N)")
                         .disabled((!vm.hasLoadedImages && vm.batchCompletionSummary == nil) || vm.isProcessing || vm.isBatchRunning)
-
-                        Button {
-                            vm.openImagesPanel()
-                        } label: {
-                            Label("Toolbar Open", systemImage: "photo.on.rectangle.angled")
-                        }
-                        .customTooltip(String(localized: "Open Stereoview Card, L/R or SBS...") + " (⌘O)")
-
-                        Button {
-                            vm.openBatchFolderPanel()
-                        } label: {
-                            Label("Toolbar Folder", systemImage: "folder.badge.gearshape")
-                        }
-                        .customTooltip(String(localized: "Batch Process Folder...") + " (⇧⌘B)")
-                        .disabled(vm.isBatchRunning || vm.isProcessing)
                     } label: {
-                        Text("Toolbar Open")
+                        Text("Toolbar Open Folder")
                     }
                     .controlGroupStyle(.automatic)
                     .labelStyle(.titleAndIcon)
 
                     toolbarDivider
 
-                    // Zone 2: 解析・整準
+                    // Zone 2: 解析・整準（または 2D→3D 再推論）
                     ControlGroup {
-                        Button {
-                            vm.runAutoAlignment()
-                        } label: {
-                            Label("Toolbar Align", systemImage: "wand.and.stars")
+                        if vm.workspaceMode == .convert2DTo3D {
+                            Button {
+                                if let url = vm.leftURL {
+                                    vm.loadSingleSBSImage(url: url, resetRestoration: false, interpretationOverride: .force2D)
+                                }
+                            } label: {
+                                Label("Toolbar Re-Depth", systemImage: "cube.transparent")
+                            }
+                            .customTooltip(String(localized: "Re-run AI 2D → 3D Conversion"))
+                            .disabled(!vm.hasLoadedImages || vm.isProcessing)
+                        } else {
+                            Button {
+                                vm.runAutoAlignment()
+                            } label: {
+                                Label("Toolbar Align", systemImage: "wand.and.stars")
+                            }
+                            .customTooltip(String(localized: "Auto Align & Window") + " (⇧⌘A)")
+                            .disabled(!vm.hasLoadedImages || vm.isProcessing)
                         }
-                        .customTooltip(String(localized: "Auto Align & Window") + " (⇧⌘A)")
-                        .disabled(!vm.hasLoadedImages || vm.isProcessing)
                     } label: {
                         Text("Toolbar Align")
                     }
@@ -103,26 +150,38 @@ struct ContentView: View {
 
                     toolbarDivider
 
-                    // Zone 3: 6タブ インスペクタ連動（色分けアイコン＋ショートラベル）
+                    // Zone 3: インスペクタ連動（色分けアイコン＋ショートラベル）
                     HStack(spacing: 4) {
-                        toolbarTabButton(
-                            titleKey: "Toolbar Recipe",
-                            systemImage: "slider.horizontal.3",
-                            color: .brightPurple,
-                            isExpanded: vm.isRecipeSectionExpanded,
-                            tooltip: String(localized: "Toggle Basic Recipe Panel") + " (⌥⌘1)"
-                        ) {
-                            toggleInspectorTab(\.isRecipeSectionExpanded)
-                        }
+                        if vm.workspaceMode == .convert2DTo3D {
+                            toolbarTabButton(
+                                titleKey: "Toolbar 2D3D",
+                                systemImage: "cube.transparent.fill",
+                                color: .brightPurple,
+                                isExpanded: vm.is2D3DSectionExpanded,
+                                tooltip: String(localized: "Toggle 2D → 3D Conversion Panel")
+                            ) {
+                                toggleInspectorTab(\.is2D3DSectionExpanded)
+                            }
+                        } else {
+                            toolbarTabButton(
+                                titleKey: "Toolbar Recipe",
+                                systemImage: "slider.horizontal.3",
+                                color: .brightPurple,
+                                isExpanded: vm.isRecipeSectionExpanded,
+                                tooltip: String(localized: "Toggle Basic Recipe Panel") + " (⌥⌘1)"
+                            ) {
+                                toggleInspectorTab(\.isRecipeSectionExpanded)
+                            }
 
-                        toolbarTabButton(
-                            titleKey: "Toolbar Window",
-                            systemImage: "rectangle.inset.filled.and.person.filled",
-                            color: .brightAmber,
-                            isExpanded: vm.isWindowSectionExpanded,
-                            tooltip: String(localized: "Toggle Stereo Window Panel") + " (⌥⌘2)"
-                        ) {
-                            toggleInspectorTab(\.isWindowSectionExpanded)
+                            toolbarTabButton(
+                                titleKey: "Toolbar Window",
+                                systemImage: "rectangle.inset.filled.and.person.filled",
+                                color: .brightAmber,
+                                isExpanded: vm.isWindowSectionExpanded,
+                                tooltip: String(localized: "Toggle Stereo Window Panel") + " (⌥⌘2)"
+                            ) {
+                                toggleInspectorTab(\.isWindowSectionExpanded)
+                            }
                         }
 
                         toolbarTabButton(
@@ -154,16 +213,6 @@ struct ContentView: View {
                         ) {
                             toggleInspectorTab(\.isColorizationSectionExpanded)
                         }
-
-                        toolbarTabButton(
-                            titleKey: "Toolbar Batch",
-                            systemImage: "square.stack.3d.up",
-                            color: .brightTeal,
-                            isExpanded: vm.isBatchSectionExpanded,
-                            tooltip: String(localized: "Toggle Batch Processing Panel") + " (⌥⌘6)"
-                        ) {
-                            toggleInspectorTab(\.isBatchSectionExpanded)
-                        }
                     }
 
                     toolbarDivider
@@ -179,14 +228,35 @@ struct ContentView: View {
                     .disabled(!vm.hasLoadedImages || vm.isProcessing || vm.isBatchRunning)
                 }
             }
+
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        vm.isShowingInspector.toggle()
+                    }
+                } label: {
+                    Label("Inspector", systemImage: "sidebar.right")
+                }
+                .customTooltip(String(localized: "Toggle Sidebar") + " (⌥⌘0)")
+            }
         }
         .labelStyle(.titleAndIcon)
-        .sheet(isPresented: $isShowingUpdateSheet) {
+        .sheet(isPresented: $isShowingUpdateSheet, onDismiss: {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                vm.presentStartupFolderPromptIfNeeded(in: NSApp.keyWindow ?? NSApp.mainWindow)
+            }
+        }) {
             StudioUpdateNotificationSheet(manager: updateManager)
         }
         .onAppear {
             if updateManager.updateAvailable {
                 isShowingUpdateSheet = true
+            } else {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    if !isShowingUpdateSheet {
+                        vm.presentStartupFolderPromptIfNeeded(in: NSApp.keyWindow ?? NSApp.mainWindow)
+                    }
+                }
             }
             updateManager.checkForUpdates()
         }
@@ -215,6 +285,125 @@ struct ContentView: View {
         }
     }
 
+    // MARK: - Top Workspace Mode Bar (上位処理モード切替)
+
+    private var topWorkspaceModeBar: some View {
+        let isStereoRestore = vm.workspaceMode == .stereoRestore
+        let accentColor: Color = isStereoRestore ? .brightAmber : .brightPurple
+        let isLocked = vm.isBatchRunning || vm.isProcessing
+
+        return ZStack(alignment: .bottom) {
+            HStack(spacing: 16) {
+                // 左: 上位階層の処理モード見出し（左右均等幅にして中央スイッチを厳密にセンター配置）
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(accentColor)
+                        .frame(width: 7, height: 7)
+                        .shadow(color: accentColor.opacity(0.8), radius: 4)
+
+                    Text(LocalizedStringKey("Processing Mode"))
+                        .appSystemFont(size: 11, weight: .bold)
+                        .foregroundStyle(.white.opacity(0.75))
+                        .tracking(0.4)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                // 中央: アイコン＆カラーグラデーション付きモード切替カプセル（ウィンドウ中央・ツールバー中央群と揃える）
+                HStack(spacing: 4) {
+                    ForEach(ViewStereoWorkspaceMode.allCases) { mode in
+                        let isSelected = vm.workspaceMode == mode
+                        let isStereo = mode == .stereoRestore
+                        let iconName = isStereo ? "rectangle.split.2x1.fill" : "cube.transparent.fill"
+                        let gradientColors: [Color] = isStereo
+                            ? [.brightAmber, .darkAmber]
+                            : [.brightPurple, .brightBlue]
+                        let glowColor: Color = isStereo ? .brightAmber : .brightPurple
+
+                        Button {
+                            guard vm.workspaceMode != mode else { return }
+                            withAnimation(.spring(response: 0.25, dampingFraction: 0.82)) {
+                                vm.workspaceMode = mode
+                            }
+                        } label: {
+                            HStack(spacing: 7) {
+                                Image(systemName: iconName)
+                                    .appSystemFont(size: 12, weight: .semibold)
+                                Text(LocalizedStringKey(mode.rawValue))
+                                    .appSystemFont(size: 12.5, weight: isSelected ? .bold : .medium)
+                            }
+                            .foregroundStyle(isSelected ? .white : .white.opacity(0.65))
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 6)
+                            .background {
+                                if isSelected {
+                                    Capsule()
+                                        .fill(
+                                            LinearGradient(
+                                                colors: gradientColors,
+                                                startPoint: .topLeading,
+                                                endPoint: .bottomTrailing
+                                            )
+                                        )
+                                        .shadow(color: glowColor.opacity(0.45), radius: 6, y: 1)
+                                } else {
+                                    Capsule()
+                                        .fill(Color.clear)
+                                }
+                            }
+                            .contentShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(3)
+                .background(
+                    Capsule()
+                        .fill(Color.black.opacity(0.42))
+                        .overlay(
+                            Capsule()
+                                .stroke(Color.white.opacity(0.14), lineWidth: 1)
+                        )
+                )
+                .fixedSize()
+                .disabled(isLocked)
+                .opacity(isLocked ? 0.55 : 1.0)
+                .customTooltip(String(localized: "Switch between Stereo Restoration and dedicated 2D → 3D Conversion"))
+
+                // 右: 現在モードの簡潔な説明（左カラムと対称の maxWidth: .infinity で中央揃えを維持）
+                Text(LocalizedStringKey(isStereoRestore ? "mode_desc_stereo_restore" : "mode_desc_2d_to_3d"))
+                    .appSystemFont(size: 11, weight: .medium)
+                    .foregroundStyle(.white.opacity(0.6))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 7)
+            .background(
+                LinearGradient(
+                    colors: [
+                        accentColor.opacity(0.16),
+                        Color(red: 0.10, green: 0.10, blue: 0.12),
+                        accentColor.opacity(0.06)
+                    ],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            )
+
+            // 下辺のモード連動アクセントライン
+            Rectangle()
+                .fill(
+                    LinearGradient(
+                        colors: [accentColor.opacity(0.75), accentColor.opacity(0.25), .clear],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                )
+                .frame(height: 1.5)
+        }
+    }
+
     // MARK: - Main Canvas & Landing View
 
     @ViewBuilder
@@ -224,11 +413,9 @@ struct ContentView: View {
                 // 上部ツールストリップ（常時表示：立体視方式切替 + 左右スワップ + ステータス）
                 topToolbarStrip
 
-                // 画像キャンバス または バッチキュー または ランディング案内
+                // 画像キャンバス または ランディング案内（バッチ実行中もライブプレビューを表示）
                 ZStack(alignment: .topTrailing) {
-                    if vm.isBatchQueueActive {
-                        batchQueueCanvasView
-                    } else if let img = vm.displayImage {
+                    if let img = vm.displayImage {
                         GeometryReader { _ in
                             Image(nsImage: img)
                                 .interpolation(.high)
@@ -440,17 +627,18 @@ struct ContentView: View {
     @ViewBuilder
     private var batchCanvasOverlay: some View {
         if vm.isBatchRunning {
+            let activeTint: Color = vm.isBatchVerifyOnly ? .brightAmber : .brightTeal
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 10) {
                     ProgressView()
                         .controlSize(.small)
-                    Text("Batch Processing...")
+                    Text(LocalizedStringKey(vm.isBatchVerifyOnly ? "Verifying Stereo..." : "Batch Processing..."))
                         .appSystemFont(size: 12.5, weight: .semibold)
                         .foregroundColor(.white)
                     Spacer()
                     Text("\(vm.batchCompletedCount) / \(vm.batchTotalCount)")
                         .appSystemFont(size: 12, weight: .bold, design: .monospaced)
-                        .foregroundColor(.brightTeal)
+                        .foregroundColor(activeTint)
                     Button {
                         vm.cancelBatchProcessing()
                     } label: {
@@ -459,11 +647,11 @@ struct ContentView: View {
                             .foregroundColor(.secondary)
                     }
                     .buttonStyle(.plain)
-                    .customTooltip("バッチ処理を中止")
+                    .customTooltip("処理を中止")
                 }
 
                 ProgressView(value: vm.batchProgress)
-                    .tint(.brightTeal)
+                    .tint(activeTint)
 
                 if !vm.batchCurrentFile.isEmpty {
                     Text(vm.batchCurrentFile)
@@ -479,11 +667,12 @@ struct ContentView: View {
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
             .overlay(
                 RoundedRectangle(cornerRadius: 12)
-                    .stroke(Color.brightTeal.opacity(0.45), lineWidth: 1)
+                    .stroke(activeTint.opacity(0.45), lineWidth: 1)
             )
             .shadow(color: Color.black.opacity(0.45), radius: 16, x: 0, y: 6)
         } else if let summary = vm.batchCompletionSummary {
-            let isCleanSuccess = !summary.wasCancelled && summary.failed == 0
+            let hasIssues = summary.failed > 0 || summary.warningCount > 0
+            let isCleanSuccess = !summary.wasCancelled && !hasIssues
             let accentColor: Color = isCleanSuccess ? .brightTeal : .brightAmber
 
             HStack(spacing: 12) {
@@ -493,7 +682,9 @@ struct ContentView: View {
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(LocalizedStringKey(
-                        summary.wasCancelled ? "Batch Cancelled" : (summary.failed > 0 ? "Batch Finished with Errors" : "Batch Complete")
+                        summary.isVerifyOnly
+                            ? (summary.wasCancelled ? "Verification Cancelled" : (hasIssues ? "Verification Finished with Warnings" : "Verification Complete"))
+                            : (summary.wasCancelled ? "Batch Cancelled" : (summary.failed > 0 ? "Batch Finished with Errors" : "Batch Complete"))
                     ))
                     .appSystemFont(size: 12.5, weight: .semibold)
                     .foregroundColor(.white)
@@ -507,15 +698,31 @@ struct ContentView: View {
 
                 Spacer(minLength: 8)
 
-                Button {
-                    vm.openBatchOutputFolderInFinder()
-                } label: {
-                    Label("Open Output", systemImage: "folder")
-                        .appSystemFont(size: 11.5, weight: .semibold)
+                if summary.isVerifyOnly {
+                    if summary.warningCount > 0 || summary.failed > 0 {
+                        Button {
+                            vm.browserStore.showWarningsOnly = true
+                            vm.isShowingFileBrowser = true
+                            vm.dismissBatchCompletionNotice()
+                        } label: {
+                            Label("Filter Warnings", systemImage: "exclamationmark.triangle")
+                                .appSystemFont(size: 11.5, weight: .semibold)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .tint(.darkAmber)
+                    }
+                } else {
+                    Button {
+                        vm.openBatchOutputFolderInFinder()
+                    } label: {
+                        Label("Open Output", systemImage: "folder")
+                            .appSystemFont(size: 11.5, weight: .semibold)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .tint(isCleanSuccess ? .palestineGreen : .darkAmber)
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                .tint(isCleanSuccess ? .palestineGreen : .darkAmber)
 
                 Button {
                     vm.dismissBatchCompletionNotice()
@@ -529,7 +736,7 @@ struct ContentView: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
-            .frame(maxWidth: 520)
+            .frame(maxWidth: 540)
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
             .overlay(
                 RoundedRectangle(cornerRadius: 12)
@@ -540,6 +747,13 @@ struct ContentView: View {
     }
 
     private func batchSummaryDetailText(_ summary: BatchCompletionSummary) -> String {
+        if summary.isVerifyOnly {
+            let okCount = max(0, summary.succeeded - summary.warningCount)
+            if summary.wasCancelled {
+                return String(format: String(localized: "%d / %d checked (%d warnings, %d failed)"), summary.succeeded, summary.total, summary.warningCount, summary.failed)
+            }
+            return String(format: String(localized: "%d OK, %d warnings, %d failed"), okCount, summary.warningCount, summary.failed)
+        }
         let dirName = summary.outputDirectory.lastPathComponent
         if summary.wasCancelled {
             return String(format: String(localized: "%d / %d completed → %@/"), summary.succeeded, summary.total, dirName)
@@ -823,23 +1037,29 @@ struct ContentView: View {
         VStack(spacing: 38) {
             // Background visual (Ambient Aura & Welcome Icon)
             ZStack {
-                // Outer ambient glow (アンバー ＆ ブルーの光彩)
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [Color.brightAmber.opacity(0.35), Color.brightBlue.opacity(0.12)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
+                ZStack {
+                    // Outer ambient glow (アンバー ＆ ブルーの光彩)
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [Color.brightAmber.opacity(0.35), Color.brightBlue.opacity(0.12)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
                         )
-                    )
-                    .frame(width: 380, height: 380)
-                    .blur(radius: 70)
+                        .frame(width: 380, height: 380)
+                        .blur(radius: 70)
 
-                // Inner core glow
-                Circle()
-                    .fill(Color.brightAmber.opacity(0.20))
-                    .frame(width: 250, height: 250)
-                    .blur(radius: 35)
+                    // Inner core glow
+                    Circle()
+                        .fill(Color.brightAmber.opacity(0.20))
+                        .frame(width: 250, height: 250)
+                        .blur(radius: 35)
+                }
+                .padding(100)
+                .drawingGroup()
+                .padding(-100)
+                .allowsHitTesting(false)
 
                 // Welcome Icon
                 Button {
@@ -872,7 +1092,12 @@ struct ContentView: View {
                 }
                 .buttonStyle(.plain)
                 .onHover { isHoveringWelcomeIcon = $0 }
-                .customTooltip(String(localized: "Open Stereo Photo...") + " (⌘O)", offsetY: 150)
+                .customTooltip(
+                    (vm.workspaceMode == .convert2DTo3D
+                        ? String(localized: "Open 2D Photos...")
+                        : String(localized: "Open Stereo Photo...")) + " (⌘O)",
+                    offsetY: 150
+                )
             }
             .padding(.top, 16)
 
@@ -893,12 +1118,12 @@ struct ContentView: View {
                 // クイックスタートガイドカード (Glass Recovery Card)
                 HStack(alignment: .top, spacing: 0) {
                     GuideItemButton(
-                        icon: "photo.stack",
-                        title: "ステレオ画像を開く",
-                        desc: "SBS・LR・カードを読み込み",
+                        icon: "folder.badge.plus",
+                        title: "作業フォルダを開く",
+                        desc: "ステレオ修復 / 2D→3D",
                         color: .brightBlue
                     ) {
-                        vm.openImagesPanel()
+                        vm.openWorkspaceFolderPanel()
                     }
 
                     chevronSpacer
@@ -981,19 +1206,24 @@ struct ContentView: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
         .background(
-            ZStack {
-                heroBackgroundImage
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .ignoresSafeArea()
+            GeometryReader { geo in
+                ZStack {
+                    heroBackgroundImage
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        .clipped()
 
-                // Darkening overlay for contrast
-                Color.black.opacity(0.42)
-                    .ignoresSafeArea()
+                    // Darkening overlay for contrast
+                    Color.black.opacity(0.42)
+                }
+                .allowsHitTesting(false)
             }
+            .ignoresSafeArea()
         )
+        .clipped()
     }
 
     // MARK: - Guide Item Button Component (SplatStereo Inheritance)
@@ -1065,16 +1295,19 @@ struct ContentView: View {
 
             Divider().opacity(0.35)
 
-            // 中央スクロール領域（ステータス / 基本設定折りたたみ / ウィンドウ微調整 / カード台紙設定 / 復元 / 彩色 / バッチ折りたたみ）
+            // 中央スクロール領域（ステータス / 2D→3Dまたは基本設定・ウィンドウ / カード台紙設定 / 復元 / 彩色）
             ScrollView([.vertical], showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 14) {
                     statusSummarySection
-                    basicRecipeDisclosure
-                    stereoWindowSection
+                    if vm.workspaceMode == .convert2DTo3D {
+                        depth2D3DConversionSection
+                    } else {
+                        basicRecipeDisclosure
+                        stereoWindowSection
+                    }
                     stereoviewCardMountSection
                     vintageRestorationSection
                     colorizationSection
-                    batchProcessingDisclosure
                 }
                 .frame(width: contentWidth, alignment: .topLeading)
                 .padding(.horizontal, sidePadding)
@@ -1155,7 +1388,7 @@ struct ContentView: View {
     private var statusSummarySection: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
-                sectionHeader(title: "RESTORATION STATUS", color: .brightBlue)
+                sectionHeader(title: vm.workspaceMode == .convert2DTo3D ? "2D → 3D STATUS" : "RESTORATION STATUS", color: .brightBlue)
                 Circle()
                     .fill(statusBadgeColor)
                     .frame(width: 6, height: 6)
@@ -1164,29 +1397,45 @@ struct ContentView: View {
                     .foregroundColor(.secondary)
                     .lineLimit(1)
                 Spacer()
-                HStack(spacing: 6) {
+                if vm.workspaceMode == .convert2DTo3D {
                     Button {
-                        vm.runAutoAlignment()
+                        if let url = vm.leftURL {
+                            vm.loadSingleSBSImage(url: url, resetRestoration: false, interpretationOverride: .force2D)
+                        }
                     } label: {
-                        Label("Re-Align", systemImage: "sparkles")
+                        Label("Re-run", systemImage: "sparkles")
                             .appSystemFont(size: 10.5, weight: .semibold)
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.mini)
-                    .tint(.brightBlue)
+                    .tint(.brightPurple)
                     .disabled(!vm.hasLoadedImages || vm.isProcessing)
-                    .customTooltip("基本設定で再調整 (⇧⌘A)")
+                    .customTooltip(String(localized: "Re-run AI 2D → 3D Conversion"))
+                } else {
+                    HStack(spacing: 6) {
+                        Button {
+                            vm.runAutoAlignment()
+                        } label: {
+                            Label("Re-Align", systemImage: "sparkles")
+                                .appSystemFont(size: 10.5, weight: .semibold)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.mini)
+                        .tint(.brightBlue)
+                        .disabled(!vm.hasLoadedImages || vm.isProcessing)
+                        .customTooltip("基本設定で再調整 (⇧⌘A)")
 
-                    Button {
-                        vm.resetAlignment()
-                    } label: {
-                        Image(systemName: "arrow.counterclockwise")
-                            .font(.system(size: 10.5))
+                        Button {
+                            vm.resetAlignment()
+                        } label: {
+                            Image(systemName: "arrow.counterclockwise")
+                                .font(.system(size: 10.5))
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.mini)
+                        .disabled(!vm.isAligned || vm.isProcessing)
+                        .customTooltip("位置合わせをリセット")
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.mini)
-                    .disabled(!vm.isAligned || vm.isProcessing)
-                    .customTooltip("位置合わせをリセット")
                 }
             }
 
@@ -1195,56 +1444,83 @@ struct ContentView: View {
                     label: "Output Size",
                     value: vm.isAligned ? "\(vm.croppedWidth) × \(vm.croppedHeight)" : (vm.imageWidth > 0 ? "\(vm.imageWidth) × \(vm.imageHeight)" : "—")
                 )
-                telemetryRow(
-                    label: "Vertical RMSE",
-                    value: vm.isAligned ? String(format: "%.3f px", vm.verticalRMSE) : "—",
-                    highlight: vm.isAligned ? (vm.verticalRMSE < 0.1 ? .brightTeal : .brightAmber) : .secondary
-                )
-                telemetryRow(
-                    label: "Disparity Range",
-                    value: vm.isAligned ? String(format: "%.2f %%", vm.maxDisparityPercent) : "—",
-                    highlight: vm.isAligned ? (vm.maxDisparityPercent > 8.0 ? .palestineRed : (vm.maxDisparityPercent > 4.0 ? .brightAmber : .brightTeal)) : .secondary
-                )
-                telemetryRow(
-                    label: "Window",
-                    value: {
-                        guard vm.isAligned else { return "—" }
-                        if vm.isStereoMismatchSuspected {
-                            return String(localized: "⚠️ Mismatched (Invalid Stereo)")
-                        }
-                        if vm.isPseudoscopicSuspected {
-                            return String(localized: vm.isSwapped ? "⚠️ Reversed (Auto-Swapped)" : "⚠️ Reversed (Pseudoscopic)")
-                        }
-                        return String(localized: vm.hasWindowViolationRisk ? "Detected (Edge)" : "Clear")
-                    }(),
-                    highlight: {
-                        guard vm.isAligned else { return .secondary }
-                        if vm.isStereoMismatchSuspected {
-                            return .palestineRed
-                        }
-                        if vm.isPseudoscopicSuspected {
-                            return vm.isSwapped ? .brightAmber : .palestineRed
-                        }
-                        return vm.hasWindowViolationRisk ? .brightAmber : .brightTeal
-                    }()
-                )
 
-                if let advisory = vm.salvageAdvisory, advisory.shouldShowSalvagePrompt || vm.stereoReconstructionMode.isSingleEyeDepth {
+                if vm.workspaceMode == .convert2DTo3D {
+                    telemetryRow(
+                        label: "AI Depth Engine",
+                        value: vm.lastDepthEngineLabel.isEmpty ? settings.preferredDepthEngine.shortLabel : vm.lastDepthEngineLabel,
+                        highlight: .brightPurple
+                    )
+                    telemetryRow(
+                        label: "Inference Time",
+                        value: vm.lastDepthInferenceMs > 0 ? String(format: "%.0f ms", vm.lastDepthInferenceMs) : "—",
+                        highlight: .brightTeal
+                    )
+                    telemetryRow(
+                        label: "Stereo Base",
+                        value: vm.isAligned ? String(format: "%.1f %%", vm.virtualDepthBasePercent) : "—",
+                        highlight: vm.isAligned ? .brightAmber : .secondary
+                    )
+                } else {
+                    telemetryRow(
+                        label: "Vertical RMSE",
+                        value: vm.isAligned ? String(format: "%.3f px", vm.verticalRMSE) : "—",
+                        highlight: vm.isAligned ? (vm.verticalRMSE < 0.1 ? .brightTeal : .brightAmber) : .secondary
+                    )
+                    telemetryRow(
+                        label: "Disparity Range",
+                        value: vm.isAligned ? String(format: "%.2f %%", vm.maxDisparityPercent) : "—",
+                        highlight: vm.isAligned ? (vm.maxDisparityPercent > 8.0 ? .palestineRed : (vm.maxDisparityPercent > 4.0 ? .brightAmber : .brightTeal)) : .secondary
+                    )
+                    telemetryRow(
+                        label: "Window",
+                        value: {
+                            guard vm.isAligned else { return "—" }
+                            if vm.isStereoMismatchSuspected {
+                                return String(localized: "⚠️ Mismatched (Invalid Stereo)")
+                            }
+                            if vm.isPseudoscopicSuspected {
+                                return String(localized: vm.isSwapped ? "⚠️ Reversed (Auto-Swapped)" : "⚠️ Reversed (Pseudoscopic)")
+                            }
+                            return String(localized: vm.hasWindowViolationRisk ? "Detected (Edge)" : "Clear")
+                        }(),
+                        highlight: {
+                            guard vm.isAligned else { return .secondary }
+                            if vm.isStereoMismatchSuspected {
+                                return .palestineRed
+                            }
+                            if vm.isPseudoscopicSuspected {
+                                return vm.isSwapped ? .brightAmber : .palestineRed
+                            }
+                            return vm.hasWindowViolationRisk ? .brightAmber : .brightTeal
+                        }()
+                    )
+                }
+
+                if vm.workspaceMode == .stereoRestore && ((vm.salvageAdvisory?.shouldShowSalvagePrompt == true) || vm.stereoReconstructionMode.isDepthSynthesized) {
+                    let isDepthMode = vm.stereoReconstructionMode.isDepthSynthesized
                     VStack(alignment: .leading, spacing: 8) {
                         HStack(alignment: .top, spacing: 6) {
-                            Image(systemName: vm.stereoReconstructionMode.isSingleEyeDepth ? "sparkles" : "exclamationmark.triangle.fill")
+                            Image(systemName: isDepthMode ? "sparkles" : "exclamationmark.triangle.fill")
                                 .font(.system(size: 12))
-                                .foregroundColor(vm.stereoReconstructionMode.isSingleEyeDepth ? .brightTeal : .brightAmber)
+                                .foregroundColor(isDepthMode ? .brightTeal : .brightAmber)
                             
                             VStack(alignment: .leading, spacing: 3) {
-                                if vm.stereoReconstructionMode.isSingleEyeDepth {
+                                if vm.stereoReconstructionMode == .fullFrame2DDepth {
+                                    Text(String(localized: "2D → 3D Conversion Active"))
+                                        .font(.system(size: 11, weight: .bold))
+                                        .foregroundColor(.white)
+                                    Text(String(localized: "Full-frame 2D photo converted to 3D using AI depth estimation."))
+                                        .font(.system(size: 10))
+                                        .foregroundColor(.white.opacity(0.85))
+                                } else if vm.stereoReconstructionMode.isSingleEyeDepth {
                                     Text(String(localized: "Single-Eye 3D Conversion Active"))
                                         .font(.system(size: 11, weight: .bold))
                                         .foregroundColor(.white)
                                     Text(String(format: String(localized: "Reconstructed from %@ image using AI depth estimation."), vm.stereoReconstructionMode.activeSide == .left ? String(localized: "Left") : String(localized: "Right")))
                                         .font(.system(size: 10))
                                         .foregroundColor(.white.opacity(0.85))
-                                } else {
+                                } else if let advisory = vm.salvageAdvisory {
                                     Text(advisory.isMismatchSuspected ? String(localized: "Stereo Mismatch Detected") : (advisory.isUnilateralDamageSuspected ? String(localized: "Unilateral Damage Detected") : String(localized: "Excessive Stereo Baseline")))
                                         .font(.system(size: 11, weight: .bold))
                                         .foregroundColor(.white)
@@ -1268,7 +1544,23 @@ struct ContentView: View {
                         }
 
                         // ユーザー判断によるアクションボタン群
-                        if vm.stereoReconstructionMode.isSingleEyeDepth {
+                        if vm.stereoReconstructionMode == .fullFrame2DDepth {
+                            if let url = vm.leftURL {
+                                Button(action: {
+                                    vm.loadSingleSBSImage(url: url, interpretationOverride: .forceStereo)
+                                }) {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "rectangle.split.2x1")
+                                        Text(String(localized: "Treat as Stereo (SBS / Card)"))
+                                    }
+                                    .font(.system(size: 11, weight: .medium))
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 5)
+                                }
+                                .buttonStyle(.bordered)
+                                .tint(.secondary)
+                            }
+                        } else if vm.stereoReconstructionMode.isSingleEyeDepth {
                             HStack(spacing: 8) {
                                 Button(action: {
                                     vm.revertToOriginalStereoPair()
@@ -1299,7 +1591,7 @@ struct ContentView: View {
                                 .buttonStyle(.borderedProminent)
                                 .tint(.brightTeal.opacity(0.8))
                             }
-                        } else {
+                        } else if let advisory = vm.salvageAdvisory {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(String(localized: "Select source image for 3D conversion:"))
                                     .font(.system(size: 9.5, weight: .medium))
@@ -1324,18 +1616,184 @@ struct ContentView: View {
                                 }
                             }
                         }
+
+                        // 優先 AI 深度エンジンと設定へのクイック導線
+                        HStack(spacing: 6) {
+                            Image(systemName: "cpu")
+                                .font(.system(size: 9.5))
+                                .foregroundColor(.secondary)
+                            Text(settings.preferredDepthEngine.shortLabel)
+                                .font(.system(size: 9.5, weight: .medium))
+                                .foregroundColor(.white.opacity(0.85))
+                                .lineLimit(1)
+                            Spacer()
+                            if vm.stereoReconstructionMode == .fullFrame2DDepth, let url = vm.leftURL {
+                                Button(String(localized: "Re-run")) {
+                                    vm.loadSingleSBSImage(url: url, interpretationOverride: .force2D)
+                                }
+                                .buttonStyle(.borderless)
+                                .font(.system(size: 9.5, weight: .medium))
+                                .foregroundColor(.brightTeal)
+                                .disabled(vm.isProcessing)
+                            } else if let activeSide = vm.stereoReconstructionMode.activeSide {
+                                Button(String(localized: "Re-run")) {
+                                    vm.convertSingleEyeToDepth3D(side: activeSide)
+                                }
+                                .buttonStyle(.borderless)
+                                .font(.system(size: 9.5, weight: .medium))
+                                .foregroundColor(.brightTeal)
+                                .disabled(vm.isProcessing)
+                            }
+                            SettingsLink {
+                                Label(String(localized: "Model Settings…"), systemImage: "gearshape")
+                                    .font(.system(size: 9.5, weight: .medium))
+                            }
+                            .buttonStyle(.borderless)
+                            .foregroundColor(.brightBlue)
+                        }
+                        .padding(.top, 2)
                     }
                     .padding(8)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background((vm.stereoReconstructionMode.isSingleEyeDepth ? Color.brightTeal : Color.brightAmber).opacity(0.18), in: RoundedRectangle(cornerRadius: 6))
+                    .background((isDepthMode ? Color.brightTeal : Color.brightAmber).opacity(0.18), in: RoundedRectangle(cornerRadius: 6))
                     .overlay(
                         RoundedRectangle(cornerRadius: 6)
-                            .strokeBorder((vm.stereoReconstructionMode.isSingleEyeDepth ? Color.brightTeal : Color.brightAmber).opacity(0.45), lineWidth: 1)
+                            .strokeBorder((isDepthMode ? Color.brightTeal : Color.brightAmber).opacity(0.45), lineWidth: 1)
                     )
                 }
             }
             .padding(10)
             .background(Color.black.opacity(0.25), in: RoundedRectangle(cornerRadius: 8))
+        }
+    }
+
+    // MARK: - Section 2: Dedicated 2D → 3D Conversion Controls
+
+    private var depth2D3DConversionSection: some View {
+        InspectorAccordionSection(
+            title: "2D → 3D CONVERSION",
+            accentColor: .brightPurple,
+            shortcutHint: "⌥⌘1",
+            summary: !vm.is2D3DSectionExpanded ? String(format: "%.1f%%", vm.virtualDepthBasePercent) : nil,
+            borderColor: Color.brightPurple.opacity(0.35),
+            isExpanded: $vm.is2D3DSectionExpanded
+        ) {
+            VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("AI Depth Engine")
+                            .appSystemFont(size: 11, weight: .semibold)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        SettingsLink {
+                            Label(String(localized: "Model Settings…"), systemImage: "gearshape")
+                                .appSystemFont(size: 10, weight: .medium)
+                        }
+                        .buttonStyle(.borderless)
+                        .foregroundColor(.brightBlue)
+                    }
+
+                    Picker("Preferred Engine", selection: $settings.depthModelEngineRaw) {
+                        ForEach(StudioDepthEngine.allCases) { engine in
+                            Text(engine.shortLabel).tag(engine.rawValue)
+                        }
+                    }
+                    .labelsHidden()
+                    .disabled(vm.isProcessing || vm.isBatchRunning)
+                }
+
+                Divider().opacity(0.3)
+
+                // 3点セット: Stereo Base (%)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Stereo Base (%)")
+                            .appSystemFont(size: 11.5, weight: .semibold)
+                        Spacer()
+                        ResetButton(isModified: abs(vm.virtualDepthBasePercent - 3.0) > 0.05) {
+                            vm.virtualDepthBasePercent = 3.0
+                        }
+                        .disabled(vm.isProcessing)
+                        NumericInput(
+                            value: $vm.virtualDepthBasePercent,
+                            range: 0.5...6.0,
+                            format: "%.1f"
+                        )
+                        .disabled(vm.isProcessing)
+                    }
+                    Slider(value: $vm.virtualDepthBasePercent, in: 0.5...6.0)
+                        .tint(.brightPurple)
+                        .disabled(vm.isProcessing)
+                }
+
+                // 3点セット: Depth Offset / Pop-out (px)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Depth Offset / Pop-out (px)")
+                            .appSystemFont(size: 11.5, weight: .semibold)
+                        Spacer()
+                        ResetButton(isModified: abs(vm.windowShiftX) > 0.05) {
+                            vm.windowShiftX = 0.0
+                            vm.applyManualWindowShift()
+                        }
+                        .disabled(!vm.isAligned || vm.isProcessing)
+                        NumericInput(
+                            value: $vm.windowShiftX,
+                            range: -300.0...300.0,
+                            format: "%.1f"
+                        ) {
+                            vm.applyManualWindowShift()
+                        }
+                        .id("2d3d-\(vm.currentSourceName)-\(vm.isAligned)")
+                        .disabled(!vm.isAligned || vm.isProcessing)
+                    }
+                    Slider(value: $vm.windowShiftX, in: -200.0...200.0, onEditingChanged: { editing in
+                        if !editing {
+                            vm.applyManualWindowShift()
+                        }
+                    })
+                    .tint(.brightAmber)
+                    .disabled(!vm.isAligned || vm.isProcessing)
+                    .onChange(of: vm.windowShiftX) { _, _ in
+                        vm.updateRealtimeDragPreview()
+                    }
+                }
+
+                // 3点セット: Depth Gamma
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Depth Gamma")
+                            .appSystemFont(size: 11.5, weight: .semibold)
+                        Spacer()
+                        ResetButton(isModified: abs(vm.depthGamma - 1.0) > 0.05) {
+                            vm.depthGamma = 1.0
+                        }
+                        .disabled(vm.isProcessing)
+                        NumericInput(
+                            value: $vm.depthGamma,
+                            range: 0.4...2.2,
+                            format: "%.2f"
+                        )
+                        .disabled(vm.isProcessing)
+                    }
+                    Slider(value: $vm.depthGamma, in: 0.4...2.2)
+                        .tint(.brightTeal)
+                        .disabled(vm.isProcessing)
+                }
+
+                Button {
+                    if let url = vm.leftURL {
+                        vm.loadSingleSBSImage(url: url, resetRestoration: false, interpretationOverride: .force2D)
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "cube.transparent.fill")
+                        Text(LocalizedStringKey("Re-run 2D → 3D Conversion"))
+                    }
+                }
+                .buttonStyle(InspectorActionButtonStyle(accentColor: .brightPurple, isPending: false))
+                .disabled(!vm.hasLoadedImages || vm.isProcessing)
+            }
         }
     }
 
@@ -1352,7 +1810,7 @@ struct ContentView: View {
         ) {
             // 3点セット: スライダー + ResetButton + NumericInput
             VStack(alignment: .leading, spacing: 8) {
-                if vm.stereoReconstructionMode.isSingleEyeDepth {
+                if vm.stereoReconstructionMode.isDepthSynthesized {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack {
                             Text("Virtual Baseline (%)")
@@ -1777,6 +2235,12 @@ struct ContentView: View {
                         .controlSize(.small)
                         .tint(.brightPink)
                         .disabled(!vm.hasLoadedImages || !vm.hasActiveVintageRestoration)
+
+                    Toggle("Keep Restoration Recipe Across Images", isOn: $settings.keepRecipeAcrossImages)
+                        .appSystemFont(size: 11.5)
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                        .tint(.brightPink)
                 }
             }
         }
@@ -1924,9 +2388,21 @@ struct ContentView: View {
             isExpanded: $vm.isRecipeSectionExpanded
         ) {
             VStack(alignment: .leading, spacing: 14) {
-                // Card Detection
+                // Card Detection & Input Interpretation
                 VStack(alignment: .leading, spacing: 8) {
                     sectionHeader(title: "STEREO CARD DETECTION", color: .brightPurple)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Input Mode (2D Auto-Detect)")
+                            .appSystemFont(size: 11, weight: .semibold)
+                            .foregroundColor(.secondary)
+                        Picker("Input Mode", selection: $vm.inputInterpretation) {
+                            ForEach(StereoInputInterpretation.allCases) { mode in
+                                Text(LocalizedStringKey(mode.rawValue)).tag(mode)
+                            }
+                        }
+                        .labelsHidden()
+                    }
 
                     Picker("Card Mode", selection: $vm.stereoCardMode) {
                         ForEach(StereoCardMode.allCases) { mode in
@@ -2037,125 +2513,7 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - Section 4: Batch Processing (Collapsible)
-
-    private var batchProcessingDisclosure: some View {
-        InspectorAccordionSection(
-            title: "BATCH PROCESSING",
-            accentColor: .brightTeal,
-            shortcutHint: "⌥⌘6",
-            summary: vm.isBatchRunning ? "\(vm.batchCompletedCount)/\(vm.batchTotalCount)" : nil,
-            borderColor: vm.isBatchRunning ? Color.brightTeal.opacity(0.45) : Color.white.opacity(0.14),
-            isExpanded: $vm.isBatchSectionExpanded
-        ) {
-            VStack(alignment: .leading, spacing: 10) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Input Pairing")
-                        .appSystemFont(size: 11, weight: .semibold)
-                        .foregroundColor(.secondary)
-                    Picker("Pairing", selection: $vm.batchPairingMode) {
-                        ForEach(StereoBatchPairingMode.allCases) { mode in
-                            Text(LocalizedStringKey(mode.rawValue)).tag(mode)
-                        }
-                    }
-                    .labelsHidden()
-                    .disabled(vm.isBatchRunning)
-                }
-
-                Toggle("Save Adjustment Report (.txt)", isOn: $vm.batchSaveReport)
-                    .appSystemFont(size: 12)
-                    .toggleStyle(.switch)
-                    .tint(.brightTeal)
-                    .disabled(vm.isBatchRunning)
-
-                HStack(spacing: 8) {
-                    if let outFolder = vm.batchOutputFolder {
-                        Text(outFolder.lastPathComponent)
-                            .appSystemFont(size: 10.5, design: .monospaced)
-                            .foregroundColor(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    } else {
-                        Text("Output: <Input>/ViewStereo_Output")
-                            .appSystemFont(size: 10.5, design: .monospaced)
-                            .foregroundColor(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
-                    Spacer()
-                    Button("Output...") {
-                        vm.chooseBatchOutputFolderPanel()
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .disabled(vm.isBatchRunning)
-                }
-
-                if vm.isBatchRunning {
-                    Button {
-                        vm.cancelBatchProcessing()
-                    } label: {
-                        Label("Cancel Batch", systemImage: "xmark.circle")
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 6)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.palestineRed)
-                } else {
-                    VStack(spacing: 6) {
-                        Button {
-                            vm.openBatchFolderPanel()
-                        } label: {
-                            Label("Select Folder for Batch...", systemImage: "folder.badge.gearshape")
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 6)
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(vm.isProcessing)
-
-                        if vm.isBatchQueueActive && !vm.batchQueueItems.isEmpty {
-                            Button {
-                                vm.startBatchProcessing()
-                            } label: {
-                                HStack(spacing: 6) {
-                                    Image(systemName: "play.fill")
-                                    Text(String(format: NSLocalizedString("Execute Batch (%lld files)", comment: ""), Int64(vm.batchQueueItems.count)))
-                                }
-                            }
-                            .buttonStyle(InspectorActionButtonStyle(accentColor: .brightTeal, isPending: false))
-                        }
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 4) {
-                    ProgressView(value: vm.batchProgress)
-                        .tint(.brightTeal)
-                    HStack {
-                        if vm.isBatchRunning {
-                            Text(vm.batchCurrentFile)
-                                .appSystemFont(size: 10.5, design: .monospaced)
-                                .foregroundColor(.secondary)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                        } else {
-                            Text("Ready (or drop a folder onto canvas)")
-                                .appSystemFont(size: 10.5, design: .monospaced)
-                                .foregroundColor(.secondary)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                        }
-                        Spacer()
-                        Text("\(vm.batchCompletedCount)/\(vm.batchTotalCount)")
-                            .appSystemFont(size: 10.5, weight: .semibold, design: .monospaced)
-                            .foregroundColor(.brightTeal)
-                    }
-                }
-                .opacity(vm.isBatchRunning || vm.batchTotalCount > 0 ? 1.0 : 0.45)
-            }
-        }
-    }
-
-    // MARK: - Fixed Footer: Export
+    // MARK: - Fixed Footer: Unified Export & Batch
 
     private var exportFooter: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -2201,17 +2559,80 @@ struct ContentView: View {
             }
             .frame(height: 24)
 
-            HStack(spacing: 8) {
+            // 共通出力先 + バッチ設定ポップオーバー
+            HStack(spacing: 6) {
+                Image(systemName: "folder")
+                    .font(.system(size: 10.5))
+                    .foregroundColor(.brightTeal)
+
+                Text(vm.batchOutputFolder?.lastPathComponent ?? (vm.browserStore.isVirtualSelection ? String(localized: "Select Output...") : "ViewStereo_Output"))
+                    .appSystemFont(size: 10.5, design: .monospaced)
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                Spacer(minLength: 4)
+
+                Button("Output...") {
+                    vm.chooseBatchOutputFolderPanel()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+                .disabled(vm.isBatchRunning)
+
                 Button {
-                    vm.exportImage()
+                    isShowingBatchSettingsPopover.toggle()
                 } label: {
-                    Label("Export Image", systemImage: "square.and.arrow.down")
+                    Image(systemName: "gearshape.fill")
+                        .font(.system(size: 10.5))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+                .tint(vm.batchWarningPolicy != .exportAll || vm.batchIncludeSubfolders || vm.batchSaveReport ? .brightTeal : .secondary)
+                .customTooltip(String(localized: "Batch & Output Settings"))
+                .popover(isPresented: $isShowingBatchSettingsPopover, arrowEdge: .leading) {
+                    batchSettingsPopoverContent
+                }
+            }
+
+            HStack(spacing: 6) {
+                Button {
+                    vm.quickExportToWorkspaceOutput()
+                } label: {
+                    Label("Quick Export", systemImage: "bolt.fill")
+                        .appSystemFont(size: 11.5, weight: .bold)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 7)
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.palestineGreen)
                 .disabled(!vm.hasLoadedImages || vm.isProcessing || vm.isBatchRunning)
+                .customTooltip(String(localized: "Quick Export to Output Folder") + " (⇧⌘E)")
+
+                if vm.isBatchRunning {
+                    Button {
+                        vm.cancelBatchProcessing()
+                    } label: {
+                        Label("Cancel", systemImage: "xmark.circle.fill")
+                            .appSystemFont(size: 11.5, weight: .bold)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 7)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.palestineRed)
+                } else {
+                    FooterBatchActionButton(vm: vm, store: vm.browserStore)
+                }
+
+                Button {
+                    vm.exportImage()
+                } label: {
+                    Image(systemName: "square.and.arrow.down")
+                        .padding(.vertical, 7)
+                }
+                .buttonStyle(.bordered)
+                .disabled(!vm.hasLoadedImages || vm.isProcessing || vm.isBatchRunning)
+                .customTooltip(String(localized: "Export Image...") + " (⌘E)")
 
                 Button {
                     vm.exportAdjustmentReport()
@@ -2224,6 +2645,61 @@ struct ContentView: View {
                 .customTooltip("調整レポート (.txt) を保存")
             }
         }
+    }
+
+    private var batchSettingsPopoverContent: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(LocalizedStringKey("Batch & Output Settings"))
+                .appSystemFont(size: 12.5, weight: .bold)
+                .foregroundColor(.white)
+
+            Divider().opacity(0.3)
+
+            if vm.workspaceMode == .stereoRestore {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Input Pairing")
+                        .appSystemFont(size: 11, weight: .semibold)
+                        .foregroundColor(.secondary)
+                    Picker("Pairing", selection: $vm.batchPairingMode) {
+                        ForEach(StereoBatchPairingMode.allCases) { mode in
+                            Text(LocalizedStringKey(mode.rawValue)).tag(mode)
+                        }
+                    }
+                    .labelsHidden()
+                    .disabled(vm.isBatchRunning)
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("On Stereo Warning")
+                        .appSystemFont(size: 11, weight: .semibold)
+                        .foregroundColor(.secondary)
+                    Picker("On Stereo Warning", selection: $vm.batchWarningPolicy) {
+                        ForEach(BatchWarningPolicy.allCases) { policy in
+                            Text(LocalizedStringKey(policy.rawValue)).tag(policy)
+                        }
+                    }
+                    .labelsHidden()
+                    .disabled(vm.isBatchRunning)
+                }
+            }
+
+            Toggle("Include Subfolders (Recursive)", isOn: $vm.batchIncludeSubfolders)
+                .appSystemFont(size: 11.5)
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .tint(.brightTeal)
+                .disabled(vm.isBatchRunning)
+
+            Toggle("Save Adjustment Report (.txt)", isOn: $vm.batchSaveReport)
+                .appSystemFont(size: 11.5)
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .tint(.brightTeal)
+                .disabled(vm.isBatchRunning)
+        }
+        .padding(14)
+        .frame(width: 280, alignment: .leading)
+        .background(Color(red: 0.12, green: 0.12, blue: 0.15))
     }
 
     // MARK: - Helpers
@@ -2529,5 +3005,29 @@ private struct SalvageConversionButton: View {
         case .right:
             return isRecommended ? String(localized: "✨ Convert Right (Recommended)") : String(localized: "Convert Right")
         }
+    }
+}
+
+private struct FooterBatchActionButton: View {
+    @ObservedObject var vm: ViewStereoViewModel
+    @ObservedObject var store: WorkspaceBrowserStore
+
+    var body: some View {
+        let batchCount = store.selectedBatchCount
+        Button {
+            vm.startBatchProcessingFromBrowser()
+        } label: {
+            Label(
+                String(format: String(localized: "Batch (%lld)"), Int64(batchCount)),
+                systemImage: "square.stack.3d.up.fill"
+            )
+            .appSystemFont(size: 11.5, weight: .bold)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 7)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(.brightTeal)
+        .disabled(batchCount == 0 || vm.isProcessing)
+        .customTooltip(String(localized: "Batch Process Selection / Folder") + " (⇧⌘B)")
     }
 }
