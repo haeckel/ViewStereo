@@ -4,6 +4,38 @@ ViewStereo は現在開発中であり、特に開発初期段階のアプリケ
 
 ==================================================
 
+ViewStereo v0.2.0 リリースノート / Release Notes (2026.11.24)
+
+==================================================
+【ViewStereo v0.2.0 新機能・改善点 / New Features & Improvements】
+==================================================
+- 日英ローカライズの100%対称化と多言語完全対応:
+  - 警告バナー（特徴点不足、ステレオ不成立、偽視検出等）、全ツールチップ、初期ガイドカードのハードコードを排除。
+  - 日英全493キーが完全一致し、多言語環境での視認性と操作性を向上。
+- 状態遷移・キャッシュ整合性・メモリ管理の徹底強化:
+  - 画像切替時の左右スワップ状態や片目Depthサルベージモードの引き継ぎバグを修正。
+  - 深度合成バッファおよび静止画・動画メモリの即時解放機構（clearDepthSynthesisCache / clearStaticImageBuffers）を導入し、長時間の連続処理や高解像度バッチ時のメモリリークを根絶。
+- 台紙抽出エンジンの堅牢化・クラッシュ防止:
+  - コーナー境界判定および台紙エッジサンプリング時のレンジ境界ガードを強化し、特殊形状や極端解像度のカードにおける強制終了（Fatal error）を完全に防止。
+- ショートカット統一:
+  - メニューバー「Panels」に「バッチ・書き出し詳細設定（⌥⌘6）」を追加し、インスペクターの開閉状態と完全同期。
+
+==================================================
+[v0.2.0 New Features & Highlights]
+==================================================
+- 100% Symmetrical English & Japanese Localization:
+  - Completely eliminated hardcoded strings across advisory banners, interactive tooltips, and welcome guide cards.
+  - All 493 localization keys are synchronized with zero parity gaps.
+- Hardened State Transitions & Memory Management:
+  - Fixed state persistence bugs where manual swaps (X) or single-eye depth modes leaked into subsequent images.
+  - Proactive buffer reclamation (clearDepthSynthesisCache / clearStaticImageBuffers) eliminates memory growth during extended sessions and batch jobs.
+- Robustness & Crash Elimination:
+  - Added strict range bounds checking in StereoCardSegmenter corner detection and border sampling, permanently resolving edge-case fatal errors on unusual card aspect ratios.
+- Unified Shortcut Navigation:
+  - Added "Toggle Batch Processing Panel" (⌥⌘6) under the Panels menu, fully synchronizing the inspector's batch section expansion state.
+
+==================================================
+
 ViewStereo v0.1.9 リリースノート / Release Notes (2026.11.23)
 
 ==================================================

@@ -481,7 +481,7 @@ final class ViewStereoViewModel: ObservableObject {
                 includeSubfolders: batchIncludeSubfolders,
                 outputFolder: batchOutputFolder
             )
-            if hasLoadedImages, let url = leftURL, !isProcessing && !isBatchRunning {
+            if !isVideoLoaded, hasLoadedImages, let url = leftURL, !isProcessing && !isBatchRunning {
                 loadSingleSBSImage(url: url, resetRestoration: false)
             }
         }
@@ -587,6 +587,36 @@ final class ViewStereoViewModel: ObservableObject {
     private var cachedDepthH: Int = 0
     private var cachedSynthFullLeftRGB: [UInt8]? = nil
     private var cachedSynthFullRightRGB: [UInt8]? = nil
+
+    /// 深度合成および高解像度ワープ用の中間キャッシュを完全解放
+    private func clearDepthSynthesisCache() {
+        cachedBaseSideRGB = nil
+        cachedBaseW = 0
+        cachedBaseH = 0
+        cachedDisparityMap = nil
+        cachedDepthW = 0
+        cachedDepthH = 0
+        cachedSynthFullLeftRGB = nil
+        cachedSynthFullRightRGB = nil
+    }
+
+    /// 静止画像（RAW・整準・プレビュー）の全バッファを完全クリア
+    private func clearStaticImageBuffers() {
+        rawLeftRGB = nil
+        rawRightRGB = nil
+        alignedLeftRGB = nil
+        alignedRightRGB = nil
+        previewRawLeftRGB = nil
+        previewRawRightRGB = nil
+        previewAlignedLeftRGB = nil
+        previewAlignedRightRGB = nil
+        rectifiedPreviewLeftRGB = nil
+        rectifiedPreviewRightRGB = nil
+        originalTrueStereoAlignedL = nil
+        originalTrueStereoAlignedR = nil
+        clearDepthSynthesisCache()
+    }
+
     private var isSyncingLayoutAndMode = false
     @Published var displayMode: StereoDisplayMode = .stereoviewCard {
         didSet {
@@ -1142,9 +1172,7 @@ final class ViewStereoViewModel: ObservableObject {
         stereoReconstructionMode = .trueStereo
         originalTrueStereoAlignedL = nil
         originalTrueStereoAlignedR = nil
-        cachedDisparityMap = nil
-        cachedSynthFullLeftRGB = nil
-        cachedSynthFullRightRGB = nil
+        clearDepthSynthesisCache()
 
         isSwapped = false
         resetVintageRestoration(renderPreview: false)
@@ -1461,7 +1489,7 @@ final class ViewStereoViewModel: ObservableObject {
     }
 
     var hasLoadedImages: Bool {
-        rawLeftRGB != nil && rawRightRGB != nil
+        (rawLeftRGB != nil && rawRightRGB != nil) || (isVideoLoaded && alignedLeftRGB != nil && alignedRightRGB != nil)
     }
 
     var activeLeftRGB: [UInt8]? { alignedLeftRGB ?? rawLeftRGB }
@@ -1765,6 +1793,11 @@ final class ViewStereoViewModel: ObservableObject {
             isStereoMismatchSuspected = false
             isPseudoscopicSuspected = false
             stereoQualityWarning = nil
+            isSwapped = false
+            stereoReconstructionMode = .trueStereo
+            originalTrueStereoAlignedL = nil
+            originalTrueStereoAlignedR = nil
+            clearDepthSynthesisCache()
             appliedCardMountConfig = makeCardMountConfig()
             appliedRecipeConfig = currentRecipeConfig
 
@@ -1869,6 +1902,11 @@ final class ViewStereoViewModel: ObservableObject {
             windowShiftX = 0
             autoOptimalShiftX = 0
             lastFullResShiftX = 0
+            isSwapped = false
+            stereoReconstructionMode = .trueStereo
+            originalTrueStereoAlignedL = nil
+            originalTrueStereoAlignedR = nil
+            clearDepthSynthesisCache()
             isProcessing = false
             statusMessage = "Loaded L/R (\(lw)×\(lh))"
             appliedCardMountConfig = makeCardMountConfig()
@@ -1920,9 +1958,7 @@ final class ViewStereoViewModel: ObservableObject {
         stereoReconstructionMode = .trueStereo
         originalTrueStereoAlignedL = nil
         originalTrueStereoAlignedR = nil
-        cachedDisparityMap = nil
-        cachedSynthFullLeftRGB = nil
-        cachedSynthFullRightRGB = nil
+        clearDepthSynthesisCache()
         statusMessage = "Reset to original images."
         renderDisplayPreview()
     }
@@ -2491,7 +2527,7 @@ final class ViewStereoViewModel: ObservableObject {
     ) -> (isMismatch: Bool, warningText: String?, reportText: String) {
         // 1. 特徴点数が極端に少ない場合
         if matches.count < 20 || samples.count < 15 {
-            let warn = "⚠️ 特徴点不足 (アライメント信頼性低)"
+            let warn = String(localized: "⚠️ Low Feature Matches (Low Reliability)")
             let rep = "⚠️ Warning: Very low feature matches (\(matches.count) matches, \(samples.count) inliers)"
             return (true, warn, rep)
         }
@@ -2542,7 +2578,7 @@ final class ViewStereoViewModel: ObservableObject {
             } else {
                 reason = "Extreme spatial clustering (\(activeCells)/9 grid coverage, \(activeRows)/3 rows)"
             }
-            let warn = "⚠️ ステレオ不成立 (左右不一致)"
+            let warn = String(localized: "⚠️ Mismatched (Invalid Stereo)")
             let rep = "⚠️ Warning: Stereo Mismatch / Invalid Pair (\(reason); not a consistent stereoscopic pair)"
             return (true, warn, rep)
         }
@@ -2552,7 +2588,7 @@ final class ViewStereoViewModel: ObservableObject {
             if isSwapped {
                 return (false, nil, "Pseudoscopic (Auto-Swapped: Left <-> Right)")
             } else {
-                let warn = "⚠️ 左右逆の疑い (偽視)"
+                let warn = String(localized: "⚠️ Reversed (Pseudoscopic)")
                 let rep = "⚠️ Warning: Pseudoscopic detected (Reversed Left/Right; needs swap)"
                 return (false, warn, rep)
             }
@@ -3242,12 +3278,13 @@ final class ViewStereoViewModel: ObservableObject {
         isStereoMismatchSuspected = false
         isPseudoscopicSuspected = false
         stereoQualityWarning = nil
+        isSwapped = false
+        stereoReconstructionMode = .trueStereo
+        clearStaticImageBuffers()
         lastMatches = []
         lastRectResult = nil
         lastCommonPolygon = []
         lastRawSaliencyMap = nil
-        originalTrueStereoAlignedL = nil
-        originalTrueStereoAlignedR = nil
 
         workspaceActiveItemID = url.path
         workspaceItemStatuses[url.path] = .processing
@@ -5338,25 +5375,29 @@ final class ViewStereoViewModel: ObservableObject {
 
                 if Task.isCancelled { break }
 
+                let isLastItem = (idx == items.count - 1) || (items.count == 1)
+
                 switch stepOutcome {
                 case .alignedSuccess(let out, let w, let h, let preservedArch, let mountCtx, let itemCfg):
                     successCnt += 1
-                    workspaceActiveItemID = item.id
-                    leftURL = item.leftURL
-                    rightURL = item.rightURL ?? item.leftURL
-                    isSingleSBSInput = (item.rightURL == nil)
-                    hasPreservedArch = preservedArch
-                    currentMountContext = mountCtx
-                    if !verifyOnly && baseCardCfg.textMode == .ocrAuto {
-                        cardBottomCaption = itemCfg.bottomCaption
-                        cardTopCenterText = itemCfg.topCenterText
-                        cardLeftMarginText = itemCfg.leftMarginText
-                        cardRightMarginText = itemCfg.rightMarginText
+                    if isLastItem {
+                        workspaceActiveItemID = item.id
+                        leftURL = item.leftURL
+                        rightURL = item.rightURL ?? item.leftURL
+                        isSingleSBSInput = (item.rightURL == nil)
+                        hasPreservedArch = preservedArch
+                        currentMountContext = mountCtx
+                        if !verifyOnly && baseCardCfg.textMode == .ocrAuto {
+                            cardBottomCaption = itemCfg.bottomCaption
+                            cardTopCenterText = itemCfg.topCenterText
+                            cardLeftMarginText = itemCfg.leftMarginText
+                            cardRightMarginText = itemCfg.rightMarginText
+                        }
+                        imageWidth = w
+                        imageHeight = h
+                        isSwapped = swapped
+                        applyAlignmentOutput(out)
                     }
-                    imageWidth = w
-                    imageHeight = h
-                    isSwapped = swapped
-                    applyAlignmentOutput(out)
 
                     if out.stereoQualityWarning != nil || out.salvageAdvisory.shouldShowSalvagePrompt {
                         warnCnt += 1
@@ -5365,53 +5406,57 @@ final class ViewStereoViewModel: ObservableObject {
                                 : (out.salvageAdvisory.isUnilateralDamageSuspected ? String(localized: "Unilateral Damage Detected")
                                     : String(localized: "Excessive Stereo Baseline")))
                         workspaceItemStatuses[item.id] = .warning(warnMsg)
+                    } else if workspaceItemStatuses[item.id] == nil || workspaceItemStatuses[item.id] == .processing {
+                        workspaceItemStatuses[item.id] = .completed
                     }
 
                 case .aiConverted2D3D(let fullL, let fullR, let w, let h, let is2DSource, let preservedArch, let mountCtx, let itemCfg):
                     successCnt += 1
-                    workspaceActiveItemID = item.id
-                    leftURL = item.leftURL
-                    rightURL = item.rightURL ?? item.leftURL
-                    isSingleSBSInput = false
-                    hasPreservedArch = preservedArch
-                    currentMountContext = mountCtx
-                    if baseCardCfg.textMode == .ocrAuto {
-                        cardBottomCaption = itemCfg.bottomCaption
-                        cardTopCenterText = itemCfg.topCenterText
-                        cardLeftMarginText = itemCfg.leftMarginText
-                        cardRightMarginText = itemCfg.rightMarginText
+                    if isLastItem {
+                        workspaceActiveItemID = item.id
+                        leftURL = item.leftURL
+                        rightURL = item.rightURL ?? item.leftURL
+                        isSingleSBSInput = false
+                        hasPreservedArch = preservedArch
+                        currentMountContext = mountCtx
+                        if baseCardCfg.textMode == .ocrAuto {
+                            cardBottomCaption = itemCfg.bottomCaption
+                            cardTopCenterText = itemCfg.topCenterText
+                            cardLeftMarginText = itemCfg.leftMarginText
+                            cardRightMarginText = itemCfg.rightMarginText
+                        }
+                        let (pL, pw, ph) = Self.downsampleForPreview(fullL, width: w, height: h, maxDim: Self.previewMaxDimension)
+                        let (pR, _, _) = Self.downsampleForPreview(fullR, width: w, height: h, maxDim: Self.previewMaxDimension)
+                        rawLeftRGB = fullL
+                        rawRightRGB = fullR
+                        alignedLeftRGB = fullL
+                        alignedRightRGB = fullR
+                        previewRawLeftRGB = pL
+                        previewRawRightRGB = pR
+                        previewAlignedLeftRGB = pL
+                        previewAlignedRightRGB = pR
+                        rectifiedPreviewLeftRGB = pL
+                        rectifiedPreviewRightRGB = pR
+                        imageWidth = w
+                        imageHeight = h
+                        croppedWidth = w
+                        croppedHeight = h
+                        previewWidth = pw
+                        previewHeight = ph
+                        previewCroppedWidth = pw
+                        previewCroppedHeight = ph
+                        rectifiedPreviewWidth = pw
+                        rectifiedPreviewHeight = ph
+                        isAligned = true
+                        stereoReconstructionMode = is2DSource ? .fullFrame2DDepth : .singleEyeDepth(.left)
+                        salvageAdvisory = nil
+                        isStereoMismatchSuspected = false
+                        isPseudoscopicSuspected = false
+                        stereoQualityWarning = nil
+                        isSwapped = false
+                        renderDisplayPreview()
                     }
-                    let (pL, pw, ph) = Self.downsampleForPreview(fullL, width: w, height: h, maxDim: Self.previewMaxDimension)
-                    let (pR, _, _) = Self.downsampleForPreview(fullR, width: w, height: h, maxDim: Self.previewMaxDimension)
-                    rawLeftRGB = fullL
-                    rawRightRGB = fullR
-                    alignedLeftRGB = fullL
-                    alignedRightRGB = fullR
-                    previewRawLeftRGB = pL
-                    previewRawRightRGB = pR
-                    previewAlignedLeftRGB = pL
-                    previewAlignedRightRGB = pR
-                    rectifiedPreviewLeftRGB = pL
-                    rectifiedPreviewRightRGB = pR
-                    imageWidth = w
-                    imageHeight = h
-                    croppedWidth = w
-                    croppedHeight = h
-                    previewWidth = pw
-                    previewHeight = ph
-                    previewCroppedWidth = pw
-                    previewCroppedHeight = ph
-                    rectifiedPreviewWidth = pw
-                    rectifiedPreviewHeight = ph
-                    isAligned = true
-                    stereoReconstructionMode = is2DSource ? .fullFrame2DDepth : .singleEyeDepth(.left)
-                    salvageAdvisory = nil
-                    isStereoMismatchSuspected = false
-                    isPseudoscopicSuspected = false
-                    stereoQualityWarning = nil
-                    isSwapped = false
                     workspaceItemStatuses[item.id] = .aiConverted(is2DSource ? "2D→3D" : "AI 3D")
-                    renderDisplayPreview()
 
                 case .skippedWarning(let warnMsg):
                     warnCnt += 1

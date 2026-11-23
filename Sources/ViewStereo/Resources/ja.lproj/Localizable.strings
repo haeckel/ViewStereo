@@ -516,10 +516,30 @@
 "Preserve HDR (10-bit HLG)" = "HDR を維持 (10-bit HLG)";
 
 
-
-
-
-
-
-
-
+// MARK: - v0.1.9+ Localized Polish
+"⚠️ Low Feature Matches (Low Reliability)" = "⚠️ 特徴点不足 (アライメント信頼性低)";
+"Compare Before / After Restoration" = "退色・階調復元の適用前/適用後を比較";
+"Cancel Processing" = "処理を中止";
+"Readjust in Basic Settings" = "基本設定で再調整";
+"Reset Alignment" = "位置合わせをリセット";
+"Apply 1860s Albumen Preset" = "1860年代 鶏卵紙プリセットを適用";
+"Apply 1890s Hand-Tinted Preset" = "1890年代 明治手彩色風プリセットを適用";
+"Reset Vintage Restoration" = "退色・階調復元設定をリセット";
+"Reset Colorization" = "カラー化設定をリセット";
+"Save Adjustment Report (.txt)" = "調整レポート (.txt) を保存";
+"AI 19th-Century Stereoview Restoration & Spatial Rendering" = "AIによる19世紀ステレオ写真復元・空間レンダリング";
+"Open Workspace Folder" = "作業フォルダを開く";
+"Stereo Restore / 2D to 3D" = "ステレオ修復 / 2D→3D";
+"AI Spatial Alignment" = "AI 空間・自動整準";
+"7-DoF Rectification & Tone" = "7自由度整準・退色階調復元";
+"Hand-Tint & Mount" = "手彩色風・台紙設定";
+"Archival Mount & Tinting" = "明治手彩色風・カード台紙";
+"Spatial Photo Export" = "空間写真・書き出し";
+"Spatial Photo & 3D Card" = "Apple空間写真・3Dカード";
+"Card Size" = "カードサイズ";
+"Colorization Mode" = "カラー化モード";
+"Input Mode" = "入力解釈モード";
+"Card Mode" = "カード抽出モード";
+"Pairing" = "ペアリング方式";
+"OK" = "OK";
+"Toggle Batch Settings Panel" = "バッチ・書き出し詳細設定を表示/非表示";

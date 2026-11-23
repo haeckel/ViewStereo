@@ -9,7 +9,7 @@ extension AboutBrandInfo {
         badgeLetter: "V",
         subtitleKey: nil,
         engineTagline: "19th Century Stereoview Restoration & Intelligent Stereo Window Studio",
-        fallbackVersion: "0.1.9",
+        fallbackVersion: "0.2.0",
         fallbackBuild: "1",
         websiteURL: URL(string: "https://viewstereo.p-media.jp/"),
         websiteLabel: "viewstereo.p-media.jp",
@@ -210,6 +210,14 @@ struct ViewStereoApp: App {
                     }
                 }
                 .keyboardShortcut("5", modifiers: [.option, .command])
+
+                Button("Toggle Batch Processing Panel") {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        if !vm.isShowingInspector { vm.isShowingInspector = true }
+                        vm.isBatchSectionExpanded.toggle()
+                    }
+                }
+                .keyboardShortcut("6", modifiers: [.option, .command])
             }
             CommandGroup(replacing: .help) {
                 Button("ViewStereo Help") {

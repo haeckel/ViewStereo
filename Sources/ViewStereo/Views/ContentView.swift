@@ -651,7 +651,7 @@ struct ContentView: View {
         .buttonStyle(.plain)
         .disabled(vm.displayMode == .twoD)
         .opacity((vm.displayMode == .twoD) ? 0.45 : 1.0)
-        .customTooltip("左右眼を入れ替え (X)")
+        .customTooltip(String(localized: "Swap Left / Right") + " (X)")
     }
 
     private var topBeforeAfterButton: some View {
@@ -681,7 +681,7 @@ struct ContentView: View {
         .buttonStyle(.plain)
         .disabled(!canCompare)
         .opacity(canCompare ? 1.0 : 0.40)
-        .customTooltip("退色・階調復元の適用前/適用後を比較")
+        .customTooltip(String(localized: "Compare Before / After Restoration"))
     }
 
     @ViewBuilder
@@ -739,7 +739,7 @@ struct ContentView: View {
                             .foregroundColor(.secondary)
                     }
                     .buttonStyle(.plain)
-                    .customTooltip("処理を中止")
+                    .customTooltip(String(localized: "Cancel Processing"))
                 }
 
                 ProgressView(value: vm.batchProgress)
@@ -1195,7 +1195,7 @@ struct ContentView: View {
 
             VStack(spacing: 34) {
                 // サブタイトル
-                Text(LocalizedStringKey("AIによる19世紀ステレオ写真復元・空間レンダリング"))
+                Text(LocalizedStringKey("AI 19th-Century Stereoview Restoration & Spatial Rendering"))
                     .font(.system(size: 18, weight: .medium, design: .rounded))
                     .foregroundStyle(
                         LinearGradient(
@@ -1211,8 +1211,8 @@ struct ContentView: View {
                 HStack(alignment: .top, spacing: 0) {
                     GuideItemButton(
                         icon: "folder.badge.plus",
-                        title: "作業フォルダを開く",
-                        desc: "ステレオ修復 / 2D→3D",
+                        title: "Open Workspace Folder",
+                        desc: "Stereo Restore / 2D to 3D",
                         color: .brightBlue
                     ) {
                         vm.openWorkspaceFolderPanel()
@@ -1222,8 +1222,8 @@ struct ContentView: View {
 
                     GuideItemButton(
                         icon: "sparkles",
-                        title: "AI 空間・自動整準",
-                        desc: "7自由度整準・退色階調復元",
+                        title: "AI Spatial Alignment",
+                        desc: "7-DoF Rectification & Tone",
                         color: .brightPink
                     ) {
                         vm.isRecipeSectionExpanded = true
@@ -1234,8 +1234,8 @@ struct ContentView: View {
 
                     GuideItemButton(
                         icon: "paintpalette.fill",
-                        title: "手彩色風・台紙設定",
-                        desc: "明治手彩色風・カード台紙",
+                        title: "Hand-Tint & Mount",
+                        desc: "Archival Mount & Tinting",
                         color: Color(red: 0.20, green: 0.85, blue: 0.98)
                     ) {
                         vm.isCardMountSectionExpanded = true
@@ -1246,8 +1246,8 @@ struct ContentView: View {
 
                     GuideItemButton(
                         icon: "square.and.arrow.up.fill",
-                        title: "空間写真・書き出し",
-                        desc: "Apple空間写真・3Dカード",
+                        title: "Spatial Photo Export",
+                        desc: "Spatial Photo & 3D Card",
                         color: .brightTeal
                     ) {
                         vm.exportImage()
@@ -1526,7 +1526,7 @@ struct ContentView: View {
                         .controlSize(.mini)
                         .tint(.brightBlue)
                         .disabled(!vm.hasLoadedImages || vm.isProcessing)
-                        .customTooltip("基本設定で再調整 (⇧⌘A)")
+                        .customTooltip(String(localized: "Auto Align & Window") + " (⇧⌘A)")
 
                         Button {
                             vm.resetAlignment()
@@ -1537,7 +1537,7 @@ struct ContentView: View {
                         .buttonStyle(.bordered)
                         .controlSize(.mini)
                         .disabled(!vm.isAligned || vm.isProcessing)
-                        .customTooltip("位置合わせをリセット")
+                        .customTooltip(String(localized: "Reset Alignment"))
                     }
                 }
             }
@@ -2325,7 +2325,7 @@ struct ContentView: View {
                         .controlSize(.small)
                         .tint(.brightPink)
                         .disabled(vm.isProcessing)
-                        .customTooltip("1860年代 鶏卵紙プリセットを適用")
+                        .customTooltip(String(localized: "Apply 1860s Albumen Preset"))
 
                         Button {
                             vm.apply1890sHandTintedPreset()
@@ -2338,7 +2338,7 @@ struct ContentView: View {
                         .controlSize(.small)
                         .tint(.brightAmber)
                         .disabled(vm.isProcessing)
-                        .customTooltip("1890年代 明治手彩色風プリセットを適用")
+                        .customTooltip(String(localized: "Apply 1890s Hand-Tinted Preset"))
 
                         Button {
                             vm.resetVintageRestoration()
@@ -2349,7 +2349,7 @@ struct ContentView: View {
                         .buttonStyle(.bordered)
                         .controlSize(.small)
                         .disabled((!vm.hasActiveVintageRestoration && !vm.isRestorationEnabled) || vm.isProcessing)
-                        .customTooltip("退色・階調復元設定をリセット")
+                        .customTooltip(String(localized: "Reset Vintage Restoration"))
                     }
 
                     Toggle("Remove Unilateral Noise & Dust", isOn: $vm.removeUnilateralNoise)
@@ -2592,7 +2592,7 @@ struct ContentView: View {
                     }
                     .buttonStyle(.bordered)
                     .disabled((!vm.hasActiveColorization && vm.restorationColorizationMode == .off) || vm.isProcessing)
-                    .customTooltip("カラー化設定をリセット")
+                    .customTooltip(String(localized: "Reset Colorization"))
                 }
 
                 Toggle("Show Original (Before Restore)", isOn: $vm.isShowingBeforeRestoration)
@@ -2959,7 +2959,7 @@ struct ContentView: View {
                 }
                 .buttonStyle(.bordered)
                 .disabled(!vm.isAligned || vm.isBatchRunning)
-                .customTooltip("調整レポート (.txt) を保存")
+                .customTooltip(String(localized: "Save Adjustment Report (.txt)"))
             }
             }
         }

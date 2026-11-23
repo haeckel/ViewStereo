@@ -1,6 +1,6 @@
 # ViewStereo 🎞️✨
 
-[![Version](https://img.shields.io/badge/version-0.1.9-brightgreen.svg)](https://viewstereo.p-media.jp/)
+[![Version](https://img.shields.io/badge/version-0.2.0-brightgreen.svg)](https://viewstereo.p-media.jp/)
 [![Status](https://img.shields.io/badge/status-Early%20Development-amber.svg)](#development-status)
 [![Platform](https://img.shields.io/badge/platform-macOS%2014.0+-lightgrey.svg)](https://apple.co/macos)
 [![Technology](https://img.shields.io/badge/tech-Card%20Segmentation%20%7C%207--DoF%20Homography%20%7C%20Stereo%20Window%20%7C%20Digital%20Remount-orange.svg)](https://viewstereo.p-media.jp/)
@@ -16,6 +16,12 @@ Designed as the archival restoration and geometric alignment companion to **Spla
 ---
 
 ## 🚀 Key Features
+
+### 🛡️ v0.2.0 New: Symmetrical Localization, Memory Hardening & Crash Prevention
+- **100% Symmetrical English & Japanese Localization**: Completely eliminated hardcoded strings across advisory banners, interactive tooltips, and welcome guide cards. All 493 localization keys are synchronized with zero parity gaps.
+- **Hardened State Transitions & Memory Management**: Fixed state persistence bugs where manual swaps (`X`) or single-eye depth modes leaked into subsequent images. Introduced proactive buffer reclamation (`clearDepthSynthesisCache` / `clearStaticImageBuffers`) to eliminate memory growth during extended sessions and batch jobs.
+- **Robustness & Crash Elimination**: Added strict range bounds checking in `StereoCardSegmenter` corner detection and border sampling, permanently resolving edge-case fatal errors on unusual card aspect ratios and small crops.
+- **Unified Shortcut Navigation**: Added `Toggle Batch Processing Panel` (`⌥⌘6`) under the Panels menu, fully synchronizing the inspector's batch section expansion state with keyboard shortcuts and menu items.
 
 ### 🎬 v0.1.9 New: Video 2D-to-3D Conversion & Spatial Video (MV-HEVC) Pipeline
 - **Video 2D-to-3D Conversion for Spatial Media**: Transform 2D videos (`.mp4`, `.mov`, `.m4v`) into Apple Vision Pro-ready Spatial Video (MV-HEVC `.mov` with spatial metadata), Full/Half SBS 3D, and Dubois Anaglyph 3D video.

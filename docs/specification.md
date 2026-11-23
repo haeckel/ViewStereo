@@ -1,4 +1,4 @@
-# ViewStereo Technical Specification (v0.1.9)
+# ViewStereo Technical Specification (v0.2.0)
 
 ## 1. System Overview
 **ViewStereo** is a native macOS 14.0+ (SwiftUI / AppKit) application designed for automated archival stereoview restoration, geometric rectification, stereo window optimization, and modern spatial media export. It builds upon `StereoStudioCore` and `StereoCore` (`stalign_src`) and leverages Apple Silicon Neural Engine (Core ML), Vision, and Accelerate (LAPACK).
@@ -75,6 +75,14 @@ When `StereoCardMode` is `.cropInner` or `.keepArchBlack`:
   - Dubois Anaglyph 3D Video (`.mp4`).
   - Container-safe audio pass-through and AAC 256kbps 48kHz re-encoding.
   - Pre-export destination disk free space validation.
+
+### Stage 8: Memory Lifecycle & Hardened Symmetrical Localization
+- **Buffer Lifecycle Management**:
+  - Proactive cache clearance routines (`clearDepthSynthesisCache`, `clearStaticImageBuffers`) invoked across document transitions and reset actions to prevent memory leaks during long-running sessions.
+- **Segmentation Bounds Safety**:
+  - Strict lower-upper bound verification (`guard minX < maxX, minY < maxY`) on corner and border sampling scans preventing fatal runtime exceptions.
+- **Symmetrical Localization**:
+  - 100% parity across English and Japanese resource strings (493 keys) with unified programmatic keys (`String(localized: ...)`).
 
 ---
 

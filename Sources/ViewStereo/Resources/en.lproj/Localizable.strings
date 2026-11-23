@@ -509,10 +509,30 @@
 "Preserve HDR (10-bit HLG)" = "Preserve HDR (10-bit HLG)";
 
 
-
-
-
-
-
-
-
+// MARK: - v0.1.9+ Localized Polish
+"⚠️ Low Feature Matches (Low Reliability)" = "⚠️ Low Feature Matches (Low Reliability)";
+"Compare Before / After Restoration" = "Compare Before / After Restoration";
+"Cancel Processing" = "Cancel Processing";
+"Readjust in Basic Settings" = "Readjust in Basic Settings";
+"Reset Alignment" = "Reset Alignment";
+"Apply 1860s Albumen Preset" = "Apply 1860s Albumen Preset";
+"Apply 1890s Hand-Tinted Preset" = "Apply 1890s Hand-Tinted Preset";
+"Reset Vintage Restoration" = "Reset Vintage Restoration";
+"Reset Colorization" = "Reset Colorization";
+"Save Adjustment Report (.txt)" = "Save Adjustment Report (.txt)";
+"AI 19th-Century Stereoview Restoration & Spatial Rendering" = "AI 19th-Century Stereoview Restoration & Spatial Rendering";
+"Open Workspace Folder" = "Open Workspace Folder";
+"Stereo Restore / 2D to 3D" = "Stereo Restore / 2D to 3D";
+"AI Spatial Alignment" = "AI Spatial Alignment";
+"7-DoF Rectification & Tone" = "7-DoF Rectification & Tone";
+"Hand-Tint & Mount" = "Hand-Tint & Mount";
+"Archival Mount & Tinting" = "Archival Mount & Tinting";
+"Spatial Photo Export" = "Spatial Photo Export";
+"Spatial Photo & 3D Card" = "Spatial Photo & 3D Card";
+"Card Size" = "Card Size";
+"Colorization Mode" = "Colorization Mode";
+"Input Mode" = "Input Mode";
+"Card Mode" = "Card Mode";
+"Pairing" = "Pairing";
+"OK" = "OK";
+"Toggle Batch Settings Panel" = "Toggle Batch Settings Panel";

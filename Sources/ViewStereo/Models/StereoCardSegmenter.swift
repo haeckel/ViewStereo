@@ -2363,11 +2363,15 @@ final class StereoCardSegmenter: @unchecked Sendable {
             // L 外側・R 外側の隅先端に十分な背景色が存在することを確認（片側欠けでの誤爆防止）
             var cornerHitsL = 0
             var cornerHitsR = 0
-            for dy in 2..<min(10, maxScanY) {
-                let y = isTop ? dy : (h - 1 - dy)
-                for dx in 2..<min(10, maxScanX) {
-                    if isBg(leftRGB, dx, y) { cornerHitsL += 1 }
-                    if isBg(rightRGB, w - 1 - dx, y) { cornerHitsR += 1 }
+            let endY = min(10, maxScanY)
+            let endX = min(10, maxScanX)
+            if endY > 2 && endX > 2 {
+                for dy in 2..<endY {
+                    let y = isTop ? dy : (h - 1 - dy)
+                    for dx in 2..<endX {
+                        if isBg(leftRGB, dx, y) { cornerHitsL += 1 }
+                        if isBg(rightRGB, w - 1 - dx, y) { cornerHitsR += 1 }
+                    }
                 }
             }
             guard cornerHitsL >= 6, cornerHitsR >= 6 else { return nil }
@@ -3364,24 +3368,36 @@ final class StereoCardSegmenter: @unchecked Sendable {
                 }
                 let bandY = max(6, min(20, (yBot - yTop) / 24))
                 let bandX = max(6, min(24, cardW / 32))
-                for y in max(cardY0, yTop)..<min(cardY1, yTop + bandY) {
-                    var x = sx0
-                    while x < sx1 { collectBorderFlat(x, y); x += xStep }
+                let topY0 = max(cardY0, yTop), topY1 = min(cardY1, yTop + bandY)
+                if topY0 < topY1 {
+                    for y in topY0..<topY1 {
+                        var x = sx0
+                        while x < sx1 { collectBorderFlat(x, y); x += xStep }
+                    }
                 }
-                for y in max(cardY0, yBot - bandY)..<min(cardY1, yBot) {
-                    var x = sx0
-                    while x < sx1 { collectBorderFlat(x, y); x += xStep }
+                let botY0 = max(cardY0, yBot - bandY), botY1 = min(cardY1, yBot)
+                if botY0 < botY1 {
+                    for y in botY0..<botY1 {
+                        var x = sx0
+                        while x < sx1 { collectBorderFlat(x, y); x += xStep }
+                    }
                 }
                 if let xL = xLeft {
-                    for x in max(cardX0, xL)..<min(cardX1, xL + bandX) {
-                        var y = my0
-                        while y < my1 { collectBorderFlat(x, y); y += yStep }
+                    let leftX0 = max(cardX0, xL), leftX1 = min(cardX1, xL + bandX)
+                    if leftX0 < leftX1 {
+                        for x in leftX0..<leftX1 {
+                            var y = my0
+                            while y < my1 { collectBorderFlat(x, y); y += yStep }
+                        }
                     }
                 }
                 if let xR = xRight {
-                    for x in max(cardX0, xR - bandX)..<min(cardX1, xR) {
-                        var y = my0
-                        while y < my1 { collectBorderFlat(x, y); y += yStep }
+                    let rightX0 = max(cardX0, xR - bandX), rightX1 = min(cardX1, xR)
+                    if rightX0 < rightX1 {
+                        for x in rightX0..<rightX1 {
+                            var y = my0
+                            while y < my1 { collectBorderFlat(x, y); y += yStep }
+                        }
                     }
                 }
             }
