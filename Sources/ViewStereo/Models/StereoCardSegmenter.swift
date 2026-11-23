@@ -21,6 +21,7 @@ final class StereoCardSegmenter: @unchecked Sendable {
         var topRyRatio: Double = 0.18
         var botRxRatio: Double = 0.09
         var botRyRatio: Double = 0.09
+        var topArchExp: Double = 2.0
     }
 
     /// 元ステレオカードの台紙・印画枠・地色・傾き・マスク情報（デジタル・リマウント & インク転写 & OCR 用）
@@ -707,7 +708,7 @@ final class StereoCardSegmenter: @unchecked Sendable {
 
             // アーチ頂点精密検出（上部アーチがある場合、中央付近の列で台紙から写真への真の境界Yを検出）
             let isSquareByTwin = (mountAnalysis?.twinWindow.cutType == .square && (mountAnalysis?.twinWindow.fitScore ?? 0) >= 0.50)
-            let effectiveHasTopArch = hasTopArch && !isSquareByTwin
+            let effectiveHasTopArch = hasTopArch && !(isSquareByTwin && archParams.topRyRatio < 0.14)
             if effectiveHasTopArch, let card = effectiveCardRGB ?? (cardLuma.map { (r: $0, g: $0, b: $0) }) {
                 let barrier = mountAnalysis?.barrier
                 func detectApexY(x0: Int, x1: Int, currentY0: Int) -> Int {
@@ -803,6 +804,7 @@ final class StereoCardSegmenter: @unchecked Sendable {
             Self.trimOuterBlackBorders(leftRGB: &fullOutL, rightRGB: &fullOutR, width: &cw, height: &ch)
 
             // 最終出力の上端に残った数pxの台紙帯（40019-3305の黄色3px / 40010-6308のオレンジ5px等）を安全に除去
+            var appliedTopTrim = 0
             if let cRGB = effectiveCardRGB {
                 let cLuma = (cRGB.r + cRGB.g + cRGB.b) / 3.0
                 if cLuma >= 95.0 || max(cRGB.r, max(cRGB.g, cRGB.b)) >= 140.0 { // 明色・有彩色台紙を対象（暗黒月写真の宇宙空間は絶対保護）
@@ -838,6 +840,7 @@ final class StereoCardSegmenter: @unchecked Sendable {
                         fullOutL = Array(fullOutL.dropFirst(dropBytes))
                         fullOutR = Array(fullOutR.dropFirst(dropBytes))
                         ch -= topTrim
+                        appliedTopTrim = topTrim
                     }
                 }
             }
@@ -852,27 +855,100 @@ final class StereoCardSegmenter: @unchecked Sendable {
                 cardRGB: effectiveCardRGB, isTop: false
             )
 
+            // Stage 1 外周連結台紙バリアによる両肩三角領域（幅14%×高さ14%）の一致率評価
+            var shoulderBarrier: Double? = nil
+            if let barrier = mountAnalysis?.barrier, barrier.model.confidence >= 0.25 {
+                let dw = Double(max(1, width - 1))
+                let dh = Double(max(1, height - 1))
+                let effLY0 = min(height - 2, startLY + appliedTopTrim)
+                let effRY0 = min(height - 2, startRY + appliedTopTrim)
+                let effLY1 = min(height - 1, effLY0 + ch)
+                let effRY1 = min(height - 1, effRY0 + ch)
+                let sL = barrier.shoulderBarrierRatio(
+                    normX0: Double(startLX) / dw,
+                    normX1: Double(startLX + cw) / dw,
+                    normY0: Double(effLY0) / dh,
+                    normY1: Double(effLY1) / dh
+                )
+                let sR = barrier.shoulderBarrierRatio(
+                    normX0: Double(startRX) / dw,
+                    normX1: Double(startRX + cw) / dw,
+                    normY0: Double(effRY0) / dh,
+                    normY1: Double(effRY1) / dh
+                )
+                shoulderBarrier = (sL + sR) * 0.5
+            }
+
+            let twinArch: (ry: Double, exp: Double)?
+            if let twin = mountAnalysis?.twinWindow,
+               twin.cutType == .arch,
+               twin.fitScore >= 0.45 {
+                twinArch = (ry: Double(twin.archDropRatio), exp: Double(twin.archExponent))
+            } else {
+                twinArch = nil
+            }
+
             // 上部コーナー判定・実測
             if let bgT = topBgRGB {
                 let topRatios = Self.cornerCardRatiosRGB(leftRGB: fullOutL, rightRGB: fullOutR, width: cw, height: ch, cardRGB: bgT, isTop: true)
-                let topSquare = (topRatios[0] + topRatios[1]) * 0.5 < 0.30
-                let allTopHaveBg = topRatios[0] >= 0.50 && (topRatios.reduce(0.0, +) * 0.25) >= 0.70
-                if isSquareByTwin || topSquare {
+                let topRatioOuterAvg = (topRatios[0] + topRatios[1]) * 0.5
+                let topAllAvg = topRatios.reduce(0.0, +) * 0.25
+                let topSquare = topRatioOuterAvg < 0.30
+                let allTopHaveBg = topRatios[0] >= 0.50 && topAllAvg >= 0.70
+                let hasShoulderBarrier = (shoulderBarrier ?? 0.0) >= 0.20
+
+                if (topSquare && !hasShoulderBarrier && twinArch == nil) || (isSquareByTwin && topSquare) {
                     archParams.topRxRatio = 0.0
                     archParams.topRyRatio = 0.0
+                    archParams.topArchExp = 2.0
                 } else if let measured = Self.measureOuterCornerArchShapeRGB(leftRGB: fullOutL, rightRGB: fullOutR, width: cw, height: ch, cardRGB: bgT, isTop: true) {
-                    if measured.ryRatio <= 0.28 {
-                        archParams.topRxRatio = measured.rxRatio
-                        archParams.topRyRatio = measured.ryRatio
+                    if measured.ryRatio <= 0.45 {
+                        // 深いアーチ（ryRatio > 0.25）では直角カードの暗い天井等を誤認しないよう両肩 connectedBarrierMask 一致率等で検証
+                        let needsBarrierGuard = measured.ryRatio > 0.25
+                        let barrierOK: Bool
+                        if let sb = shoulderBarrier {
+                            barrierOK = (sb >= 0.20) || (allTopHaveBg && topRatioOuterAvg >= 0.70) || (topRatioOuterAvg >= 0.65 && topAllAvg >= 0.55)
+                        } else {
+                            barrierOK = (measured.ryRatio <= 0.28) || (allTopHaveBg && topRatioOuterAvg >= 0.60)
+                        }
+                        if !needsBarrierGuard || barrierOK {
+                            archParams.topRxRatio = measured.rxRatio
+                            archParams.topRyRatio = measured.ryRatio
+                            archParams.topArchExp = measured.exp
+                            // 台紙と写真の色が近いカードでも印画紙境界に吸着させるため Stage 2 Sobel勾配最適解 (ha, q) を同期
+                            if let tw = twinArch, (shoulderBarrier == nil || shoulderBarrier! >= 0.18) {
+                                archParams.topArchExp = tw.exp
+                                if measured.rxRatio >= 0.45 || tw.ry >= 0.14 {
+                                    archParams.topRxRatio = 0.50
+                                    if tw.ry > measured.ryRatio {
+                                        archParams.topRyRatio = max(measured.ryRatio, min(0.45, tw.ry))
+                                    }
+                                }
+                            }
+                        } else {
+                            archParams.topRxRatio = 0.0
+                            archParams.topRyRatio = 0.0
+                            archParams.topArchExp = 2.0
+                        }
                     } else {
                         archParams.topRxRatio = 0.0
                         archParams.topRyRatio = 0.0
+                        archParams.topArchExp = 2.0
                     }
-                } else if !allTopHaveBg && archParams.topRyRatio < 0.24 {
-                    // 4隅揃っておらず低解像度値のみが 0.24 未満（角欠け・空誤差）の場合は直角プリントとみなす
+                } else if let tw = twinArch, hasShoulderBarrier {
+                    archParams.topRxRatio = 0.50
+                    archParams.topRyRatio = min(0.45, tw.ry)
+                    archParams.topArchExp = tw.exp
+                } else if (isSquareByTwin && !allTopHaveBg) || (!allTopHaveBg && archParams.topRyRatio < 0.24) {
+                    // Stage 2 が直角と判定し 4隅が揃わない場合、または低解像度値が 0.24 未満の場合は直角プリントとみなす
                     archParams.topRxRatio = 0.0
                     archParams.topRyRatio = 0.0
+                    archParams.topArchExp = 2.0
                 }
+            } else if let tw = twinArch, (shoulderBarrier ?? 0.0) >= 0.22 {
+                archParams.topRxRatio = 0.50
+                archParams.topRyRatio = min(0.45, tw.ry)
+                archParams.topArchExp = tw.exp
             }
 
             // 下部コーナー判定・実測（上部アーチの有無にかかわらず独立して実測・4隅丸角に正式対応）
@@ -899,7 +975,8 @@ final class StereoCardSegmenter: @unchecked Sendable {
                 topRxRatio: finalTopRx,
                 topRyRatio: finalTopRy,
                 botRxRatio: finalBotRx,
-                botRyRatio: finalBotRy
+                botRyRatio: finalBotRy,
+                topArchExp: (finalTopRx > 0.0 && finalTopRy > 0.0) ? archParams.topArchExp : 2.0
             )
 
             let sampledU8: (r: UInt8, g: UInt8, b: UInt8)
@@ -2586,14 +2663,14 @@ final class StereoCardSegmenter: @unchecked Sendable {
         height h: Int,
         cardRGB: (r: Double, g: Double, b: Double),
         isTop: Bool = true
-    ) -> (rxRatio: Double, ryRatio: Double)? {
+    ) -> (rxRatio: Double, ryRatio: Double, exp: Double)? {
         guard w >= 64, h >= 64, leftRGB.count >= w * h * 3, rightRGB.count >= w * h * 3 else { return nil }
         if isCornersSquareRGB(leftRGB: leftRGB, rightRGB: rightRGB, width: w, height: h, cardRGB: cardRGB, isTop: isTop) {
             return nil
         }
 
         let maxScanX = min(w / 2, Int(Double(w) * 0.52))
-        let maxScanY = min(h / 2, Int(Double(h) * 0.45))
+        let maxScanY = min(h / 2, Int(Double(h) * 0.48))
         guard maxScanX >= 12, maxScanY >= 12 else { return nil }
 
         let runLen = max(6, min(14, Int(Double(h) * 0.014)))
@@ -2632,7 +2709,30 @@ final class StereoCardSegmenter: @unchecked Sendable {
             localBg = cardRGB
         }
 
-        func tryMeasure(refCol: (r: Double, g: Double, b: Double), tol: Double) -> (rxRatio: Double, ryRatio: Double)? {
+        // 上部アーチ曲線上の Sobel エッジ勾配吸着に用いる局所勾配マップ（上部 maxScanY 範囲のみ事前計算）
+        let gradH = isTop ? min(h, maxScanY + 4) : 0
+        func computeTopGrad(_ rgb: [UInt8]) -> [Double] {
+            guard isTop, gradH >= 4, w >= 16 else { return [] }
+            var luma = [Double](repeating: 0.0, count: w * gradH)
+            for i in 0..<(w * gradH) {
+                let p = i * 3
+                luma[i] = (Double(rgb[p]) + Double(rgb[p + 1]) + Double(rgb[p + 2])) / 3.0
+            }
+            var grad = [Double](repeating: 0.0, count: w * gradH)
+            for y in 1..<(gradH - 1) {
+                let r0 = (y - 1) * w, r1 = y * w, r2 = (y + 1) * w
+                for x in 1..<(w - 1) {
+                    let gx = (-luma[r0 + x - 1] + luma[r0 + x + 1]) + 2.0 * (-luma[r1 + x - 1] + luma[r1 + x + 1]) + (-luma[r2 + x - 1] + luma[r2 + x + 1])
+                    let gy = (-luma[r0 + x - 1] - 2.0 * luma[r0 + x] - luma[r0 + x + 1]) + (luma[r2 + x - 1] + 2.0 * luma[r2 + x] + luma[r2 + x + 1])
+                    grad[r1 + x] = min(1.0, hypot(gx, gy) / 255.0)
+                }
+            }
+            return grad
+        }
+        let topGradL = computeTopGrad(leftRGB)
+        let topGradR = computeTopGrad(rightRGB)
+
+        func tryMeasure(refCol: (r: Double, g: Double, b: Double), tol: Double) -> (rxRatio: Double, ryRatio: Double, exp: Double)? {
             func isBg(_ rgb: [UInt8], _ x: Int, _ y: Int) -> Bool {
                 let idx = (y * w + x) * 3
                 let dr = abs(Double(rgb[idx]) - refCol.r)
@@ -2767,7 +2867,7 @@ final class StereoCardSegmenter: @unchecked Sendable {
             var bestRy = 0.0
             for ixStep in 6...52 {
                 let rx = Double(ixStep) * 0.01
-                for iyStep in 6...42 {
+                for iyStep in 6...45 {
                     let ry = Double(iyStep) * 0.01
                     guard rx >= ry * 0.60 && rx <= ry * 2.80 else { continue }
                     var loss = 0.0
@@ -2791,22 +2891,231 @@ final class StereoCardSegmenter: @unchecked Sendable {
             }
             guard bestRx > 0.0 && bestRy > 0.0 else { return nil }
             let finalRx: Double
+            var finalRy = bestRy
+            var finalExp = 2.0
             if bestRx >= 0.45 || (isTop && bestRy >= 0.14 && bestRx >= 0.28) {
-                // 歴史的ステレオカードの Arch Top (半円ドームアーチ)
-                // アーチ頂点付近の扁平性による過小評価を防ぎ、完全なアーチ (rx = 0.50) にスナップ
+                // 歴史的ステレオカードの Arch Top (半円/ドームアーチ)
+                // アーチ頂点付近の扁平性による過小評価を防ぎ、完全なアーチ (rx = 0.50) で (ry, q) の 2 変数 L1 フィットを行う
                 finalRx = 0.50
+                var bestArchLoss = Double.greatestFiniteMagnitude
+                let ryMinStep = max(8, Int((bestRy * 100.0).rounded()) - 6)
+                let sampleCount = 24
+                for q in [1.7, 1.85, 2.0, 2.2, 2.4, 2.6, 2.8] {
+                    for iyStep in ryMinStep...45 {
+                        let ry = Double(iyStep) * 0.01
+                        var loss = 0.0
+                        for pt in mono {
+                            let u = min(1.0, max(0.0, (0.50 - pt.fx) / 0.50))
+                            let pred = ry * (1.0 - sqrt(max(0.0, 1.0 - pow(u, q))))
+                            let diff = pred - pt.fy
+                            loss += (diff < 0.0) ? (-2.6 * diff) : diff
+                        }
+                        let meanLoss = loss / Double(max(1, mono.count))
+                        var edgeScore = 0.0
+                        if isTop && !topGradL.isEmpty && !topGradR.isEmpty && gradH >= 4 {
+                            var gradSum = 0.0
+                            for si in 0..<sampleCount {
+                                let fx = 0.02 + (0.44 * Double(si)) / Double(sampleCount - 1)
+                                let u = min(1.0, max(0.0, (0.50 - fx) / 0.50))
+                                let yCurve = ry * Double(h) * (1.0 - sqrt(max(0.0, 1.0 - pow(u, q))))
+                                let cy = Int(yCurve.rounded())
+                                let xL = max(1, min(w - 2, Int((fx * Double(w)).rounded())))
+                                let xR = max(1, min(w - 2, w - 1 - Int((fx * Double(w)).rounded())))
+                                var maxGL = 0.0
+                                var maxGR = 0.0
+                                for dy in -1...1 {
+                                    let py = max(0, min(gradH - 1, cy + dy))
+                                    let rowOff = py * w
+                                    maxGL = max(maxGL, topGradL[rowOff + xL])
+                                    maxGR = max(maxGR, topGradR[rowOff + xR])
+                                }
+                                gradSum += (maxGL + maxGR) * 0.5
+                            }
+                            edgeScore = gradSum / Double(sampleCount)
+                        }
+                        let score = meanLoss - 0.08 * edgeScore
+                        if score < bestArchLoss {
+                            bestArchLoss = score
+                            finalRy = ry
+                            finalExp = q
+                        }
+                    }
+                }
             } else {
                 finalRx = min(0.50, bestRx + 0.008)
             }
-            return (finalRx, min(0.42, bestRy + 0.008))
+            return (finalRx, min(0.45, finalRy + 0.008), finalExp)
         }
 
+        // 色差ベース実測が色同系・斑点等で失敗／浅く止まった場合の上部専用「領域平坦性＋Sobel勾配」2変数直接アーチフィット
+        func fitArchByEdgeAndRegion() -> (rxRatio: Double, ryRatio: Double, exp: Double)? {
+            guard isTop, !topGradL.isEmpty, !topGradR.isEmpty, gradH >= 8 else { return nil }
+            func medianCornerRGB(_ rgb: [UInt8], isLeftCorner: Bool) -> (r: Double, g: Double, b: Double)? {
+                let xEnd = min(16, w / 16)
+                let yEnd = min(16, h / 16)
+                guard xEnd > 2, yEnd > 2 else { return nil }
+                var rs: [Double] = [], gs: [Double] = [], bs: [Double] = []
+                let cap = (xEnd - 2) * (yEnd - 2)
+                rs.reserveCapacity(cap); gs.reserveCapacity(cap); bs.reserveCapacity(cap)
+                for dy in 2..<yEnd {
+                    let row = dy * w * 3
+                    for dx in 2..<xEnd {
+                        let x = isLeftCorner ? dx : (w - 1 - dx)
+                        let i = row + x * 3
+                        rs.append(Double(rgb[i]))
+                        gs.append(Double(rgb[i + 1]))
+                        bs.append(Double(rgb[i + 2]))
+                    }
+                }
+                guard !rs.isEmpty else { return nil }
+                rs.sort(); gs.sort(); bs.sort()
+                let mid = rs.count / 2
+                return (rs[mid], gs[mid], bs[mid])
+            }
+            guard let bgL = medianCornerRGB(leftRGB, isLeftCorner: true),
+                  let bgR = medianCornerRGB(rightRGB, isLeftCorner: false) else { return nil }
+
+            @inline(__always)
+            func calcPBg(_ rgb: [UInt8], _ gradMap: [Double], _ x: Int, _ y: Int, _ bg: (r: Double, g: Double, b: Double)) -> Double {
+                let idx = y * w + x
+                let off = idx * 3
+                let dist = max(abs(Double(rgb[off]) - bg.r), max(abs(Double(rgb[off + 1]) - bg.g), abs(Double(rgb[off + 2]) - bg.b)))
+                let g = gradMap[idx]
+                let pColor = 1.0 / (1.0 + exp((dist - 24.0) / 5.5))
+                let texGate = (g <= 0.25) ? 1.0 : max(0.25, 1.0 - (g - 0.25) * 1.5)
+                return pColor * texGate
+            }
+
+            let step = max(2, min(w, h) / 140)
+            var ys: [Int] = []
+            var yy = 1
+            while yy < gradH - 1 { ys.append(yy); yy += step }
+            guard ys.count >= 4 else { return nil }
+
+            // アーチ頂点直下（中央帯 y ∈ 5%..15%）が均一な無地背景一色である場合（空・天井等）はアーチ誤検出を防ぐ
+            let cyStart = max(1, Int(Double(h) * 0.05))
+            let cyEnd = min(gradH - 1, max(cyStart + 1, Int(Double(h) * 0.15)))
+            var centerBgSum = 0.0
+            var centerBgCnt = 0
+            for cy in stride(from: cyStart, to: cyEnd, by: step) {
+                for cx in stride(from: Int(Double(w) * 0.35), to: w / 2, by: step) {
+                    centerBgSum += calcPBg(leftRGB, topGradL, cx, cy, bgL)
+                    centerBgSum += calcPBg(rightRGB, topGradR, w - 1 - cx, cy, bgR)
+                    centerBgCnt += 2
+                }
+            }
+            if centerBgCnt > 0 && (centerBgSum / Double(centerBgCnt)) >= 0.55 {
+                return nil
+            }
+
+            struct ColCache {
+                let fx: Double
+                let xL: Int
+                let xR: Int
+                let pBgL: [Double]
+                let pBgR: [Double]
+            }
+            var cols: [ColCache] = []
+            var xx = 2
+            while xx < w / 2 {
+                let xR = w - 1 - xx
+                var pL = [Double](); pL.reserveCapacity(ys.count)
+                var pR = [Double](); pR.reserveCapacity(ys.count)
+                for y in ys {
+                    pL.append(calcPBg(leftRGB, topGradL, xx, y, bgL))
+                    pR.append(calcPBg(rightRGB, topGradR, xR, y, bgR))
+                }
+                cols.append(ColCache(fx: Double(xx) / Double(w), xL: xx, xR: xR, pBgL: pL, pBgR: pR))
+                xx += step
+            }
+            guard !cols.isEmpty else { return nil }
+
+            func evalArchCost(ry: Double, q: Double) -> Double {
+                var errSum = 0.0
+                var cnt = 0
+                var edgeSum = 0.0
+                var edgeCnt = 0
+                for col in cols {
+                    let u = min(1.0, max(0.0, (0.50 - col.fx) / 0.50))
+                    let yCurve = (ry > 0.0) ? (ry * Double(h) * (1.0 - sqrt(max(0.0, 1.0 - pow(u, q))))) : 0.0
+                    for rIdx in 0..<ys.count {
+                        let py = Double(ys[rIdx])
+                        let pL = col.pBgL[rIdx]
+                        let pR = col.pBgR[rIdx]
+                        if py < yCurve {
+                            errSum += (1.0 - pL) + (1.0 - pR)
+                        } else {
+                            errSum += 1.75 * pL + 1.75 * pR
+                        }
+                        cnt += 2
+                    }
+                    if ry > 0.0 {
+                        let cy = Int(yCurve.rounded())
+                        let yOut = max(0, min(gradH - 1, cy - 4))
+                        let yIn = max(0, min(gradH - 1, cy + 4))
+                        let pOutL = calcPBg(leftRGB, topGradL, col.xL, yOut, bgL)
+                        let pOutR = calcPBg(rightRGB, topGradR, col.xR, yOut, bgR)
+                        let pInL = calcPBg(leftRGB, topGradL, col.xL, yIn, bgL)
+                        let pInR = calcPBg(rightRGB, topGradR, col.xR, yIn, bgR)
+                        let dirContrastL = max(0.0, pOutL - pInL)
+                        let dirContrastR = max(0.0, pOutR - pInR)
+                        var maxGL = 0.0
+                        var maxGR = 0.0
+                        for dy in -2...2 {
+                            let gy = max(0, min(gradH - 1, cy + dy))
+                            let rowOff = gy * w
+                            maxGL = max(maxGL, topGradL[rowOff + col.xL])
+                            maxGR = max(maxGR, topGradR[rowOff + col.xR])
+                        }
+                        let bL = maxGL * (0.4 + 0.6 * dirContrastL)
+                        let bR = maxGR * (0.4 + 0.6 * dirContrastR)
+                        edgeSum += (bL + bR) * 0.5
+                        edgeCnt += 1
+                    }
+                }
+                let regionErr = errSum / Double(max(1, cnt))
+                let edgeScore = (ry > 0.0 && edgeCnt > 0) ? (edgeSum / Double(edgeCnt)) : 0.0
+                return regionErr - 0.14 * edgeScore
+            }
+
+            let squareCost = evalArchCost(ry: 0.0, q: 2.0)
+            var bestCost = squareCost
+            var bestRy = 0.0
+            var bestQ = 2.0
+            for q in [1.7, 1.85, 2.0, 2.2, 2.4, 2.6, 2.8] {
+                for ry in stride(from: 0.10, through: 0.44, by: 0.01) {
+                    let cost = evalArchCost(ry: ry, q: q)
+                    if cost < bestCost {
+                        bestCost = cost
+                        bestRy = ry
+                        bestQ = q
+                    }
+                }
+            }
+            guard bestCost < squareCost - 0.020, bestRy >= 0.10 else { return nil }
+            return (0.50, min(0.45, bestRy + 0.012), bestQ)
+        }
+
+        var colorRes: (rxRatio: Double, ryRatio: Double, exp: Double)? = nil
         for (ref, tol) in [(cardRGB, 24.0), (localBg, 18.0), (localBg, 14.0)] {
             if let res = tryMeasure(refCol: ref, tol: tol) {
-                return res
+                colorRes = res
+                break
             }
         }
-        return nil
+        if isTop {
+            if let cRes = colorRes {
+                if cRes.rxRatio >= 0.45,
+                   let edgeRes = fitArchByEdgeAndRegion(),
+                   edgeRes.ryRatio > cRes.ryRatio + 0.04 {
+                    return edgeRes
+                }
+                return cRes
+            } else {
+                return fitArchByEdgeAndRegion()
+            }
+        }
+        return colorRes
     }
 
     /// 外側コーナー（L左上・R右上）の実測台紙深さプロファイルを左右対称に全4上隅へ適用し、
@@ -3769,12 +4078,78 @@ final class StereoCardSegmenter: @unchecked Sendable {
     }
 
     /// パラメトリック角丸アーチ SDF マスクをフル解像度で滑らかに適用（ジャギーゼロ・白フリンジ除去）
+    /// 上部アーチ（topRxRatio >= 0.45）または楕円角丸・下部角丸の矩形領域からの符号付き法線距離（内側が正 [px]）
+    static func signedArchShapeDistance(
+        px: Double,
+        py: Double,
+        ax0: Double,
+        ax1: Double,
+        ay0: Double,
+        y1: Double,
+        rxTop: Double,
+        ryTop: Double,
+        rxBot: Double,
+        ryBot: Double,
+        hasTopRound: Bool,
+        hasBotRound: Bool,
+        isFullTopArch: Bool,
+        topArchExp: Double
+    ) -> Double {
+        var d = min(min(px - ax0, ax1 - px), min(py - ay0, y1 - py))
+        if d > -1.5 {
+            if hasTopRound && py < ay0 + ryTop {
+                if isFullTopArch {
+                    let halfW = max(4.0, (ax1 - ax0) * 0.5)
+                    let midX = (ax0 + ax1) * 0.5
+                    let a = abs(px - midX) / halfW
+                    let b = max(0.0, (ay0 + ryTop - py) / max(1.0, ryTop))
+                    if b > 0.0 {
+                        let q = max(1.2, min(4.0, topArchExp))
+                        let g = pow(a, q) + b * b - 1.0
+                        let dgdx = (a > 1e-6) ? (q * pow(a, q - 1.0) / halfW) : 0.0
+                        let dgdy = 2.0 * b / max(1.0, ryTop)
+                        let grad = max(1e-6, hypot(dgdx, dgdy))
+                        d = min(d, -g / grad)
+                    }
+                } else {
+                    let topScale = min(rxTop, ryTop)
+                    if px < ax0 + rxTop {
+                        let nx = (ax0 + rxTop - px) / rxTop
+                        let ny = (ay0 + ryTop - py) / ryTop
+                        let dCorner = (1.0 - hypot(nx, ny)) * topScale
+                        d = min(d, dCorner)
+                    } else if px > ax1 - rxTop {
+                        let nx = (px - (ax1 - rxTop)) / rxTop
+                        let ny = (ay0 + ryTop - py) / ryTop
+                        let dCorner = (1.0 - hypot(nx, ny)) * topScale
+                        d = min(d, dCorner)
+                    }
+                }
+            } else if hasBotRound && py > y1 - ryBot {
+                let botScale = min(rxBot, ryBot)
+                if px < ax0 + rxBot {
+                    let nx = (ax0 + rxBot - px) / rxBot
+                    let ny = (py - (y1 - ryBot)) / ryBot
+                    let dCorner = (1.0 - hypot(nx, ny)) * botScale
+                    d = min(d, dCorner)
+                } else if px > ax1 - rxBot {
+                    let nx = (px - (ax1 - rxBot)) / rxBot
+                    let ny = (py - (y1 - ryBot)) / ryBot
+                    let dCorner = (1.0 - hypot(nx, ny)) * botScale
+                    d = min(d, dCorner)
+                }
+            }
+        }
+        return d
+    }
+
     static func applyParametricArchMask(
         _ rgb: inout [UInt8],
         width w: Int,
         height h: Int,
         params: ArchShapeParams,
         extraInsetRatio: Double = 0.015,
+        archInnerOffsetPx: Double = 2.0,
         edgeInsets: (top: Int, bottom: Int, left: Int, right: Int) = (0, 0, 0, 0)
     ) {
         guard w >= 16, h >= 16, rgb.count >= w * h * 3 else { return }
@@ -3783,6 +4158,7 @@ final class StereoCardSegmenter: @unchecked Sendable {
 
         let hasTopRound = (params.topRxRatio > 0.005 && params.topRyRatio > 0.005)
         let hasBotRound = (params.botRxRatio > 0.005 && params.botRyRatio > 0.005)
+        let isFullTopArch = hasTopRound && params.topRxRatio >= 0.45
 
         let insetX = fw * max(0.0, extraInsetRatio)
         let insetYTop = fh * max(0.0, extraInsetRatio)
@@ -3796,23 +4172,26 @@ final class StereoCardSegmenter: @unchecked Sendable {
         let innerW = max(8.0, x1 - x0)
         let innerH = max(8.0, y1 - y0)
 
+        let archOff = hasTopRound ? max(0.0, archInnerOffsetPx) : 0.0
+        let ax0 = x0 + archOff
+        let ax1 = x1 - archOff
+        let ay0 = y0 + archOff
+
         let rxTop = hasTopRound ? max(2.0, innerW * params.topRxRatio) : 0.0
         let ryTop = hasTopRound ? max(2.0, innerH * params.topRyRatio) : 0.0
         let rxBot = hasBotRound ? max(2.0, innerW * params.botRxRatio) : 0.0
         let ryBot = hasBotRound ? max(2.0, innerH * params.botRyRatio) : 0.0
 
-        let topScale = min(rxTop, ryTop)
-        let botScale = min(rxBot, ryBot)
-        let safeY0 = Int(ceil(y0 + ryTop + 2.5))
+        let safeY0 = Int(ceil(ay0 + ryTop + 2.5))
         let safeY1 = Int(floor(y1 - ryBot - 2.5))
-        let safeX0 = Int(ceil(x0 + 2.5))
-        let safeX1 = Int(floor(x1 - 2.5))
+        let safeX0 = Int(ceil(ax0 + 2.5))
+        let safeX1 = Int(floor(ax1 - 2.5))
 
         rgb.withUnsafeMutableBufferPointer { ptr in
             guard let base = ptr.baseAddress else { return }
             for y in 0..<h {
                 let py = Double(y) + 0.5
-                let dTop = py - y0
+                let dTop = py - ay0
                 let dBot = y1 - py
                 let dY = min(dTop, dBot)
                 let rowOff = y * w * 3
@@ -3830,37 +4209,13 @@ final class StereoCardSegmenter: @unchecked Sendable {
                         continue
                     }
                     let px = Double(x) + 0.5
-                    let dLeft = px - x0
-                    let dRight = x1 - px
-                    var d = min(min(dLeft, dRight), dY)
-
-                    if d > -1.5 {
-                        if hasTopRound && py < y0 + ryTop {
-                            if px < x0 + rxTop {
-                                let nx = (x0 + rxTop - px) / rxTop
-                                let ny = (y0 + ryTop - py) / ryTop
-                                let dCorner = (1.0 - hypot(nx, ny)) * topScale
-                                d = min(d, dCorner)
-                            } else if px > x1 - rxTop {
-                                let nx = (px - (x1 - rxTop)) / rxTop
-                                let ny = (y0 + ryTop - py) / ryTop
-                                let dCorner = (1.0 - hypot(nx, ny)) * topScale
-                                d = min(d, dCorner)
-                            }
-                        } else if hasBotRound && py > y1 - ryBot {
-                            if px < x0 + rxBot {
-                                let nx = (x0 + rxBot - px) / rxBot
-                                let ny = (py - (y1 - ryBot)) / ryBot
-                                let dCorner = (1.0 - hypot(nx, ny)) * botScale
-                                d = min(d, dCorner)
-                            } else if px > x1 - rxBot {
-                                let nx = (px - (x1 - rxBot)) / rxBot
-                                let ny = (py - (y1 - ryBot)) / ryBot
-                                let dCorner = (1.0 - hypot(nx, ny)) * botScale
-                                d = min(d, dCorner)
-                            }
-                        }
-                    }
+                    let d = signedArchShapeDistance(
+                        px: px, py: py,
+                        ax0: ax0, ax1: ax1, ay0: ay0, y1: y1,
+                        rxTop: rxTop, ryTop: ryTop, rxBot: rxBot, ryBot: ryBot,
+                        hasTopRound: hasTopRound, hasBotRound: hasBotRound,
+                        isFullTopArch: isFullTopArch, topArchExp: params.topArchExp
+                    )
 
                     if d <= -1.2 {
                         let idx = rowOff + x * 3
@@ -3891,7 +4246,7 @@ final class StereoCardSegmenter: @unchecked Sendable {
         cardLuma: Double?
     ) {
         var insets = (top: 0, bottom: 0, left: 0, right: 0)
-        if let card = cardLuma, w >= 64, h >= 64 {
+        if let card = cardLuma, card >= 85.0, w >= 64, h >= 64 {
             let a = residualBorderInsets(left, width: w, height: h, cardLuma: card)
             let b = residualBorderInsets(right, width: w, height: h, cardLuma: card)
             // 下端（bottom）の微小クロップ漏れ・平行化楔によるアナグリフ横線を除去
@@ -4748,7 +5103,8 @@ enum StereoCardMountRenderer {
                 topRxRatio: topRx,
                 topRyRatio: topRy,
                 botRxRatio: botRx,
-                botRyRatio: botRy
+                botRyRatio: botRy,
+                topArchExp: (topRx > 0.0 && topRy > 0.0) ? ai.topArchExp : 2.0
             )
         }
         switch cutStyle {
@@ -4790,10 +5146,58 @@ enum StereoCardMountRenderer {
     ) {
         let w = Double(pw)
         let h = Double(ph)
-        let topRx = max(0.0, archParams.topRxRatio * w)
-        let topRy = max(0.0, archParams.topRyRatio * h)
-        let botRx = max(0.0, archParams.botRxRatio * w)
-        let botRy = max(0.0, archParams.botRyRatio * h)
+
+        // Keep Arch 適用済み（外周黒マスク済み）のプリントでは黒フリンジや元台紙残りをゼロにするため同一インセット & 内側オフセットで切り抜く
+        let hasKeepArchBlackFrame: Bool = {
+            guard pw >= 16, ph >= 16, printRGB.count >= pw * ph * 3 else { return false }
+            let xs = [pw / 4, pw / 2, (pw * 3) / 4]
+            for x in xs {
+                let tOff = x * 3
+                let bOff = ((ph - 1) * pw + x) * 3
+                if printRGB[tOff] > 8 || printRGB[tOff + 1] > 8 || printRGB[tOff + 2] > 8 { return false }
+                if printRGB[bOff] > 8 || printRGB[bOff + 1] > 8 || printRGB[bOff + 2] > 8 { return false }
+            }
+            return true
+        }()
+
+        let hasTopRound = (archParams.topRxRatio > 0.005 && archParams.topRyRatio > 0.005)
+        let hasBotRound = (archParams.botRxRatio > 0.005 && archParams.botRyRatio > 0.005)
+        let isFullTopArch = hasTopRound && archParams.topRxRatio >= 0.45
+
+        let insetX = hasKeepArchBlackFrame ? (w * 0.008 + 0.5) : 0.0
+        let insetYTop = hasKeepArchBlackFrame ? (h * 0.008 + 0.5) : 0.0
+        let insetYBot = hasKeepArchBlackFrame ? ((hasBotRound ? (h * 0.008) : max(1.5, h * 0.004)) + 0.5) : 0.0
+        let archOff = (hasKeepArchBlackFrame && hasTopRound) ? 2.2 : 0.0
+
+        let x0 = insetX
+        let x1 = w - insetX
+        let y0 = insetYTop
+        let y1 = h - insetYBot
+        let innerW = max(8.0, x1 - x0)
+        let innerH = max(8.0, y1 - y0)
+        let ax0 = x0 + archOff
+        let ax1 = x1 - archOff
+        let ay0 = y0 + archOff
+
+        let topRx = hasTopRound ? max(2.0, innerW * archParams.topRxRatio) : 0.0
+        let topRy = hasTopRound ? max(2.0, innerH * archParams.topRyRatio) : 0.0
+        let botRx = hasBotRound ? max(2.0, innerW * archParams.botRxRatio) : 0.0
+        let botRy = hasBotRound ? max(2.0, innerH * archParams.botRyRatio) : 0.0
+
+        @inline(__always)
+        func printAlphaAt(_ px: Double, _ py: Double) -> Double {
+            let d = StereoCardSegmenter.signedArchShapeDistance(
+                px: px, py: py,
+                ax0: ax0, ax1: ax1, ay0: ay0, y1: y1,
+                rxTop: topRx, ryTop: topRy, rxBot: botRx, ryBot: botRy,
+                hasTopRound: hasTopRound, hasBotRound: hasBotRound,
+                isFullTopArch: isFullTopArch, topArchExp: archParams.topArchExp
+            )
+            if d <= -1.2 { return 0.0 }
+            if d >= 1.2 { return 1.0 }
+            let t = (d + 1.2) / 2.4
+            return t * t * (3.0 - 2.0 * t)
+        }
 
         // 1. 印画の紙厚を表現する微細なドロップシャドウ（右下へ 1〜2px）
         let shadowOff = max(1, min(2, cardW / 1000))
@@ -4803,7 +5207,7 @@ enum StereoCardMountRenderer {
             for px in 0..<pw {
                 let cx = dstX + px + shadowOff
                 guard cx >= 0 && cx < cardW else { continue }
-                let alpha = archCornerAlpha(x: Double(px) + 0.5, y: Double(py) + 0.5, w: w, h: h, topRx: topRx, topRy: topRy, botRx: botRx, botRy: botRy)
+                let alpha = printAlphaAt(Double(px) + 0.5, Double(py) + 0.5)
                 if alpha > 0.5 {
                     let cIdx = (cy * cardW + cx) * 3
                     canvasRGB[cIdx]     = UInt8(Double(canvasRGB[cIdx]) * 0.84)
@@ -4820,7 +5224,7 @@ enum StereoCardMountRenderer {
             for px in 0..<pw {
                 let cx = dstX + px
                 guard cx >= 0 && cx < cardW else { continue }
-                let alpha = archCornerAlpha(x: Double(px) + 0.5, y: Double(py) + 0.5, w: w, h: h, topRx: topRx, topRy: topRy, botRx: botRx, botRy: botRy)
+                let alpha = printAlphaAt(Double(px) + 0.5, Double(py) + 0.5)
                 guard alpha > 0.0 else { continue }
 
                 let pIdx = (py * pw + px) * 3

@@ -73,6 +73,35 @@ public struct MountBarrierMap: Sendable {
         let iy = max(0, min(height - 1, Int(round(normY * Double(height - 1)))))
         return connectedBarrierMask[iy * width + ix]
     }
+
+    /// 窓の左上・右上両肩領域（幅 14% × 高さ 14% の外側三角領域）における外周連結台紙バリア一致率を返す
+    public func shoulderBarrierRatio(normX0: Double, normX1: Double, normY0: Double, normY1: Double) -> Double {
+        let bx0 = max(0, min(width - 1, Int(floor(normX0 * Double(width - 1)))))
+        let bx1 = max(bx0 + 1, min(width - 1, Int(ceil(normX1 * Double(width - 1)))))
+        let by0 = max(0, min(height - 1, Int(floor(normY0 * Double(height - 1)))))
+        let by1 = max(by0 + 1, min(height - 1, Int(ceil(normY1 * Double(height - 1)))))
+        let bw = bx1 - bx0
+        let bh = by1 - by0
+        let sx = max(2, Int(Double(bw) * 0.14))
+        let sy = max(2, Int(Double(bh) * 0.14))
+        var hit = 0
+        var total = 0
+        for dy in 0..<sy {
+            let y = by0 + dy
+            let fy = Double(dy) / Double(sy)
+            let rowOff = y * width
+            for dx in 0..<sx {
+                let fx = Double(dx) / Double(sx)
+                guard fx + fy <= 1.0 else { continue }
+                let xl = bx0 + dx
+                let xr = bx1 - dx
+                total += 2
+                if connectedBarrierMask[rowOff + xl] { hit += 1 }
+                if connectedBarrierMask[rowOff + xr] { hit += 1 }
+            }
+        }
+        return Double(hit) / Double(max(1, total))
+    }
 }
 
 /// Stage 2: 連結パラメトリック双子窓パラメータ
@@ -679,37 +708,79 @@ public enum StereoCardMountAnalyzer {
             }
         }
 
-        let archExp = 2.2
-        func upperCutError(cut: StereoPrintCutType, ratio: Double) -> Double {
-            let yBandH = max(8, Int(winH * 0.28))
+        func upperCutError(cut: StereoPrintCutType, ratio: Double, exp: Double) -> Double {
+            let yBandH = max(8, Int(winH * 0.45))
             var errSum = 0.0, cnt = 0
+            var edgeSum = 0.0, edgeCnt = 0
             for (sx, sy) in [(xL, topY), (xR, topY + dyR)] {
                 let ix0 = max(0, Int(sx)), ix1 = min(w - 1, Int(sx + winW))
                 let iy0 = max(0, Int(sy)), iy1 = min(h - 1, Int(sy) + yBandH)
                 guard ix1 > ix0 && iy1 > iy0 else { continue }
                 for x in stride(from: ix0, through: ix1, by: 2) {
                     let u = ((Double(x) - sx) / winW) * 2.0 - 1.0
-                    let yCurve = sy + upperDropPixels(cut: cut, u: u, width: winW, height: winH, ratio: ratio, exp: archExp)
+                    let yCurve = sy + upperDropPixels(cut: cut, u: u, width: winW, height: winH, ratio: ratio, exp: exp)
                     for y in stride(from: iy0, through: iy1, by: 2) {
                         let pM = Double(effectivePMount[y * w + x])
                         errSum += (Double(y) >= yCurve) ? pM : (1.0 - pM)
                         cnt += 1
                     }
+                    // 曲線位置 (±1px) における Sobel 勾配強度をサンプリングしてエッジ吸着を促進
+                    let cy = Int(round(yCurve))
+                    var localMaxG = 0.0
+                    for dy in -1...1 {
+                        let iy = max(0, min(h - 1, cy + dy))
+                        let idx = iy * w + x
+                        let g = hypot(Double(gradMagX[idx]), Double(gradMagY[idx]))
+                        if g > localMaxG { localMaxG = g }
+                    }
+                    edgeSum += localMaxG
+                    edgeCnt += 1
                 }
             }
-            return errSum / Double(max(1, cnt))
+            let areaErr = errSum / Double(max(1, cnt))
+            let edgeScore = edgeSum / Double(max(1, edgeCnt))
+            return areaErr - 0.12 * edgeScore
         }
 
         var bestCut: StereoPrintCutType = .square
-        var bestCutErr = upperCutError(cut: .square, ratio: 0.0)
-        var bestCornerRatio = 0.0, bestArchRatio = 0.0
+        var bestCutErr = upperCutError(cut: .square, ratio: 0.0, exp: 2.0)
+        var bestCornerRatio = 0.0, bestArchRatio = 0.0, bestArchExp = 2.2
         for r in stride(from: 0.04, through: 0.16, by: 0.02) {
-            let e = upperCutError(cut: .rounded, ratio: r) + 0.015
+            let e = upperCutError(cut: .rounded, ratio: r, exp: 2.0) + 0.015
             if e < bestCutErr { bestCutErr = e; bestCut = .rounded; bestCornerRatio = r; bestArchRatio = 0.0 }
         }
-        for ha in stride(from: 0.08, through: 0.26, by: 0.015) {
-            let e = upperCutError(cut: .arch, ratio: ha) + 0.020
-            if e < bestCutErr { bestCutErr = e; bestCut = .arch; bestArchRatio = ha; bestCornerRatio = 0.0 }
+
+        // 2変数アーチ粗探索 (archDropRatio ∈ [0.08...0.42], archExponent ∈ [1.7...2.8])
+        let expCandidates = [1.7, 1.9, 2.0, 2.2, 2.4, 2.6, 2.8]
+        var coarseBestErr = Double.greatestFiniteMagnitude
+        var coarseBestHa = 0.16
+        var coarseBestExp = 2.2
+        for expVal in expCandidates {
+            for ha in stride(from: 0.08, through: 0.42, by: 0.02) {
+                let e = upperCutError(cut: .arch, ratio: ha, exp: expVal) + 0.020
+                if e < coarseBestErr {
+                    coarseBestErr = e
+                    coarseBestHa = ha
+                    coarseBestExp = expVal
+                }
+            }
+        }
+        // 最良周辺の精密探索
+        let fineLo = max(0.06, coarseBestHa - 0.02)
+        let fineHi = min(0.45, coarseBestHa + 0.02)
+        for ha in stride(from: fineLo, through: fineHi, by: 0.005) {
+            let e = upperCutError(cut: .arch, ratio: ha, exp: coarseBestExp) + 0.020
+            if e < coarseBestErr {
+                coarseBestErr = e
+                coarseBestHa = ha
+            }
+        }
+        if coarseBestErr < bestCutErr {
+            bestCutErr = coarseBestErr
+            bestCut = .arch
+            bestArchRatio = coarseBestHa
+            bestArchExp = coarseBestExp
+            bestCornerRatio = 0.0
         }
 
         let fitScore = Float(max(0.0, min(1.0, 1.0 - bestCutErr * 1.5)))
@@ -723,12 +794,16 @@ public enum StereoCardMountAnalyzer {
             cutType: bestCut,
             cornerRadiusRatio: CGFloat(bestCornerRatio),
             archDropRatio: CGFloat(bestArchRatio),
-            archExponent: CGFloat(archExp),
+            archExponent: CGFloat(bestArchExp),
             fitScore: fitScore
         )
     }
 
-    public static func renderAnalyticCutMask(params: TwinWindowParams, outputSize: CGSize) -> [UInt8] {
+    public static func renderAnalyticCutMask(
+        params: TwinWindowParams,
+        outputSize: CGSize,
+        innerOffsetPx: Double = 1.75
+    ) -> [UInt8] {
         let w = max(1, Int(outputSize.width)), h = max(1, Int(outputSize.height))
         var mask = [UInt8](repeating: 255, count: w * h)
         guard params.cutType != .square else { return mask }
@@ -736,7 +811,7 @@ public enum StereoCardMountAnalyzer {
         let expVal = Double(params.archExponent)
         for x in 0..<w {
             let u = (Double(x) + 0.5) / Double(w) * 2.0 - 1.0
-            let yDrop = upperDropPixels(cut: params.cutType, u: u, width: Double(w), height: Double(h), ratio: ratio, exp: expVal)
+            let yDrop = upperDropPixels(cut: params.cutType, u: u, width: Double(w), height: Double(h), ratio: ratio, exp: expVal) + innerOffsetPx
             let yCutoff = Int(ceil(yDrop)) + 1
             for y in 0..<min(h, max(0, yCutoff)) {
                 let cov = max(0.0, min(1.0, (Double(y) + 0.5) - yDrop))
