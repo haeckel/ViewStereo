@@ -4,6 +4,29 @@ ViewStereo は現在開発中であり、特に開発初期段階のアプリケ
 
 ==================================================
 
+ViewStereo v0.2.2 リリースノート / Release Notes (2026.11.24)
+
+==================================================
+【ViewStereo v0.2.2 新機能・改善点 / New Features & Improvements】
+==================================================
+- 深いドーム型アーチ（Deep Dome Arch）の数理フィッティング強化:
+  - 19世紀特有の急峻なドーム型アーチカード（降下率 ry 最大 0.45）に対応するため、超楕円指数（p=1.6〜2.6）の探索と Sobel 勾配エッジ吸着スコアリングを導入。写真上部の建造物や空の欠けを防止。
+  - 外周連結台紙バリア（connectedBarrierMask）による両肩三角領域（幅14%×高さ14%）の一致率検証（shoulderBarrierRatio）を新設し、直角写真カードでのアーチ誤判定を防止。
+- Keep Arch（アーチ保持）のサブピクセル内側オフセット＆アンチエイリアス境界処理:
+  - Keep Arch マスク適用時および台紙再構成レンダラー（StereoCardMountRenderer）において、黒枠フリンジや元台紙の境界残りをゼロにする内側オフセット・インセット処理を実装。
+  - 符号付き距離関数（signedArchShapeDistance）に基づくスムーズなアルファブレンディング（printAlphaAt）を導入し、滑らかで自然なアーチ縁を実現。
+
+==================================================
+[v0.2.2 New Features & Highlights]
+==================================================
+- Deep Dome Arch Parametric Fitting & Anti-False-Positive Guards:
+  - Overhauled Stage 2 twin-window upper arch fitting to support deep dome curves (drop ratio up to ry <= 0.45) with adaptive superellipse exponents (p = 1.6 - 2.6) and Sobel gradient attraction.
+  - Added shoulder barrier verification (shoulderBarrierRatio over 14% x 14% corner regions) to safeguard square/rectangular prints from false arch misclassifications.
+- Keep Arch Inner Mask Offset & Anti-Aliased Blending:
+  - Sub-pixel margin insetting and signed-distance field anti-aliased normal blending (printAlphaAt) across StereoCardSegmenter and StereoCardMountRenderer eliminate black fringes and mount border bleed.
+
+==================================================
+
 ViewStereo v0.2.1 リリースノート / Release Notes (2026.11.24)
 
 ==================================================

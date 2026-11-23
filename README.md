@@ -1,6 +1,6 @@
 # ViewStereo 🎞️✨
 
-[![Version](https://img.shields.io/badge/version-0.2.1-brightgreen.svg)](https://viewstereo.p-media.jp/)
+[![Version](https://img.shields.io/badge/version-0.2.2-brightgreen.svg)](https://viewstereo.p-media.jp/)
 [![Status](https://img.shields.io/badge/status-Early%20Development-amber.svg)](#development-status)
 [![Platform](https://img.shields.io/badge/platform-macOS%2014.0+-lightgrey.svg)](https://apple.co/macos)
 [![Technology](https://img.shields.io/badge/tech-Card%20Segmentation%20%7C%207--DoF%20Homography%20%7C%20Stereo%20Window%20%7C%20Digital%20Remount-orange.svg)](https://viewstereo.p-media.jp/)
@@ -17,7 +17,12 @@ Designed as the archival restoration and geometric alignment companion to **Spla
 
 ## 🚀 Key Features
 
-### 📐 v0.2.1 New: 3-Stage Cascade Mount Analysis & Precision Crop Pipeline
+### 🏛️ v0.2.2 New: Deep Dome Arch Fitting & Keep Arch Precision Alignment
+- **Deep Dome Arch Fitting & Superellipse Exponent Optimization**: Enhanced `StereoCardMountAnalyzer` with parametric deep dome arch curve modeling (supporting $r_y \le 0.45$ drop ratios, variable superellipse exponents $p \in [1.6, 2.6]$, and Sobel edge attraction scoring), accurately capturing steep-domed 19th-century stereoviews without truncating upper architectural motifs.
+- **Shoulder Barrier Verification**: Introduced outer-connected mount barrier validation (`shoulderBarrierRatio` across 14% × 14% triangular corner zones) to safeguard rectangular/square cards from being falsely classified as arched frames.
+- **Sub-Pixel Keep Arch Inner Mask Offset & Anti-Aliased Blending**: Re-engineered Keep Arch masking in both `StereoCardSegmenter` and `StereoCardMountRenderer` with sub-pixel margin insetting and smooth signed-distance normal blending (`printAlphaAt`), completely eliminating dark fringes, border bleed, and residual scanner artifacts.
+
+### 📐 v0.2.1: 3-Stage Cascade Mount Analysis & Precision Crop Pipeline
 - **3-Stage Cascade Mount Analyzer (`StereoCardMountAnalyzer`)**: Completely overhauled card segmentation with a 3-stage cascade pipeline—Stage 0 (outer-connected CIE Lab flood-fill scan margin removal, RANSAC deskewing, and drop-shadow crossing with 3-fold white-mount safety guards), Stage 1 (adaptive `step=1` rim sampling CIE Lab mount color barrier with outer-connected protection), and Stage 2 (SAT + Sobel coordinate-descent twin-window parametric fitting for `.square` / `.rounded` / `.arch` frames).
 - **Dark-Background & Arch/Caption Overcrop Prevention**: Refined SAM 2.1 Tiny mask tolerance and candidate selection to prevent overcropping dark-background photographs (e.g., lunar/night scenes), fixed bottom caption trimmer false positives from dark rule streaks, and synchronized arch apex detection with Stage 2 window geometry.
 - **Hardened Core ML PixelBuffer Input**: Switched `StereoCardSeg` and `SAM2_1TinyImageEncoder` inputs from `MLFeatureValue(cgImage:)` to direct `CVPixelBufferCreate` rendering, eliminating environment-dependent `Failed to create CVPixelBuffer` errors.
