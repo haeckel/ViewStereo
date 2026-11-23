@@ -605,7 +605,7 @@ final class StereoCardSegmenter: @unchecked Sendable {
                     guard scanX1 > scanX0 else { return currentY0 }
                     let step = max(1, (scanX1 - scanX0) / 9)
                     var apexYList: [Int] = []
-                    let minY = max(topBorderEnd + 8, currentY0 - 35)
+                    let minY = max(topBorderEnd + 1, currentY0 - 35)
                     let maxY = min(height - 10, currentY0 + 35)
                     guard maxY > minY + 8 else { return currentY0 }
                     let runLen = 6
@@ -616,8 +616,8 @@ final class StereoCardSegmenter: @unchecked Sendable {
                                 let idx = ((y + k) * width + x) * 3
                                 let r = Double(rgb[idx]), g = Double(rgb[idx + 1]), b = Double(rgb[idx + 2])
                                 let luma = (r + g + b) / 3.0
-                                if luma <= 35.0 {
-                                    // スキャナ黒枠は写真ではない
+                                if (y + k) <= topBorderEnd + 2 && luma <= 35.0 {
+                                    // 画像上端直後のスキャナ黒枠は写真ではない
                                     nonCard = 0
                                     break
                                 }
@@ -640,8 +640,14 @@ final class StereoCardSegmenter: @unchecked Sendable {
                 }
                 let apexL = detectApexY(x0: cLx0, x1: cLx1, currentY0: cLy0)
                 let apexR = detectApexY(x0: cRx0, x1: cRx1, currentY0: cRy0)
-                cLy0 = apexL
-                cRy0 = apexR
+                if abs(apexL - apexR) >= 4 {
+                    let topApex = min(apexL, apexR)
+                    cLy0 = topApex
+                    cRy0 = topApex
+                } else {
+                    cLy0 = apexL
+                    cRy0 = apexR
+                }
             }
 
             let lw = cLx1 - cLx0, lh = cLy1 - cLy0
@@ -1860,23 +1866,35 @@ final class StereoCardSegmenter: @unchecked Sendable {
                 var photoStreak = 0
                 var missBudget = 0
                 var lastMarginY: Int? = nil
+                var darkRuleStreak = 0
 
                 // 外縁から内側（上）へ向かって台紙・文字行を辿る
                 for y in stride(from: currentY1 - 1, through: capLimitY, by: -1) {
                     let st = analyzeRow(y, x0: sx0, x1: sx1)
                     let isMarginOrTextRow = st.bgRatio >= 0.42
                     let isDarkRuleRow = st.darkRatio >= 0.62 && st.std <= 28.0
-                    if isMarginOrTextRow || isDarkRuleRow {
+                    if isMarginOrTextRow {
                         sumBgRatio += st.bgRatio
                         rowCount += 1
                         photoStreak = 0
                         missBudget = 0
+                        darkRuleStreak = 0
+                        lastMarginY = y
+                    } else if isDarkRuleRow && darkRuleStreak < 2 && rowCount >= 1 {
+                        // 台紙と写真の間の細い黒罫線（最大2px）のみ許容
+                        // 宇宙空間・夜空等の暗部写真への侵入を防止
+                        sumBgRatio += st.bgRatio
+                        rowCount += 1
+                        photoStreak = 0
+                        missBudget = 0
+                        darkRuleStreak += 1
                         lastMarginY = y
                     } else if st.bgRatio >= 0.28 && missBudget < 2 && rowCount >= 1 {
                         // キャプション文字密度が濃い1〜2行を跨ぐための極小許容（写真側侵入は連続判定で弾く）
                         sumBgRatio += st.bgRatio
                         rowCount += 1
                         missBudget += 1
+                        darkRuleStreak = 0
                     } else {
                         photoStreak += 1
                         if photoStreak >= 3 {
@@ -2050,7 +2068,7 @@ final class StereoCardSegmenter: @unchecked Sendable {
             var cnt = 0
             for y in minY1..<maxY1 {
                 let st = analyzeRow(y, x0: sx0, x1: sx1)
-                sumBg += (st.bgRatio + (st.darkRatio >= 0.65 && st.std <= 26 ? 0.6 : 0.0))
+                sumBg += st.bgRatio
                 cnt += 1
             }
             if cnt > 0 && (sumBg / Double(cnt)) >= 0.45 {
