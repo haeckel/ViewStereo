@@ -140,29 +140,78 @@ final class StereoCardSegmenter: @unchecked Sendable {
 
     /// Core ML でステレオカード画像をセグメンテーションし、左右写真ペアを切り出す
     func extractPhotoPair(
-        from rgb: [UInt8],
-        width: Int,
-        height: Int,
+        from inputRGB: [UInt8],
+        width inputImgW: Int,
+        height inputImgH: Int,
         mode: StereoCardCropper.ExtractionMode
     ) -> StereoCardCropper.CropResult? {
         lock.lock()
         latestCardLuma = nil
         latestMountContext = nil
         lock.unlock()
-        guard width >= 64, height >= 32, rgb.count >= width * height * 3,
+        guard inputImgW >= 64, inputImgH >= 32, inputRGB.count >= inputImgW * inputImgH * 3,
               let model = loadModel(name: "StereoCardSeg", cache: &cachedModel),
-              let cgImage = makeCGImage(from: rgb, width: width, height: height) else {
+              let rawCGImage = makeCGImage(from: inputRGB, width: inputImgW, height: inputImgH) else {
             return nil
         }
 
+        // 3段階カスケード解析（Stage 0: スキャン余白除去 & 水平化 / Stage 1: CIE Lab 台紙バリア / Stage 2: 双子窓フィッティング）
+        let mountAnalysis = StereoCardMountAnalyzer.analyze(cgImage: rawCGImage, rgb: inputRGB)
+        let rgb: [UInt8]
+        let width: Int
+        let height: Int
+        let cgImage: CGImage
+        if let deskew = mountAnalysis?.deskew, deskew.hasScanMargin,
+           deskew.width >= 64, deskew.height >= 32,
+           deskew.deskewedRGB.count >= deskew.width * deskew.height * 3 {
+            rgb = deskew.deskewedRGB
+            width = deskew.width
+            height = deskew.height
+            cgImage = deskew.deskewedImage
+        } else {
+            rgb = inputRGB
+            width = inputImgW
+            height = inputImgH
+            cgImage = rawCGImage
+        }
+
         do {
-            let inputFeature = try MLFeatureValue(
-                cgImage: cgImage,
-                pixelsWide: inputWidth,
-                pixelsHigh: inputHeight,
-                pixelFormatType: kCVPixelFormatType_32BGRA,
-                options: nil
+            var pixelBuffer: CVPixelBuffer?
+            let attrs: [CFString: Any] = [
+                kCVPixelBufferCGImageCompatibilityKey: true,
+                kCVPixelBufferCGBitmapContextCompatibilityKey: true
+            ]
+            let status = CVPixelBufferCreate(
+                kCFAllocatorDefault,
+                inputWidth,
+                inputHeight,
+                kCVPixelFormatType_32BGRA,
+                attrs as CFDictionary,
+                &pixelBuffer
             )
+            guard status == kCVReturnSuccess, let pb = pixelBuffer else {
+                return nil
+            }
+            CVPixelBufferLockBaseAddress(pb, [])
+            if let pxData = CVPixelBufferGetBaseAddress(pb) {
+                let colorSpace = CGColorSpaceCreateDeviceRGB()
+                let bpr = CVPixelBufferGetBytesPerRow(pb)
+                if let ctx = CGContext(
+                    data: pxData,
+                    width: inputWidth,
+                    height: inputHeight,
+                    bitsPerComponent: 8,
+                    bytesPerRow: bpr,
+                    space: colorSpace,
+                    bitmapInfo: CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.noneSkipFirst.rawValue
+                ) {
+                    ctx.interpolationQuality = .high
+                    ctx.draw(cgImage, in: CGRect(x: 0, y: 0, width: inputWidth, height: inputHeight))
+                }
+            }
+            CVPixelBufferUnlockBaseAddress(pb, [])
+
+            let inputFeature = MLFeatureValue(pixelBuffer: pb)
             let provider = try MLDictionaryFeatureProvider(dictionary: ["image": inputFeature])
             let output = try model.prediction(from: provider)
             guard let logits = output.featureValue(for: "logits")?.multiArrayValue else {
@@ -203,6 +252,20 @@ final class StereoCardSegmenter: @unchecked Sendable {
                         let m = max(v0, v1)
                         let e0 = expf(v0 - m), e1 = expf(v1 - m)
                         probPhoto[y * W + x] = e1 / (e0 + e1)
+                    }
+                }
+            }
+
+            // Stage 1 外周連結台紙バリアによる強制 0 マスク（安全策3: 外周・中央連結領域のみをマスクし、月写真の宇宙空間など内部の平坦領域を保護）
+            if let barrier = mountAnalysis?.barrier, barrier.model.confidence >= 0.25 {
+                for y in 0..<H {
+                    let ny = Double(y) / Double(max(1, H - 1))
+                    let row = y * W
+                    for x in 0..<W {
+                        let nx = Double(x) / Double(max(1, W - 1))
+                        if barrier.isConnectedBarrierAt(normX: nx, normY: ny) {
+                            probPhoto[row + x] = 0.0
+                        }
                     }
                 }
             }
@@ -419,7 +482,8 @@ final class StereoCardSegmenter: @unchecked Sendable {
                     rgb: rgb, srcW: width, srcH: height,
                     cLx0: preLx0, cLx1: preLx1, cLy0: &preLy0, cLy1: preLy1,
                     cRx0: preRx0, cRx1: preRx1, cRy0: &preRy0, cRy1: preRy1,
-                    cardRGB: prelimCardRGB
+                    cardRGB: prelimCardRGB,
+                    barrier: mountAnalysis?.barrier
                 )
                 if preLy0 < origPreLy0 {
                     roughBoxL.minY = min(roughBoxL.minY, max(0, preLy0 * H / height))
@@ -455,6 +519,7 @@ final class StereoCardSegmenter: @unchecked Sendable {
                 finalMaskR = refined.maskR
                 mw = refined.w
                 mh = refined.h
+            } else {
             }
 
             let invScaleX = Double(width) / Double(mw)
@@ -523,7 +588,8 @@ final class StereoCardSegmenter: @unchecked Sendable {
                     rgb: rgb, srcW: width, srcH: height,
                     cLx0: cLx0, cLx1: cLx1, cLy0: &cLy0, cLy1: cLy1,
                     cRx0: cRx0, cRx1: cRx1, cRy0: &cRy0, cRy1: cRy1,
-                    cardRGB: effectiveCardRGB
+                    cardRGB: effectiveCardRGB,
+                    barrier: mountAnalysis?.barrier
                 )
             }
 
@@ -545,7 +611,8 @@ final class StereoCardSegmenter: @unchecked Sendable {
                     rgb: rgb, srcW: width, srcH: height,
                     cLx0: cLx0, cLx1: cLx1, cLy0: &cLy0, cLy1: cLy1,
                     cRx0: cRx0, cRx1: cRx1, cRy0: &cRy0, cRy1: cRy1,
-                    cardRGB: effectiveCardRGB
+                    cardRGB: effectiveCardRGB,
+                    barrier: mountAnalysis?.barrier
                 )
             }
 
@@ -587,16 +654,62 @@ final class StereoCardSegmenter: @unchecked Sendable {
                         return Double(cardCount) / Double(total) >= 0.50
                     }
                     if cLy0 > safeTop + 6 && !isCardBetween(y0: safeTop, y1: cLy0, x: midLX) {
-                        cLy0 = safeTop
+                        let blockedByBarrier = mountAnalysis?.barrier.isMountBarrierRow(
+                            normalizedY: CGFloat((safeTop + cLy0) / 2) / CGFloat(max(1, height - 1)),
+                            normalizedXRange: 0.15...0.40,
+                            threshold: 0.55
+                        ) ?? false
+                        if !blockedByBarrier { cLy0 = safeTop }
                     }
                     if cRy0 > safeTop + 6 && !isCardBetween(y0: safeTop, y1: cRy0, x: midRX) {
-                        cRy0 = safeTop
+                        let blockedByBarrier = mountAnalysis?.barrier.isMountBarrierRow(
+                            normalizedY: CGFloat((safeTop + cRy0) / 2) / CGFloat(max(1, height - 1)),
+                            normalizedXRange: 0.60...0.85,
+                            threshold: 0.55
+                        ) ?? false
+                        if !blockedByBarrier { cRy0 = safeTop }
                     }
                 }
             }
 
+            // Stage 1/2 外周連結バリアによる上端残留台紙の押し下げガード
+            if let analysis = mountAnalysis, analysis.barrier.model.confidence >= 0.25 {
+                let barrier = analysis.barrier
+                func pushDownPastBarrier(y0: Int, y1: Int, x0: Int, x1: Int) -> Int {
+                    let limit = min(y1 - 48, y0 + max(8, Int(Double(height) * 0.10)))
+                    guard limit > y0 else { return y0 }
+                    let nx0 = CGFloat(x0 + (x1 - x0) / 4) / CGFloat(max(1, width - 1))
+                    let nx1 = CGFloat(x1 - (x1 - x0) / 4) / CGFloat(max(1, width - 1))
+                    var y = y0
+                    while y < limit {
+                        let ny = CGFloat(y) / CGFloat(max(1, height - 1))
+                        // 連結バリアマスクまたは行バリアが支配的なら押し下げる
+                        var connCnt = 0, tot = 0
+                        for sx in stride(from: x0 + (x1 - x0) / 4, through: x1 - (x1 - x0) / 4, by: max(1, (x1 - x0) / 32)) {
+                            tot += 1
+                            if barrier.isConnectedBarrierAt(normX: Double(sx) / Double(max(1, width - 1)), normY: Double(ny)) {
+                                connCnt += 1
+                            }
+                        }
+                        let connRatio = Double(connCnt) / Double(max(1, tot))
+                        let rowBarrier = barrier.isMountBarrierRow(normalizedY: ny, normalizedXRange: min(nx0, nx1)...max(nx0, nx1), threshold: 0.45)
+                        if connRatio >= 0.35 || rowBarrier {
+                            y += 1
+                        } else {
+                            break
+                        }
+                    }
+                    return y
+                }
+                cLy0 = pushDownPastBarrier(y0: cLy0, y1: cLy1, x0: cLx0, x1: cLx1)
+                cRy0 = pushDownPastBarrier(y0: cRy0, y1: cRy1, x0: cRx0, x1: cRx1)
+            }
+
             // アーチ頂点精密検出（上部アーチがある場合、中央付近の列で台紙から写真への真の境界Yを検出）
-            if hasTopArch, let card = effectiveCardRGB ?? (cardLuma.map { (r: $0, g: $0, b: $0) }) {
+            let isSquareByTwin = (mountAnalysis?.twinWindow.cutType == .square && (mountAnalysis?.twinWindow.fitScore ?? 0) >= 0.50)
+            let effectiveHasTopArch = hasTopArch && !isSquareByTwin
+            if effectiveHasTopArch, let card = effectiveCardRGB ?? (cardLuma.map { (r: $0, g: $0, b: $0) }) {
+                let barrier = mountAnalysis?.barrier
                 func detectApexY(x0: Int, x1: Int, currentY0: Int) -> Int {
                     let bw = x1 - x0
                     let midX = (x0 + x1) / 2
@@ -605,7 +718,7 @@ final class StereoCardSegmenter: @unchecked Sendable {
                     guard scanX1 > scanX0 else { return currentY0 }
                     let step = max(1, (scanX1 - scanX0) / 9)
                     var apexYList: [Int] = []
-                    let minY = max(topBorderEnd + 1, currentY0 - 35)
+                    let minY = max(topBorderEnd + 2, currentY0 - 35)
                     let maxY = min(height - 10, currentY0 + 35)
                     guard maxY > minY + 8 else { return currentY0 }
                     let runLen = 6
@@ -613,11 +726,18 @@ final class StereoCardSegmenter: @unchecked Sendable {
                         for y in minY..<(maxY - runLen) {
                             var nonCard = 0
                             for k in 0..<runLen {
-                                let idx = ((y + k) * width + x) * 3
+                                let py = y + k
+                                let idx = (py * width + x) * 3
                                 let r = Double(rgb[idx]), g = Double(rgb[idx + 1]), b = Double(rgb[idx + 2])
                                 let luma = (r + g + b) / 3.0
-                                if (y + k) <= topBorderEnd + 2 && luma <= 35.0 {
+                                if py <= topBorderEnd + 2 && luma <= 35.0 {
                                     // 画像上端直後のスキャナ黒枠は写真ではない
+                                    nonCard = 0
+                                    break
+                                }
+                                if let bMap = barrier, bMap.model.confidence >= 0.25,
+                                   bMap.isConnectedBarrierAt(normX: Double(x) / Double(max(1, width - 1)), normY: Double(py) / Double(max(1, height - 1))) {
+                                    // Stage 1 外周連結台紙バリア（および外縁ドロップシャドウ）上は写真頂点ではない
                                     nonCard = 0
                                     break
                                 }
@@ -682,6 +802,46 @@ final class StereoCardSegmenter: @unchecked Sendable {
             var fullOutR = cropRotatedRGB(rgb, srcW: width, srcH: height, centerX: centerRX, centerY: centerRY, width: cw, height: ch, angleRad: commonSkewAngle)
             Self.trimOuterBlackBorders(leftRGB: &fullOutL, rightRGB: &fullOutR, width: &cw, height: &ch)
 
+            // 最終出力の上端に残った数pxの台紙帯（40019-3305の黄色3px / 40010-6308のオレンジ5px等）を安全に除去
+            if let cRGB = effectiveCardRGB {
+                let cLuma = (cRGB.r + cRGB.g + cRGB.b) / 3.0
+                if cLuma >= 95.0 || max(cRGB.r, max(cRGB.g, cRGB.b)) >= 140.0 { // 明色・有彩色台紙を対象（暗黒月写真の宇宙空間は絶対保護）
+                    let maxTopTrim = min(14, ch / 16)
+                    var topTrim = 0
+                    for y in 0..<maxTopTrim {
+                        var matchL = 0, matchR = 0, n = 0
+                        let x0 = cw / 4, x1 = (cw * 3) / 4
+                        let step = max(1, (x1 - x0) / 32)
+                        for x in stride(from: x0, to: x1, by: step) {
+                            let off = (y * cw + x) * 3
+                            let rL = Double(fullOutL[off]), gL = Double(fullOutL[off + 1]), bL = Double(fullOutL[off + 2])
+                            let rR = Double(fullOutR[off]), gR = Double(fullOutR[off + 1]), bR = Double(fullOutR[off + 2])
+                            let dL = max(abs(rL - cRGB.r), max(abs(gL - cRGB.g), abs(bL - cRGB.b)))
+                            let dR = max(abs(rR - cRGB.r), max(abs(gR - cRGB.g), abs(bR - cRGB.b)))
+                            if dL <= 42.0 { matchL += 1 }
+                            if dR <= 42.0 { matchR += 1 }
+                            n += 1
+                        }
+                        let rateL = Double(matchL) / Double(max(1, n))
+                        let rateR = Double(matchR) / Double(max(1, n))
+                        if max(rateL, rateR) >= 0.40 {
+                            topTrim = y + 1
+                        } else if y < 4 {
+                            // 最上端 1〜4px の薄い影線や境界グラデーションを跨いでその直下に台紙帯が続いていれば続行
+                            continue
+                        } else {
+                            break
+                        }
+                    }
+                    if topTrim > 0 && ch - topTrim >= 64 {
+                        let dropBytes = topTrim * cw * 3
+                        fullOutL = Array(fullOutL.dropFirst(dropBytes))
+                        fullOutR = Array(fullOutR.dropFirst(dropBytes))
+                        ch -= topTrim
+                    }
+                }
+            }
+
             // フル解像度のコーナー背景色（通常台紙または白/黒抜き背景）から上下の角丸／直角／アーチを独立確定
             let topBgRGB = Self.resolveCornerBackgroundRGB(
                 leftRGB: fullOutL, rightRGB: fullOutR, width: cw, height: ch,
@@ -697,12 +857,17 @@ final class StereoCardSegmenter: @unchecked Sendable {
                 let topRatios = Self.cornerCardRatiosRGB(leftRGB: fullOutL, rightRGB: fullOutR, width: cw, height: ch, cardRGB: bgT, isTop: true)
                 let topSquare = (topRatios[0] + topRatios[1]) * 0.5 < 0.30
                 let allTopHaveBg = topRatios[0] >= 0.50 && (topRatios.reduce(0.0, +) * 0.25) >= 0.70
-                if topSquare {
+                if isSquareByTwin || topSquare {
                     archParams.topRxRatio = 0.0
                     archParams.topRyRatio = 0.0
                 } else if let measured = Self.measureOuterCornerArchShapeRGB(leftRGB: fullOutL, rightRGB: fullOutR, width: cw, height: ch, cardRGB: bgT, isTop: true) {
-                    archParams.topRxRatio = measured.rxRatio
-                    archParams.topRyRatio = measured.ryRatio
+                    if measured.ryRatio <= 0.28 {
+                        archParams.topRxRatio = measured.rxRatio
+                        archParams.topRyRatio = measured.ryRatio
+                    } else {
+                        archParams.topRxRatio = 0.0
+                        archParams.topRyRatio = 0.0
+                    }
                 } else if !allTopHaveBg && archParams.topRyRatio < 0.24 {
                     // 4隅揃っておらず低解像度値のみが 0.24 未満（角欠け・空誤差）の場合は直角プリントとみなす
                     archParams.topRxRatio = 0.0
@@ -858,18 +1023,45 @@ final class StereoCardSegmenter: @unchecked Sendable {
         let validW = max(1, Int((Double(resizedW) / 4.0).rounded()))
         let validH = max(1, Int((Double(resizedH) / 4.0).rounded()))
 
-        guard let paddedCG = makeTopLeftPaddedCGImage(cgImage, targetSize: samSize, drawW: resizedW, drawH: resizedH) else {
-            return nil
-        }
-
         do {
-            let imgFeature = try MLFeatureValue(
-                cgImage: paddedCG,
-                pixelsWide: samSize,
-                pixelsHigh: samSize,
-                pixelFormatType: kCVPixelFormatType_32BGRA,
-                options: nil
+            var samPixelBuffer: CVPixelBuffer?
+            let attrs: [CFString: Any] = [
+                kCVPixelBufferCGImageCompatibilityKey: true,
+                kCVPixelBufferCGBitmapContextCompatibilityKey: true
+            ]
+            let status = CVPixelBufferCreate(
+                kCFAllocatorDefault,
+                samSize,
+                samSize,
+                kCVPixelFormatType_32BGRA,
+                attrs as CFDictionary,
+                &samPixelBuffer
             )
+            guard status == kCVReturnSuccess, let samPB = samPixelBuffer else {
+                return nil
+            }
+            CVPixelBufferLockBaseAddress(samPB, [])
+            if let pxData = CVPixelBufferGetBaseAddress(samPB) {
+                let colorSpace = CGColorSpaceCreateDeviceRGB()
+                let bpr = CVPixelBufferGetBytesPerRow(samPB)
+                if let ctx = CGContext(
+                    data: pxData,
+                    width: samSize,
+                    height: samSize,
+                    bitsPerComponent: 8,
+                    bytesPerRow: bpr,
+                    space: colorSpace,
+                    bitmapInfo: CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.noneSkipFirst.rawValue
+                ) {
+                    ctx.setFillColor(red: 0, green: 0, blue: 0, alpha: 1)
+                    ctx.fill(CGRect(x: 0, y: 0, width: samSize, height: samSize))
+                    ctx.interpolationQuality = .medium
+                    ctx.draw(cgImage, in: CGRect(x: 0, y: samSize - resizedH, width: resizedW, height: resizedH))
+                }
+            }
+            CVPixelBufferUnlockBaseAddress(samPB, [])
+
+            let imgFeature = MLFeatureValue(pixelBuffer: samPB)
             let encOut = try encoder.prediction(from: MLDictionaryFeatureProvider(dictionary: ["image": imgFeature]))
             guard let imgEmb = encOut.featureValue(for: "image_embedding")?.multiArrayValue,
                   let featsS0 = encOut.featureValue(for: "feats_s0")?.multiArrayValue,
@@ -1588,7 +1780,8 @@ final class StereoCardSegmenter: @unchecked Sendable {
         srcH: Int,
         cLx0: Int, cLx1: Int, cLy0: inout Int, cLy1: Int,
         cRx0: Int, cRx1: Int, cRy0: inout Int, cRy1: Int,
-        cardRGB: (r: Double, g: Double, b: Double)
+        cardRGB: (r: Double, g: Double, b: Double),
+        barrier: MountBarrierMap? = nil
     ) {
         guard srcW >= 64, srcH >= 64, rgb.count >= srcW * srcH * 3 else { return }
         let cLuma = (cardRGB.r + cardRGB.g + cardRGB.b) / 3.0
@@ -1674,6 +1867,15 @@ final class StereoCardSegmenter: @unchecked Sendable {
             var steps = 0
 
             for y in stride(from: y0 - 1, through: limitY, by: -1) {
+                // Stage 1 CIE Lab 台紙バリアに到達した瞬間に無条件でハードストップ
+                if let b = barrier, b.model.confidence >= 0.25 {
+                    let normY = CGFloat(y) / CGFloat(max(1, srcH - 1))
+                    let nx0 = CGFloat(sx0) / CGFloat(max(1, srcW - 1))
+                    let nx1 = CGFloat(sx1) / CGFloat(max(1, srcW - 1))
+                    if b.isMountBarrierRow(normalizedY: normY, normalizedXRange: min(nx0, nx1)...max(nx0, nx1), threshold: 0.55) {
+                        break
+                    }
+                }
                 let st = analyzeRow(y)
                 if st.bgRatio >= 0.35 || st.distCard < 26.0 { break }
                 if st.scanMatch { break }

@@ -30,6 +30,7 @@
 		SW0100230000000000000001 /* WorkspaceOutlineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SW0200230000000000000001 /* WorkspaceOutlineView.swift */; };
 		SW0100240000000000000001 /* ViewStereoVideoProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = SW0200240000000000000001 /* ViewStereoVideoProcessor.swift */; };
 		SW0100250000000000000001 /* ViewStereoMetalDIBR.swift in Sources */ = {isa = PBXBuildFile; fileRef = SW0200250000000000000001 /* ViewStereoMetalDIBR.swift */; };
+		SW0100260000000000000001 /* StereoCardMountAnalyzer.swift in Sources */ = {isa = PBXBuildFile; fileRef = SW0200260000000000000001 /* StereoCardMountAnalyzer.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -56,6 +57,7 @@
 		SW0200230000000000000001 /* WorkspaceOutlineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceOutlineView.swift; sourceTree = "<group>"; };
 		SW0200240000000000000001 /* ViewStereoVideoProcessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewStereoVideoProcessor.swift; sourceTree = "<group>"; };
 		SW0200250000000000000001 /* ViewStereoMetalDIBR.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewStereoMetalDIBR.swift; sourceTree = "<group>"; };
+		SW0200260000000000000001 /* StereoCardMountAnalyzer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StereoCardMountAnalyzer.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -115,6 +117,7 @@
 				SW0200210000000000000001 /* WorkspaceBrowserModels.swift */,
 				SW0200240000000000000001 /* ViewStereoVideoProcessor.swift */,
 				SW0200250000000000000001 /* ViewStereoMetalDIBR.swift */,
+				SW0200260000000000000001 /* StereoCardMountAnalyzer.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -252,6 +255,7 @@
 				SW0100230000000000000001 /* WorkspaceOutlineView.swift in Sources */,
 				SW0100240000000000000001 /* ViewStereoVideoProcessor.swift in Sources */,
 				SW0100250000000000000001 /* ViewStereoMetalDIBR.swift in Sources */,
+				SW0100260000000000000001 /* StereoCardMountAnalyzer.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
