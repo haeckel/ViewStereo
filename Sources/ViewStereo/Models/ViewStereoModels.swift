@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import Combine
 import CoreGraphics
 import ImageIO
@@ -66,6 +67,35 @@ enum StereoDisplayMode: Int, CaseIterable, Identifiable {
         case .grayAnaglyph: return .grayAnaglyph
         case .polarized: return .polarized
         case .twoD: return .twoD
+        }
+    }
+
+    var correspondingVideoExportFormat: StereoVideoExportFormat {
+        switch self {
+        case .stereoviewCard: return .stereoviewCard
+        case .sbs: return .sbs
+        case .lrrl: return .lrrl
+        case .dubois: return .dubois
+        case .colorAnaglyph: return .colorAnaglyph
+        case .grayAnaglyph: return .grayAnaglyph
+        case .polarized: return .polarized
+        case .twoD: return .twoD
+        }
+    }
+}
+
+extension StereoVideoExportFormat {
+    var correspondingDisplayMode: StereoDisplayMode? {
+        switch self {
+        case .stereoviewCard: return .stereoviewCard
+        case .sbs: return .sbs
+        case .lrrl: return .lrrl
+        case .dubois: return .dubois
+        case .colorAnaglyph: return .colorAnaglyph
+        case .grayAnaglyph: return .grayAnaglyph
+        case .polarized: return .polarized
+        case .twoD: return .twoD
+        case .separateLR, .spatialVideo: return nil
         }
     }
 }
@@ -275,13 +305,17 @@ struct BatchCompletionSummary: Equatable {
     let outputDirectory: URL
 }
 
-/// バッチ処理対象アイテム
+/// バッチ処理・ブラウザ対象アイテム
 struct StereoBatchItem: Identifiable, Sendable {
     var id: String { leftURL.path + (rightURL?.path ?? "") }
     let baseName: String
     let displayLabel: String
     let leftURL: URL
-    let rightURL: URL? // nil の場合は SBS 単体画像
+    let rightURL: URL? // nil の場合は SBS 単体画像または動画
+
+    var isVideo: Bool {
+        rightURL == nil && WorkspaceScanner.supportedVideoExtensions.contains(leftURL.pathExtension.lowercased())
+    }
 }
 
 /// アプリ設定（UI大文字モード・AI深度モデル・メモリ管理等）
@@ -495,6 +529,45 @@ final class ViewStereoViewModel: ObservableObject {
         }
     }
 
+    // MARK: - 動画 2D→3D 変換状態
+    @Published var isVideoLoaded: Bool = false
+    @Published var currentVideoURL: URL? = nil
+    @Published var videoMetadata: VideoClipMetadata? = nil
+    @Published var videoCurrentTimeSeconds: Double = 0.0
+    @Published var isVideoPlaying: Bool = false
+    @Published var videoExportFormat: StereoVideoExportFormat = .spatialVideo {
+        didSet {
+            UserDefaults.standard.set(videoExportFormat.rawValue, forKey: "VS.videoExportFormat")
+            if !isSyncingLayoutAndMode, let mode = videoExportFormat.correspondingDisplayMode {
+                isSyncingLayoutAndMode = true
+                if displayMode != mode {
+                    displayMode = mode
+                }
+                if let layout = mode.correspondingExportLayout, exportLayout != layout {
+                    exportLayout = layout
+                }
+                isSyncingLayoutAndMode = false
+            }
+        }
+    }
+    @Published var videoTemporalSmoothing: Double = UserDefaults.standard.object(forKey: "VS.videoTemporalSmoothing") as? Double ?? 0.85 {
+        didSet { UserDefaults.standard.set(videoTemporalSmoothing, forKey: "VS.videoTemporalSmoothing") }
+    }
+    @Published var videoLockDepthRange: Bool = false
+    @Published var videoAutoCutDetection: Bool = true
+    @Published var videoInputStereoSource: VideoInputStereoSource = .full2D
+    @Published var videoPreserveHDR: Bool = true
+    @Published var isExportingVideo: Bool = false
+    @Published var videoExportProgress: Double = 0.0
+    @Published var videoExportStatusText: String = ""
+    @Published var videoActiveEngineLabel: String = ""
+    private var videoPreviewSession: ViewStereoVideoDepthSession? = nil
+    private var videoFrameTask: Task<Void, Never>? = nil
+    private var videoPlaybackTask: Task<Void, Never>? = nil
+    private var videoExportTask: Task<Void, Never>? = nil
+    private var videoPreviewGeneration: Int = 0
+    private var isVideoFrameInferring: Bool = false
+
     // バックアップ用（元ペアに戻せるように保存）
     private var originalTrueStereoAlignedL: [UInt8]? = nil
     private var originalTrueStereoAlignedR: [UInt8]? = nil
@@ -517,9 +590,15 @@ final class ViewStereoViewModel: ObservableObject {
     private var isSyncingLayoutAndMode = false
     @Published var displayMode: StereoDisplayMode = .stereoviewCard {
         didSet {
-            if !isSyncingLayoutAndMode, let layout = displayMode.correspondingExportLayout, exportLayout != layout {
+            if !isSyncingLayoutAndMode {
                 isSyncingLayoutAndMode = true
-                exportLayout = layout
+                if let layout = displayMode.correspondingExportLayout, exportLayout != layout {
+                    exportLayout = layout
+                }
+                let vfmt = displayMode.correspondingVideoExportFormat
+                if videoExportFormat != vfmt {
+                    videoExportFormat = vfmt
+                }
                 isSyncingLayoutAndMode = false
             }
             renderDisplayPreview()
@@ -859,7 +938,7 @@ final class ViewStereoViewModel: ObservableObject {
         return nil
     }
 
-    nonisolated private static func applyVintagePipeline(
+    nonisolated static func applyVintagePipeline(
         left: [UInt8],
         right: [UInt8],
         width: Int,
@@ -1003,7 +1082,8 @@ final class ViewStereoViewModel: ObservableObject {
 
     /// アプリ起動時の初期状態（ランディング画面）へリセットする
     func resetToInitialState() {
-        guard !isProcessing && !isBatchRunning else { return }
+        guard !isProcessing && !isBatchRunning && !isExportingVideo else { return }
+        clearVideoState()
         previewRenderGeneration += 1
 
         rawLeftRGB = nil
@@ -1108,9 +1188,15 @@ final class ViewStereoViewModel: ObservableObject {
     @Published var exportLayout: StereoExportLayout = .stereoviewCard {
         didSet {
             UserDefaults.standard.set(exportLayout.rawValue, forKey: "VS.exportLayout")
-            if !isSyncingLayoutAndMode, let mode = exportLayout.correspondingDisplayMode, displayMode != mode {
+            if !isSyncingLayoutAndMode, let mode = exportLayout.correspondingDisplayMode {
                 isSyncingLayoutAndMode = true
-                displayMode = mode
+                if displayMode != mode {
+                    displayMode = mode
+                }
+                let vfmt = mode.correspondingVideoExportFormat
+                if videoExportFormat != vfmt {
+                    videoExportFormat = vfmt
+                }
                 isSyncingLayoutAndMode = false
             }
         }
@@ -1284,15 +1370,13 @@ final class ViewStereoViewModel: ObservableObject {
         if let fs = ud.string(forKey: "VS.frameStyle"), let style = StereoFrameStyle(rawValue: fs) {
             self.frameStyle = style
         }
+        self.isSyncingLayoutAndMode = true
         if let el = ud.string(forKey: "VS.exportLayout"), let layout = StereoExportLayout(rawValue: el) {
-            self.isSyncingLayoutAndMode = true
             self.exportLayout = layout
             if let mode = layout.correspondingDisplayMode {
                 self.displayMode = mode
             }
-            self.isSyncingLayoutAndMode = false
         } else if let legacy = ud.string(forKey: "VS.exportFormat") {
-            self.isSyncingLayoutAndMode = true
             switch legacy {
             case "SBS (JPEG)":
                 self.exportLayout = .sbs; self.exportImageFormat = .jpeg
@@ -1312,8 +1396,13 @@ final class ViewStereoViewModel: ObservableObject {
             if let mode = self.exportLayout.correspondingDisplayMode {
                 self.displayMode = mode
             }
-            self.isSyncingLayoutAndMode = false
         }
+        if let vfmt = ud.string(forKey: "VS.videoExportFormat"), let fmt = StereoVideoExportFormat(rawValue: vfmt), fmt.correspondingDisplayMode == nil {
+            self.videoExportFormat = fmt
+        } else {
+            self.videoExportFormat = self.displayMode.correspondingVideoExportFormat
+        }
+        self.isSyncingLayoutAndMode = false
         if let eif = ud.string(forKey: "VS.exportImageFormat"), let imgFmt = StereoExportImageFormat(rawValue: eif) {
             self.exportImageFormat = imgFmt
         }
@@ -1395,7 +1484,7 @@ final class ViewStereoViewModel: ObservableObject {
 
     func openImagesPanel() {
         let panel = NSOpenPanel()
-        var types: [UTType] = [.jpeg, .png, .tiff, .bmp, .heic, .webP, .rawImage]
+        var types: [UTType] = [.jpeg, .png, .tiff, .bmp, .heic, .webP, .rawImage, .mpeg4Movie, .quickTimeMovie, .movie]
         if let mpoType = UTType(filenameExtension: "mpo") {
             types.append(mpoType)
         }
@@ -1464,6 +1553,17 @@ final class ViewStereoViewModel: ObservableObject {
             isShowingFileBrowser = true
             return
         }
+        if let videoURL = urls.first(where: { WorkspaceScanner.supportedVideoExtensions.contains($0.pathExtension.lowercased()) }),
+           urls.count == 1 {
+            if workspaceRootFolder == nil && !isTemporaryLocation(videoURL) {
+                setWorkspaceRootFolder(videoURL.deletingLastPathComponent())
+                isShowingFileBrowser = true
+            } else if isTemporaryLocation(videoURL), let out = batchOutputFolder, isTemporaryLocation(out) {
+                batchOutputFolder = nil
+            }
+            loadVideo(url: videoURL)
+            return
+        }
         let filtered = urls.filter { Self.supportedImageExtensions.contains($0.pathExtension.lowercased()) }
         if filtered.count >= 3 || (workspaceMode == .convert2DTo3D && filtered.count >= 2) {
             setVirtualWorkspaceSelection(urls: filtered)
@@ -1497,6 +1597,7 @@ final class ViewStereoViewModel: ObservableObject {
         interpretationOverride: StereoInputInterpretation? = nil
     ) {
         currentImageLoadTask?.cancel()
+        clearVideoState()
         imageLoadGeneration += 1
         let gen = imageLoadGeneration
 
@@ -1688,6 +1789,7 @@ final class ViewStereoViewModel: ObservableObject {
 
     func loadSeparateImages(left: URL, right: URL) {
         currentImageLoadTask?.cancel()
+        clearVideoState()
         imageLoadGeneration += 1
         let gen = imageLoadGeneration
 
@@ -3101,6 +3203,447 @@ final class ViewStereoViewModel: ObservableObject {
         renderDisplayPreview()
     }
 
+    // MARK: - Video 2D-to-3D Pipeline (Phase 1 MVP)
+
+    /// 動画関連の状態・再生タスク・Stateful セッションをクリーンリセットする
+    func clearVideoState() {
+        videoPlaybackTask?.cancel()
+        videoPlaybackTask = nil
+        videoFrameTask?.cancel()
+        videoFrameTask = nil
+        videoExportTask?.cancel()
+        videoExportTask = nil
+        videoPreviewGeneration += 1
+        isVideoFrameInferring = false
+        isVideoPlaying = false
+        isExportingVideo = false
+        videoExportProgress = 0.0
+        videoExportStatusText = ""
+        videoActiveEngineLabel = ""
+        videoPreviewSession?.endSession(releaseModel: ViewStereoSettings.shared.releaseAIModelsAfterGeneration)
+        videoPreviewSession = nil
+        isVideoLoaded = false
+        currentVideoURL = nil
+        videoMetadata = nil
+        videoCurrentTimeSeconds = 0.0
+        videoInputStereoSource = .full2D
+    }
+
+    /// 動画ファイルを読み込み、タイムラインプレビュー用 Stateful セッションを開始する
+    func loadVideo(url: URL) {
+        currentImageLoadTask?.cancel()
+        clearVideoState()
+        imageLoadGeneration += 1
+
+        isBatchQueueActive = false
+        batchCompletionSummary = nil
+        hasPreservedArch = false
+        salvageAdvisory = nil
+        isStereoMismatchSuspected = false
+        isPseudoscopicSuspected = false
+        stereoQualityWarning = nil
+        lastMatches = []
+        lastRectResult = nil
+        lastCommonPolygon = []
+        lastRawSaliencyMap = nil
+        originalTrueStereoAlignedL = nil
+        originalTrueStereoAlignedR = nil
+
+        workspaceActiveItemID = url.path
+        workspaceItemStatuses[url.path] = .processing
+        leftURL = url
+        rightURL = url
+        isSingleSBSInput = true
+        isVideoLoaded = true
+        currentVideoURL = url
+        isProcessing = true
+        statusMessage = String(localized: "Loading video metadata...")
+
+        let preferredEngine = ViewStereoSettings.shared.preferredDepthEngine
+        Task {
+            guard let meta = await ViewStereoVideoProcessor.shared.loadMetadata(url: url) else {
+                await MainActor.run {
+                    self.isProcessing = false
+                    self.isVideoLoaded = false
+                    self.currentVideoURL = nil
+                    self.workspaceItemStatuses[url.path] = .failed(String(localized: "Failed to load video."))
+                    self.statusMessage = String(localized: "Failed to load video.")
+                }
+                return
+            }
+
+            let session = ViewStereoVideoDepthSession()
+            await Task.detached(priority: .userInitiated) {
+                session.startSession(preferredEngine: preferredEngine)
+            }.value
+
+            await MainActor.run {
+                guard self.currentVideoURL == url else {
+                    session.endSession(releaseModel: ViewStereoSettings.shared.releaseAIModelsAfterGeneration)
+                    return
+                }
+                self.videoMetadata = meta
+                self.imageWidth = meta.naturalWidth
+                self.imageHeight = meta.naturalHeight
+                self.croppedWidth = meta.naturalWidth
+                self.croppedHeight = meta.naturalHeight
+                self.videoPreviewSession = session
+                self.videoActiveEngineLabel = session.activeEngineName
+                self.stereoReconstructionMode = .fullFrame2DDepth
+                self.isWindowSectionExpanded = true
+                self.isProcessing = false
+                self.workspaceItemStatuses[url.path] = .completed
+                self.seekVideoAndRender(to: 0.0, resetSession: true)
+            }
+        }
+    }
+
+    /// 指定秒数のフレームをデコードして 2D→3D プレビューを更新する
+    /// - 再生中 (`isPlaybackFrame == true`) は 720p 上限でフレームスキップ許容、停止／シーク確定時は 1280p ＋プログレッシブウォームアップ更新
+    func seekVideoAndRender(
+        to seconds: Double,
+        resetSession: Bool = false,
+        isPlaybackFrame: Bool = false,
+        progressiveWarmup: Bool = false
+    ) {
+        guard isVideoLoaded, let url = currentVideoURL, let meta = videoMetadata else { return }
+        let clampedTime = max(0.0, min(meta.durationSeconds, seconds))
+        videoCurrentTimeSeconds = clampedTime
+
+        // 再生中は前フレームの推論が完了していなければフレームスキップして UI フリーズを防止
+        if isPlaybackFrame && isVideoFrameInferring {
+            return
+        }
+
+        videoPreviewGeneration += 1
+        let gen = videoPreviewGeneration
+        videoFrameTask?.cancel()
+        isVideoFrameInferring = true
+
+        let session = videoPreviewSession ?? ViewStereoVideoDepthSession()
+        if videoPreviewSession == nil {
+            session.startSession(preferredEngine: ViewStereoSettings.shared.preferredDepthEngine)
+            videoPreviewSession = session
+        }
+
+        let dispPct = virtualDepthBasePercent
+        let gamma = depthGamma
+        let smoothing = videoTemporalSmoothing
+        let lockRange = videoLockDepthRange
+        let autoCut = videoAutoCutDetection
+        let inputSrc = videoInputStereoSource
+        let previewMaxDim = isPlaybackFrame ? 720 : 1280
+        let shouldWarmup = progressiveWarmup && !isPlaybackFrame && ViewStereoSettings.shared.preferredDepthEngine.isDepthPro2Engine && clampedTime > (2.0 / max(1.0, meta.nominalFPS))
+
+        videoFrameTask = Task {
+            defer {
+                Task { @MainActor in
+                    if self.videoPreviewGeneration == gen {
+                        self.isVideoFrameInferring = false
+                    }
+                }
+            }
+            if resetSession {
+                session.resetTemporalState()
+            }
+            guard let decoded = await ViewStereoVideoProcessor.shared.decodePreviewFrame(url: url, atSeconds: clampedTime, maxDimension: previewMaxDim, inputSource: inputSrc) else {
+                return
+            }
+            if Task.isCancelled { return }
+            guard let cgImg = ViewStereoDepthSynthesizer.createCGImage(from: decoded.rgb, width: decoded.width, height: decoded.height) else {
+                return
+            }
+
+            let res = await Task.detached(priority: .userInitiated) { () -> (disp: [Float], dw: Int, dh: Int, left: [UInt8], right: [UInt8], focus: Double, engineName: String) in
+                let dOut = session.processFrame(
+                    cgImage: cgImg,
+                    rgb24: decoded.rgb,
+                    width: decoded.width,
+                    height: decoded.height,
+                    targetDisparityPercent: dispPct,
+                    depthGamma: gamma,
+                    temporalSmoothing: smoothing,
+                    lockDepthRange: lockRange,
+                    autoCutDetection: autoCut
+                )
+                let (l, r) = ViewStereoDepthSynthesizer.shared.synthesizeStereoPair(
+                    baseRGB: decoded.rgb,
+                    width: decoded.width,
+                    height: decoded.height,
+                    disparityMap: dOut.disparityMap,
+                    depthW: dOut.depthW,
+                    depthH: dOut.depthH,
+                    targetDisparityPercent: dispPct,
+                    depthGamma: gamma,
+                    focusRatio: dOut.focusRatio
+                )
+                return (dOut.disparityMap, dOut.depthW, dOut.depthH, l, r, dOut.focusRatio, dOut.engineName)
+            }.value
+
+            if Task.isCancelled { return }
+            await applyVideoPreviewResult(decoded: decoded, res: res, gen: gen, url: url, meta: meta, dispPct: dispPct)
+
+            // プログレッシブ・ウォームアップ更新（Depth Pro 2 シーク確定時: 直前2フレームを非同期ウォームアップして再上書き）
+            if shouldWarmup && !Task.isCancelled {
+                let dt = 1.0 / max(1.0, meta.nominalFPS)
+                let warmupTimes = [max(0.0, clampedTime - 2.0 * dt), max(0.0, clampedTime - dt)]
+                session.resetTemporalState()
+                for wt in warmupTimes {
+                    if Task.isCancelled { return }
+                    if let wDec = await ViewStereoVideoProcessor.shared.decodePreviewFrame(url: url, atSeconds: wt, maxDimension: 720, inputSource: inputSrc),
+                       let wCG = ViewStereoDepthSynthesizer.createCGImage(from: wDec.rgb, width: wDec.width, height: wDec.height) {
+                        _ = await Task.detached(priority: .utility) {
+                            session.processFrame(
+                                cgImage: wCG,
+                                rgb24: wDec.rgb,
+                                width: wDec.width,
+                                height: wDec.height,
+                                targetDisparityPercent: dispPct,
+                                depthGamma: gamma,
+                                temporalSmoothing: smoothing,
+                                lockDepthRange: lockRange,
+                                autoCutDetection: autoCut
+                            )
+                        }.value
+                    }
+                }
+                if Task.isCancelled { return }
+                let refined = await Task.detached(priority: .utility) { () -> (disp: [Float], dw: Int, dh: Int, left: [UInt8], right: [UInt8], focus: Double, engineName: String) in
+                    let dOut = session.processFrame(
+                        cgImage: cgImg,
+                        rgb24: decoded.rgb,
+                        width: decoded.width,
+                        height: decoded.height,
+                        targetDisparityPercent: dispPct,
+                        depthGamma: gamma,
+                        temporalSmoothing: smoothing,
+                        lockDepthRange: lockRange,
+                        autoCutDetection: autoCut
+                    )
+                    let (l, r) = ViewStereoDepthSynthesizer.shared.synthesizeStereoPair(
+                        baseRGB: decoded.rgb,
+                        width: decoded.width,
+                        height: decoded.height,
+                        disparityMap: dOut.disparityMap,
+                        depthW: dOut.depthW,
+                        depthH: dOut.depthH,
+                        targetDisparityPercent: dispPct,
+                        depthGamma: gamma,
+                        focusRatio: dOut.focusRatio
+                    )
+                    return (dOut.disparityMap, dOut.depthW, dOut.depthH, l, r, dOut.focusRatio, dOut.engineName)
+                }.value
+                if Task.isCancelled { return }
+                await applyVideoPreviewResult(decoded: decoded, res: refined, gen: gen, url: url, meta: meta, dispPct: dispPct)
+            }
+        }
+    }
+
+    private func applyVideoPreviewResult(
+        decoded: (rgb: [UInt8], cgImage: CGImage, width: Int, height: Int, actualSeconds: Double),
+        res: (disp: [Float], dw: Int, dh: Int, left: [UInt8], right: [UInt8], focus: Double, engineName: String),
+        gen: Int,
+        url: URL,
+        meta: VideoClipMetadata,
+        dispPct: Double
+    ) async {
+        await MainActor.run {
+            guard self.videoPreviewGeneration == gen, self.currentVideoURL == url else { return }
+            self.cachedBaseSideRGB = decoded.rgb
+            self.cachedBaseW = decoded.width
+            self.cachedBaseH = decoded.height
+            self.cachedDisparityMap = res.disp
+            self.cachedDepthW = res.dw
+            self.cachedDepthH = res.dh
+
+            self.alignedLeftRGB = res.left
+            self.alignedRightRGB = res.right
+            self.croppedWidth = decoded.width
+            self.croppedHeight = decoded.height
+            self.previewAlignedLeftRGB = res.left
+            self.previewAlignedRightRGB = res.right
+            self.previewCroppedWidth = decoded.width
+            self.previewCroppedHeight = decoded.height
+            self.rectifiedPreviewLeftRGB = res.left
+            self.rectifiedPreviewRightRGB = res.right
+            self.rectifiedPreviewWidth = decoded.width
+            self.rectifiedPreviewHeight = decoded.height
+
+            self.isAligned = true
+            self.windowShiftX = 0.0
+            self.autoOptimalShiftX = 0.0
+            self.maxDisparityPercent = dispPct
+            self.videoActiveEngineLabel = res.engineName
+            self.statusMessage = String(format: String(localized: "Video Frame %.2fs | %dx%d | %@"), decoded.actualSeconds, meta.naturalWidth, meta.naturalHeight, res.engineName)
+            self.renderDisplayPreview()
+        }
+    }
+
+    /// 1 フレーム前後にステップ移動する
+    func stepVideoFrame(deltaFrames: Int) {
+        guard isVideoLoaded, let meta = videoMetadata else { return }
+        if isVideoPlaying { toggleVideoPlayback() }
+        let stepSec = 1.0 / max(1.0, meta.nominalFPS)
+        seekVideoAndRender(to: videoCurrentTimeSeconds + Double(deltaFrames) * stepSec, resetSession: deltaFrames < 0, isPlaybackFrame: false, progressiveWarmup: deltaFrames < 0)
+    }
+
+    /// 動画プレビューの再生／一時停止をトグルする（再生中は 720p・フレームスキップ許容で MLState を継続、停止時に 1280p 再描画）
+    func toggleVideoPlayback() {
+        guard isVideoLoaded, let meta = videoMetadata else { return }
+        if isVideoPlaying {
+            videoPlaybackTask?.cancel()
+            videoPlaybackTask = nil
+            isVideoPlaying = false
+            seekVideoAndRender(to: videoCurrentTimeSeconds, resetSession: false, isPlaybackFrame: false, progressiveWarmup: false)
+            return
+        }
+
+        if videoCurrentTimeSeconds >= max(0.0, meta.durationSeconds - 0.05) {
+            videoCurrentTimeSeconds = 0.0
+            videoPreviewSession?.resetTemporalState()
+        }
+        isVideoPlaying = true
+        let stepSec = max(1.0 / 15.0, 1.0 / max(1.0, meta.nominalFPS))
+        videoPlaybackTask = Task {
+            while !Task.isCancelled && self.isVideoPlaying {
+                let nextT = self.videoCurrentTimeSeconds + stepSec
+                if nextT >= meta.durationSeconds {
+                    await MainActor.run {
+                        self.isVideoPlaying = false
+                    }
+                    break
+                }
+                self.seekVideoAndRender(to: nextT, resetSession: false, isPlaybackFrame: true, progressiveWarmup: false)
+                try? await Task.sleep(nanoseconds: UInt64(stepSec * 1_000_000_000))
+            }
+        }
+    }
+
+    /// 優先エンジン切り替え後に動画セッションを再初期化して現在フレームを再推論する
+    func refreshVideoEngineAndReprocess() {
+        guard isVideoLoaded else { return }
+        videoPreviewSession?.startSession(preferredEngine: ViewStereoSettings.shared.preferredDepthEngine)
+        videoActiveEngineLabel = videoPreviewSession?.activeEngineName ?? ""
+        seekVideoAndRender(to: videoCurrentTimeSeconds, resetSession: true)
+    }
+
+    /// 動画 2D→3D フル書き出し（Spatial Video MV-HEVC / Full SBS / Half SBS / Anaglyph）
+    func exportVideo(toQuickOutput: Bool) {
+        guard isVideoLoaded, let sourceURL = currentVideoURL, let meta = videoMetadata, !isExportingVideo else { return }
+        if isVideoPlaying { toggleVideoPlayback() }
+
+        let format = videoExportFormat
+        let baseName = sourceURL.deletingPathExtension().lastPathComponent
+        let defaultFilename = "\(baseName)\(format.suffix).\(format.fileExtension)"
+
+        let targetURL: URL
+        if toQuickOutput {
+            let outDir = batchOutputFolder ?? sourceURL.deletingLastPathComponent().appendingPathComponent("ViewStereo_Output", isDirectory: true)
+            try? FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
+            targetURL = outDir.appendingPathComponent(defaultFilename)
+        } else {
+            let panel = NSSavePanel()
+            panel.nameFieldStringValue = defaultFilename
+            panel.allowedContentTypes = format == .spatialVideo ? [.quickTimeMovie] : [.mpeg4Movie]
+            panel.canCreateDirectories = true
+            guard panel.runModal() == .OK, let url = panel.url else { return }
+            targetURL = url
+        }
+
+        // 書き出し前のディスク空き容量事前チェック
+        let estBytes = ViewStereoVideoProcessor.estimateOutputFileSizeBytes(metadata: meta, format: format)
+        let requiredBytes = Int64(Double(estBytes) * 1.2) + 200_000_000
+        if let avail = ViewStereoVideoProcessor.availableDiskSpaceBytes(at: targetURL), avail < requiredBytes {
+            let fmt = ByteCountFormatter()
+            fmt.countStyle = .file
+            let estStr = fmt.string(fromByteCount: estBytes)
+            let availStr = fmt.string(fromByteCount: avail)
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = String(localized: "Low Disk Space Warning")
+            alert.informativeText = String(format: String(localized: "Estimated video size is ~%@, but only %@ is available on the destination drive. Continue anyway?"), estStr, availStr)
+            alert.addButton(withTitle: String(localized: "Cancel"))
+            alert.addButton(withTitle: String(localized: "Continue Anyway"))
+            if alert.runModal() == .alertFirstButtonReturn {
+                return
+            }
+        }
+
+        isExportingVideo = true
+        videoExportProgress = 0.0
+        videoExportStatusText = String(localized: "Preparing video export...")
+
+        let preferredEngine = ViewStereoSettings.shared.preferredDepthEngine
+        let releaseAfter = ViewStereoSettings.shared.releaseAIModelsAfterGeneration
+        let dispPct = virtualDepthBasePercent
+        let gamma = depthGamma
+        let smoothing = videoTemporalSmoothing
+        let lockRange = videoLockDepthRange
+        let autoCut = videoAutoCutDetection
+        let swapped = isSwapped
+        let inputSrc = videoInputStereoSource
+        let preserveHDR = videoPreserveHDR
+        let cardCfg = appliedCardMountConfig
+        let toneOpts = makeVintageRestorationOptions()
+        let detailOpts = makeDetailRestorationOptions()
+        let colorOpts = makeColorizationOptions()
+
+        videoExportTask = Task {
+            do {
+                let savedURL = try await ViewStereoVideoProcessor.shared.exportVideo(
+                    sourceURL: sourceURL,
+                    outputURL: targetURL,
+                    metadata: meta,
+                    format: format,
+                    preferredEngine: preferredEngine,
+                    virtualDepthBasePercent: dispPct,
+                    depthGamma: gamma,
+                    temporalSmoothing: smoothing,
+                    lockDepthRange: lockRange,
+                    autoCutDetection: autoCut,
+                    isSwapped: swapped,
+                    inputSource: inputSrc,
+                    preserveHDR: preserveHDR,
+                    cardConfig: cardCfg,
+                    toneOptions: toneOpts,
+                    detailOptions: detailOpts,
+                    colorOptions: colorOpts,
+                    releaseAfterExport: releaseAfter
+                ) { prog, frameIdx, totalFrames, fps in
+                    self.videoExportProgress = prog
+                    self.videoExportStatusText = String(format: "%d / %d frames (%.1f fps)", frameIdx, totalFrames, fps)
+                }
+
+                await MainActor.run {
+                    self.isExportingVideo = false
+                    self.videoExportProgress = 1.0
+                    self.videoExportStatusText = ""
+                    self.workspaceItemStatuses[sourceURL.path] = .aiConverted(format.rawValue)
+                    self.statusMessage = String(format: String(localized: "Video exported: %@"), savedURL.lastPathComponent)
+                }
+            } catch is CancellationError {
+                await MainActor.run {
+                    self.isExportingVideo = false
+                    self.videoExportProgress = 0.0
+                    self.videoExportStatusText = ""
+                    self.statusMessage = String(localized: "Video export cancelled.")
+                }
+            } catch {
+                await MainActor.run {
+                    self.isExportingVideo = false
+                    self.videoExportProgress = 0.0
+                    self.videoExportStatusText = ""
+                    self.statusMessage = String(format: String(localized: "Video export failed: %@"), error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    func cancelVideoExport() {
+        videoExportTask?.cancel()
+        videoExportTask = nil
+    }
+
     /// ウィンドウ最適シフトを解き、ステレオカード(preserveArch)用の上限クランプ後に
     /// 端帯域のバイオレーションを再評価する。
     /// 通常は ±2% に制限するが、制限後も端で飛び出しが残る場合は ±5% まで拡張して飛び出しを防ぐ。
@@ -4004,6 +4547,10 @@ final class ViewStereoViewModel: ObservableObject {
     }
 
     func exportImage() {
+        if isVideoLoaded {
+            exportVideo(toQuickOutput: false)
+            return
+        }
         guard hasLoadedImages else { return }
         let layout = exportLayout
         let imgFormat = exportImageFormat
@@ -4164,6 +4711,10 @@ final class ViewStereoViewModel: ObservableObject {
 
     /// 作業フォルダ内の出力先（ViewStereo_Output）へダイアログなしで即座に書き出す
     func quickExportToWorkspaceOutput() {
+        if isVideoLoaded {
+            exportVideo(toQuickOutput: true)
+            return
+        }
         guard hasLoadedImages, !isProcessing, !isBatchRunning else { return }
         let baseDir: URL
         if let out = batchOutputFolder, !isTemporaryLocation(out) {
@@ -4361,7 +4912,11 @@ final class ViewStereoViewModel: ObservableObject {
     }
 
     func openBrowserItem(_ item: StereoBatchItem) {
-        guard !isBatchRunning else { return }
+        guard !isBatchRunning && !isExportingVideo else { return }
+        if item.isVideo {
+            loadVideo(url: item.leftURL)
+            return
+        }
         if let rURL = item.rightURL {
             loadSeparateImages(left: item.leftURL, right: rURL)
         } else {
@@ -4471,13 +5026,13 @@ final class ViewStereoViewModel: ObservableObject {
         batchOutputFolder = outDir
 
         let pairingMode = effectiveBrowserPairingMode
-        let items: [StereoBatchItem]
+        let rawItems: [StereoBatchItem]
         if let itemsOverride {
-            items = itemsOverride
+            rawItems = itemsOverride
         } else if !batchQueueItems.isEmpty && (inputDir == nil || inputDir == batchInputFolder) {
-            items = batchQueueItems
+            rawItems = batchQueueItems
         } else {
-            items = WorkspaceScanner.collectBatchItems(
+            rawItems = WorkspaceScanner.collectBatchItems(
                 from: [],
                 rootFolder: targetDir,
                 pairingMode: pairingMode,
@@ -4485,6 +5040,7 @@ final class ViewStereoViewModel: ObservableObject {
                 customOutputFolder: outDir
             )
         }
+        let items = rawItems.filter { !$0.isVideo }
         guard !items.isEmpty else {
             statusMessage = "No stereo images found in \(targetDir.lastPathComponent)."
             return
@@ -5597,7 +6153,7 @@ final class ViewStereoViewModel: ObservableObject {
         return dst
     }
 
-    nonisolated private static func combineSBS(left: [UInt8], right: [UInt8], width: Int, height: Int) -> [UInt8] {
+    nonisolated static func combineSBS(left: [UInt8], right: [UInt8], width: Int, height: Int) -> [UInt8] {
         var out = [UInt8](repeating: 0, count: width * 2 * height * 3)
         for y in 0..<height {
             let srcRow = y * width * 3
@@ -5621,7 +6177,7 @@ final class ViewStereoViewModel: ObservableObject {
         return out
     }
 
-    nonisolated private static func combineLRRL(left: [UInt8], right: [UInt8], width: Int, height: Int) -> [UInt8] {
+    nonisolated static func combineLRRL(left: [UInt8], right: [UInt8], width: Int, height: Int) -> [UInt8] {
         let outW = width * 2
         let outH = height * 2
         var out = [UInt8](repeating: 0, count: outW * outH * 3)
@@ -5711,7 +6267,7 @@ final class ViewStereoViewModel: ObservableObject {
         return out
     }
 
-    nonisolated private static func makePolarized(left: [UInt8], right: [UInt8], width: Int, height: Int) -> [UInt8] {
+    nonisolated static func makePolarized(left: [UInt8], right: [UInt8], width: Int, height: Int) -> [UInt8] {
         let rowBytes = width * 3
         var out = [UInt8](repeating: 0, count: height * rowBytes)
         for y in 0..<height {
@@ -5739,7 +6295,7 @@ final class ViewStereoViewModel: ObservableObject {
         return out
     }
 
-    nonisolated private static func makeAnaglyph(left: [UInt8], right: [UInt8], width: Int, height: Int, type: AnaglyphType = .gray) -> [UInt8] {
+    nonisolated static func makeAnaglyph(left: [UInt8], right: [UInt8], width: Int, height: Int, type: AnaglyphType = .gray) -> [UInt8] {
         let count = width * height
         var out = [UInt8](repeating: 0, count: count * 3)
         left.withUnsafeBufferPointer { lPtr in

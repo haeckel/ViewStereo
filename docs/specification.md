@@ -1,4 +1,4 @@
-# ViewStereo Technical Specification (v0.1.8)
+# ViewStereo Technical Specification (v0.1.9)
 
 ## 1. System Overview
 **ViewStereo** is a native macOS 14.0+ (SwiftUI / AppKit) application designed for automated archival stereoview restoration, geometric rectification, stereo window optimization, and modern spatial media export. It builds upon `StereoStudioCore` and `StereoCore` (`stalign_src`) and leverages Apple Silicon Neural Engine (Core ML), Vision, and Accelerate (LAPACK).
@@ -60,6 +60,21 @@ When `StereoCardMode` is `.cropInner` or `.keepArchBlack`:
 - **8 Real-Time Display Modes**: `StereoView`, `SBS`, `LR/RL`, `Dubois`, `Color Anaglyph`, `Gray Anaglyph`, `Polarized`, `2D`.
 - **11 Export Layouts**: All 8 display layouts (JPEG/PNG) plus `Separate L/R`, `Spatial Photo (HEIC / MV-HEVC)` via `StereoStudioCore.SpatialPhotoExporter`, and `MPO (3D Camera)`.
 - **Batch Engine**: Asynchronous folder processing with `Auto (L/R Pairs + SBS)`, `SBS Images Only`, and `Consecutive L/R Pairs` modes, plus per-item `.txt` adjustment reports.
+
+### Stage 7: Video 2D-to-3D Conversion & Spatial Video Pipeline
+- **Inputs**: `.mp4`, `.mov`, `.m4v` 2D video files with AVFoundation `preferredTransform` auto-upright and SDR Rec.709 tone mapping.
+- **Stateful Video Depth Inference (`ViewStereoVideoDepthSession`)**:
+  - Leverages Apple Depth Pro 2 Core ML `MLState` (macOS 15+) for temporal consistency and flicker elimination.
+  - Scene cut detection via 64×36 luminance MAD, 16-bin histogram, blackout recovery, and cooldown.
+  - Temporal EMA smoothing for depth range percentiles and zero-parallax window focal plane.
+- **Metal GPU DIBR Synthesis (`ViewStereoMetalDIBR`)**:
+  - High-performance Metal compute shader zero-copy warping with unified boundary interpolation.
+- **Video Formats**:
+  - Apple Vision Pro Spatial Video (`MV-HEVC .mov` with stereoscopic metadata).
+  - Side-by-Side 3D Video (Full SBS / Half SBS `.mp4`).
+  - Dubois Anaglyph 3D Video (`.mp4`).
+  - Container-safe audio pass-through and AAC 256kbps 48kHz re-encoding.
+  - Pre-export destination disk free space validation.
 
 ---
 

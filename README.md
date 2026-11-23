@@ -1,6 +1,6 @@
 # ViewStereo 🎞️✨
 
-[![Version](https://img.shields.io/badge/version-0.1.8-brightgreen.svg)](https://viewstereo.p-media.jp/)
+[![Version](https://img.shields.io/badge/version-0.1.9-brightgreen.svg)](https://viewstereo.p-media.jp/)
 [![Status](https://img.shields.io/badge/status-Early%20Development-amber.svg)](#development-status)
 [![Platform](https://img.shields.io/badge/platform-macOS%2014.0+-lightgrey.svg)](https://apple.co/macos)
 [![Technology](https://img.shields.io/badge/tech-Card%20Segmentation%20%7C%207--DoF%20Homography%20%7C%20Stereo%20Window%20%7C%20Digital%20Remount-orange.svg)](https://viewstereo.p-media.jp/)
@@ -16,6 +16,12 @@ Designed as the archival restoration and geometric alignment companion to **Spla
 ---
 
 ## 🚀 Key Features
+
+### 🎬 v0.1.9 New: Video 2D-to-3D Conversion & Spatial Video (MV-HEVC) Pipeline
+- **Video 2D-to-3D Conversion for Spatial Media**: Transform 2D videos (`.mp4`, `.mov`, `.m4v`) into Apple Vision Pro-ready Spatial Video (MV-HEVC `.mov` with spatial metadata), Full/Half SBS 3D, and Dubois Anaglyph 3D video.
+- **Stateful Video Depth Inference via Apple Depth Pro 2**: Leverages Core ML `MLState` (macOS 15+) for cross-frame hidden state propagation, automatic scene cut detection with blackout recovery, temporal EMA smoothing, and depth range locking to eliminate depth flickering.
+- **Metal GPU-Accelerated DIBR & Optimized AVFoundation Engine**: Integrates Metal compute shader zero-copy warping, auto-rotation handling (`preferredTransform`), SDR Rec.709 tone mapping, `CVPixelBufferPool` buffer recycling, AAC 256kbps audio re-encoding, and pre-export disk space validation.
+- **SBS 3D Video Salvage & Re-synthesis**: Extract single-eye video streams (Left or Right) from existing SBS 3D footage and re-synthesize violation-free, comfortable 3D stereoscopic videos within Percival's zone.
 
 ### 🪟 v0.1.8 New: Intelligent DIBR Stereo Window Optimization & High-Res 2D-to-3D Export
 - **Intelligent Zero-Parallax Plane Alignment for 2D-to-3D Synthesis**: Coupled depth disparity distributions and Apple Vision Attention Saliency into `computeDepthWindowSetup`, automatically setting the optimal zero-parallax focal plane (`focusRatio`) to structurally eliminate frame-edge stereoscopic window violations while maintaining natural Percival comfort-zone depth.

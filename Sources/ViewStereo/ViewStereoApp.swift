@@ -9,7 +9,7 @@ extension AboutBrandInfo {
         badgeLetter: "V",
         subtitleKey: nil,
         engineTagline: "19th Century Stereoview Restoration & Intelligent Stereo Window Studio",
-        fallbackVersion: "0.1.8",
+        fallbackVersion: "0.1.9",
         fallbackBuild: "1",
         websiteURL: URL(string: "https://viewstereo.p-media.jp/"),
         websiteLabel: "viewstereo.p-media.jp",

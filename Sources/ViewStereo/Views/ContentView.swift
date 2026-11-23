@@ -123,7 +123,15 @@ struct ContentView: View {
 
                     // Zone 2: 解析・整準（または 2D→3D 再推論）
                     ControlGroup {
-                        if vm.workspaceMode == .convert2DTo3D {
+                        if vm.isVideoLoaded {
+                            Button {
+                                vm.refreshVideoEngineAndReprocess()
+                            } label: {
+                                Label("Toolbar Re-Depth", systemImage: "cube.transparent")
+                            }
+                            .customTooltip(String(localized: "Re-run Video Frame"))
+                            .disabled(vm.isProcessing || vm.isExportingVideo)
+                        } else if vm.workspaceMode == .convert2DTo3D {
                             Button {
                                 if let url = vm.leftURL {
                                     vm.loadSingleSBSImage(url: url, resetRestoration: false, interpretationOverride: .force2D)
@@ -152,7 +160,7 @@ struct ContentView: View {
 
                     // Zone 3: インスペクタ連動（色分けアイコン＋ショートラベル）
                     HStack(spacing: 4) {
-                        if vm.workspaceMode == .convert2DTo3D {
+                        if vm.workspaceMode == .convert2DTo3D || vm.isVideoLoaded {
                             toolbarTabButton(
                                 titleKey: "Toolbar 2D3D",
                                 systemImage: "cube.transparent.fill",
@@ -455,6 +463,10 @@ struct ContentView: View {
                 }
                 .animation(.easeInOut(duration: 0.2), value: vm.isSwapped)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                if vm.isVideoLoaded {
+                    videoTimelineBar
+                }
             }
 
             if isDropTargeted {
@@ -501,6 +513,86 @@ struct ContentView: View {
         .animation(.easeInOut(duration: 0.2), value: vm.isBatchRunning)
         .animation(.easeInOut(duration: 0.2), value: vm.batchCompletionSummary != nil)
         .animation(.easeInOut(duration: 0.18), value: vm.isRestoringPreview)
+    }
+
+    private var videoTimelineBar: some View {
+        let totalSec = max(0.01, vm.videoMetadata?.durationSeconds ?? 0.01)
+        return HStack(spacing: 10) {
+            Button {
+                vm.toggleVideoPlayback()
+            } label: {
+                Image(systemName: vm.isVideoPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: 12, weight: .bold))
+                    .frame(width: 24, height: 22)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.brightBlue)
+            .keyboardShortcut(.space, modifiers: [])
+            .disabled(vm.isExportingVideo)
+
+            HStack(spacing: 2) {
+                Button {
+                    vm.stepVideoFrame(deltaFrames: -1)
+                } label: {
+                    Image(systemName: "backward.frame.fill")
+                        .font(.system(size: 10.5))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(vm.isExportingVideo)
+
+                Button {
+                    vm.stepVideoFrame(deltaFrames: 1)
+                } label: {
+                    Image(systemName: "forward.frame.fill")
+                        .font(.system(size: 10.5))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(vm.isExportingVideo)
+            }
+
+            Text(Self.formatVideoTime(vm.videoCurrentTimeSeconds))
+                .appSystemFont(size: 10.5, weight: .semibold, design: .monospaced)
+                .foregroundColor(.white)
+                .frame(width: 48, alignment: .trailing)
+
+            Slider(
+                value: Binding(
+                    get: { vm.videoCurrentTimeSeconds },
+                    set: { newVal in
+                        vm.videoCurrentTimeSeconds = newVal
+                    }
+                ),
+                in: 0.0...totalSec,
+                onEditingChanged: { editing in
+                    if !editing {
+                        vm.seekVideoAndRender(to: vm.videoCurrentTimeSeconds, resetSession: true, isPlaybackFrame: false, progressiveWarmup: true)
+                    } else if vm.isVideoPlaying {
+                        vm.toggleVideoPlayback()
+                    }
+                }
+            )
+            .tint(.brightBlue)
+            .disabled(vm.isExportingVideo)
+
+            Text(Self.formatVideoTime(totalSec))
+                .appSystemFont(size: 10.5, design: .monospaced)
+                .foregroundColor(.secondary)
+                .frame(width: 48, alignment: .leading)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(Color.black.opacity(0.45))
+        .overlay(Divider().opacity(0.3), alignment: .top)
+    }
+
+    private static func formatVideoTime(_ seconds: Double) -> String {
+        let s = max(0, Int(seconds))
+        let frac = max(0, Int((seconds - Double(s)) * 10.0))
+        let mins = s / 60
+        let secs = s % 60
+        return String(format: "%02d:%02d.%d", mins, secs, frac)
     }
 
     private var topToolbarStrip: some View {
@@ -1299,7 +1391,7 @@ struct ContentView: View {
             ScrollView([.vertical], showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 14) {
                     statusSummarySection
-                    if vm.workspaceMode == .convert2DTo3D {
+                    if vm.workspaceMode == .convert2DTo3D || vm.isVideoLoaded {
                         depth2D3DConversionSection
                     } else {
                         basicRecipeDisclosure
@@ -1397,7 +1489,18 @@ struct ContentView: View {
                     .foregroundColor(.secondary)
                     .lineLimit(1)
                 Spacer()
-                if vm.workspaceMode == .convert2DTo3D {
+                if vm.isVideoLoaded {
+                    Button {
+                        vm.refreshVideoEngineAndReprocess()
+                    } label: {
+                        Label("Re-run", systemImage: "sparkles")
+                            .appSystemFont(size: 10.5, weight: .semibold)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+                    .tint(.brightPurple)
+                    .disabled(vm.isProcessing || vm.isExportingVideo)
+                } else if vm.workspaceMode == .convert2DTo3D {
                     Button {
                         if let url = vm.leftURL {
                             vm.loadSingleSBSImage(url: url, resetRestoration: false, interpretationOverride: .force2D)
@@ -1445,7 +1548,25 @@ struct ContentView: View {
                     value: vm.isAligned ? "\(vm.croppedWidth) × \(vm.croppedHeight)" : (vm.imageWidth > 0 ? "\(vm.imageWidth) × \(vm.imageHeight)" : "—")
                 )
 
-                if vm.workspaceMode == .convert2DTo3D {
+                if vm.isVideoLoaded {
+                    if let meta = vm.videoMetadata {
+                        telemetryRow(
+                            label: "Video Info",
+                            value: String(format: "%.1fs · %.1f fps · %@", meta.durationSeconds, meta.nominalFPS, meta.hasAudio ? "Audio" : "No Audio"),
+                            highlight: .brightBlue
+                        )
+                    }
+                    telemetryRow(
+                        label: "AI Depth Engine",
+                        value: vm.videoActiveEngineLabel.isEmpty ? settings.preferredDepthEngine.shortLabel : vm.videoActiveEngineLabel,
+                        highlight: .brightPurple
+                    )
+                    telemetryRow(
+                        label: "Stereo Base",
+                        value: String(format: "%.1f %%", vm.virtualDepthBasePercent),
+                        highlight: .brightAmber
+                    )
+                } else if vm.workspaceMode == .convert2DTo3D {
                     telemetryRow(
                         label: "AI Depth Engine",
                         value: vm.lastDepthEngineLabel.isEmpty ? settings.preferredDepthEngine.shortLabel : vm.lastDepthEngineLabel,
@@ -1781,18 +1902,144 @@ struct ContentView: View {
                         .disabled(vm.isProcessing)
                 }
 
-                Button {
-                    if let url = vm.leftURL {
-                        vm.loadSingleSBSImage(url: url, resetRestoration: false, interpretationOverride: .force2D)
+                if vm.isVideoLoaded {
+                    Divider().opacity(0.3)
+
+                    // 既存3D動画サルベージ（SBS片眼抽出 / 2Dフル）
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(String(localized: "Video Source"))
+                            .appSystemFont(size: 11, weight: .semibold)
+                            .foregroundColor(.secondary)
+                        Picker("Video Source", selection: $vm.videoInputStereoSource) {
+                            ForEach(VideoInputStereoSource.allCases) { src in
+                                Text(src.localizedLabel).tag(src)
+                            }
+                        }
+                        .labelsHidden()
+                        .disabled(vm.isExportingVideo)
+                        .onChange(of: vm.videoInputStereoSource) { _, _ in
+                            vm.seekVideoAndRender(to: vm.videoCurrentTimeSeconds, resetSession: true, progressiveWarmup: true)
+                        }
+
+                        if let meta = vm.videoMetadata, meta.isLikelySBS && vm.videoInputStereoSource == .full2D {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(String(localized: "Likely SBS 3D video detected. You can extract one eye to reconstruct comfortable 3D:"))
+                                    .font(.system(size: 9.5))
+                                    .foregroundColor(.brightAmber)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                HStack(spacing: 6) {
+                                    Button(String(localized: "SBS → Left Eye")) {
+                                        vm.videoInputStereoSource = .sbsLeft
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.mini)
+                                    .tint(.brightAmber)
+                                    Button(String(localized: "SBS → Right Eye")) {
+                                        vm.videoInputStereoSource = .sbsRight
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.mini)
+                                    .tint(.brightAmber)
+                                }
+                            }
+                            .padding(6)
+                            .background(Color.brightAmber.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+                        }
                     }
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "cube.transparent.fill")
-                        Text(LocalizedStringKey("Re-run 2D → 3D Conversion"))
+
+                    if !settings.preferredDepthEngine.isDepthPro2Engine {
+                        HStack(alignment: .top, spacing: 6) {
+                            Image(systemName: "info.circle.fill")
+                                .font(.system(size: 11))
+                                .foregroundColor(.brightAmber)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(String(localized: "video_depth_pro2_recommended"))
+                                    .font(.system(size: 10))
+                                    .foregroundColor(.white.opacity(0.9))
+                                    .fixedSize(horizontal: false, vertical: true)
+                                if StudioDepthEngine.depthPro2Base.isInstalled(preferredAppFolder: "ViewStereo") {
+                                    Button(String(localized: "Switch to Depth Pro 2 Base")) {
+                                        settings.preferredDepthEngine = .depthPro2Base
+                                        vm.refreshVideoEngineAndReprocess()
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.mini)
+                                    .tint(.brightAmber)
+                                } else {
+                                    SettingsLink {
+                                        Text(String(localized: "Model Settings…"))
+                                            .font(.system(size: 10, weight: .semibold))
+                                    }
+                                    .buttonStyle(.borderless)
+                                    .foregroundColor(.brightBlue)
+                                }
+                            }
+                        }
+                        .padding(8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.brightAmber.opacity(0.14), in: RoundedRectangle(cornerRadius: 6))
                     }
+
+                    // 時間的平滑化 (EMA)
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("Temporal Smoothing")
+                                .appSystemFont(size: 11.5, weight: .semibold)
+                            Spacer()
+                            ResetButton(isModified: abs(vm.videoTemporalSmoothing - 0.85) > 0.02) {
+                                vm.videoTemporalSmoothing = 0.85
+                            }
+                            Text(String(format: "%.0f%%", vm.videoTemporalSmoothing * 100))
+                                .appSystemFont(size: 11, design: .monospaced)
+                                .foregroundColor(.secondary)
+                        }
+                        Slider(value: $vm.videoTemporalSmoothing, in: 0.0...1.0)
+                            .tint(.brightBlue)
+                            .disabled(vm.videoLockDepthRange)
+                    }
+
+                    Toggle(String(localized: "Lock Depth Range"), isOn: $vm.videoLockDepthRange)
+                        .appSystemFont(size: 11)
+                        .toggleStyle(.switch)
+                        .controlSize(.mini)
+
+                    if let meta = vm.videoMetadata, meta.isHDR {
+                        Toggle(String(localized: "Preserve HDR (10-bit HLG)"), isOn: $vm.videoPreserveHDR)
+                            .appSystemFont(size: 11)
+                            .tint(.brightAmber)
+                            .toggleStyle(.switch)
+                            .controlSize(.mini)
+                    }
+
+                    Toggle(String(localized: "Auto Cut Detection"), isOn: $vm.videoAutoCutDetection)
+                        .appSystemFont(size: 11)
+                        .toggleStyle(.switch)
+                        .controlSize(.mini)
+
+                    Button {
+                        vm.refreshVideoEngineAndReprocess()
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "cube.transparent.fill")
+                            Text(LocalizedStringKey("Re-run Video Frame"))
+                        }
+                    }
+                    .buttonStyle(InspectorActionButtonStyle(accentColor: .brightPurple, isPending: false))
+                    .disabled(vm.isProcessing || vm.isExportingVideo)
+                } else {
+                    Button {
+                        if let url = vm.leftURL {
+                            vm.loadSingleSBSImage(url: url, resetRestoration: false, interpretationOverride: .force2D)
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "cube.transparent.fill")
+                            Text(LocalizedStringKey("Re-run 2D → 3D Conversion"))
+                        }
+                    }
+                    .buttonStyle(InspectorActionButtonStyle(accentColor: .brightPurple, isPending: false))
+                    .disabled(!vm.hasLoadedImages || vm.isProcessing)
                 }
-                .buttonStyle(InspectorActionButtonStyle(accentColor: .brightPurple, isPending: false))
-                .disabled(!vm.hasLoadedImages || vm.isProcessing)
             }
         }
     }
@@ -2517,6 +2764,76 @@ struct ContentView: View {
 
     private var exportFooter: some View {
         VStack(alignment: .leading, spacing: 8) {
+            if vm.isVideoLoaded {
+                HStack(spacing: 8) {
+                    Text("Video Format")
+                        .appSystemFont(size: 11.5, weight: .semibold)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    Picker("Video Format", selection: $vm.videoExportFormat) {
+                        ForEach(StereoVideoExportFormat.allCases) { fmt in
+                            Text(LocalizedStringKey(fmt.rawValue)).tag(fmt)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    .frame(maxWidth: 230)
+                    .disabled(vm.isExportingVideo)
+                }
+
+                if vm.isExportingVideo {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text(vm.videoExportStatusText.isEmpty ? String(localized: "Exporting 3D Video...") : vm.videoExportStatusText)
+                                .appSystemFont(size: 10.5, weight: .medium, design: .monospaced)
+                                .foregroundColor(.white)
+                                .lineLimit(1)
+                            Spacer()
+                            Text("\(Int(vm.videoExportProgress * 100))%")
+                                .appSystemFont(size: 10.5, weight: .bold, design: .monospaced)
+                                .foregroundColor(.brightTeal)
+                        }
+                        ProgressView(value: vm.videoExportProgress)
+                            .tint(.brightTeal)
+                    }
+
+                    Button {
+                        vm.cancelVideoExport()
+                    } label: {
+                        Label("Cancel Export", systemImage: "xmark.circle.fill")
+                            .appSystemFont(size: 11.5, weight: .bold)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 7)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.palestineRed)
+                } else {
+                    HStack(spacing: 6) {
+                        Button {
+                            vm.exportVideo(toQuickOutput: true)
+                        } label: {
+                            Label("Export 3D Video", systemImage: "film.stack.fill")
+                                .appSystemFont(size: 11.5, weight: .bold)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 7)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.palestineGreen)
+                        .disabled(vm.isProcessing || vm.videoMetadata == nil)
+                        .customTooltip(String(localized: "Quick Export to Output Folder") + " (⇧⌘E)")
+
+                        Button {
+                            vm.exportVideo(toQuickOutput: false)
+                        } label: {
+                            Image(systemName: "square.and.arrow.down")
+                                .padding(.vertical, 7)
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(vm.isProcessing || vm.videoMetadata == nil)
+                        .customTooltip(String(localized: "Export Video As...") + " (⌘E)")
+                    }
+                }
+            } else {
             HStack(spacing: 8) {
                 Text("Stereo Layout")
                     .appSystemFont(size: 11.5, weight: .semibold)
@@ -2643,6 +2960,7 @@ struct ContentView: View {
                 .buttonStyle(.bordered)
                 .disabled(!vm.isAligned || vm.isBatchRunning)
                 .customTooltip("調整レポート (.txt) を保存")
+            }
             }
         }
     }

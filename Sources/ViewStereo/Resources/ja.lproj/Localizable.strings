@@ -370,6 +370,36 @@
 "Model Settings…" = "モデル設定…";
 "Re-run" = "再推論";
 
+/* Video 2D-to-3D Conversion */
+"Spatial Video (MV-HEVC .mov)" = "空間ビデオ (MV-HEVC .mov)";
+"Full SBS 3D (.mp4)" = "Full SBS 3D (.mp4)";
+"Half SBS 3D (.mp4)" = "Half SBS 3D (.mp4)";
+"Anaglyph 3D (.mp4)" = "アナグリフ 3D (.mp4)";
+"Loading video metadata..." = "動画メタデータを読み込み中...";
+"Failed to load video." = "動画の読み込みに失敗しました。";
+"Video Frame %.2fs | %dx%d | %@" = "動画フレーム %.2fs | %dx%d | %@";
+"Preparing video export..." = "動画書き出しを準備中...";
+"Video exported: %@" = "3D 動画を書き出しました: %@";
+"Video export cancelled." = "動画の書き出しをキャンセルしました。";
+"Video export failed: %@" = "動画の書き出しに失敗しました: %@";
+"Video Info" = "動画情報";
+"video_depth_pro2_recommended" = "動画の 2D→3D 変換には、時間的一貫性に優れた Apple Depth Pro 2 の使用を推奨します。";
+"Switch to Depth Pro 2 Base" = "Depth Pro 2 Base に切替";
+"Temporal Smoothing" = "時間的平滑化 (EMA)";
+"Lock Depth Range" = "奥行きレンジを固定 (Lock)";
+"Auto Cut Detection" = "シーンカット自動検出";
+"Re-run Video Frame" = "現在フレームを再推論";
+"Video Format" = "動画出力形式";
+"Exporting 3D Video..." = "3D 動画を書き出し中...";
+"Cancel Export" = "書き出しを中止";
+"Export 3D Video" = "3D 動画を書き出す";
+"Export Video As..." = "別名で 3D 動画を保存...";
+"Low Disk Space Warning" = "ディスク空き容量不足の警告";
+"Estimated video size is ~%@, but only %@ is available on the destination drive. Continue anyway?" = "書き出し推定サイズは約 %@ ですが、出力先ドライブの空き容量は %@ です。このまま続行しますか？";
+"Continue Anyway" = "このまま続行";
+
+
+
 /* Workspace File Browser & 3-Pane Workflow */
 "Ask for Workspace Folder" = "起動時にフォルダ選択シートを開く";
 "Reopen Last Folder" = "前回開いていたフォルダを自動で開く";
@@ -477,7 +507,13 @@
 "Choose a destination folder for processed images." = "処理した画像の出力先フォルダを選択してください。";
 "Select Output..." = "出力先を選択...";
 "Export cancelled (no output folder selected)." = "出力先フォルダが選択されなかったため処理を中止しました。";
-"Open 2D Photos..." = "2D 写真を開く...";
+"Open 2D Photos..." = "2D 写真／動画を開く...";
+"Video Source" = "動画入力ソース";
+"2D Full Frame" = "2D フルフレーム";
+"SBS → Left Eye" = "SBS → 左眼を抽出";
+"SBS → Right Eye" = "SBS → 右眼を抽出";
+"Likely SBS 3D video detected. You can extract one eye to reconstruct comfortable 3D:" = "SBS 3D 動画の可能性があります。片眼のみ抽出して快適な 3D 動画へ再構築できます：";
+"Preserve HDR (10-bit HLG)" = "HDR を維持 (10-bit HLG)";
 
 
 

@@ -951,7 +951,15 @@ final class WorkspaceOutlineCellView: NSTableCellView {
             }
         }
 
-        lrBadge.isHidden = (node.item?.rightURL == nil)
+        if let item = node.item, item.isVideo {
+            lrBadge.configure(text: "VIDEO", color: NSColor(calibratedRed: 0.75, green: 0.65, blue: 1.0, alpha: 1.0), showDot: false)
+            lrBadge.isHidden = false
+        } else if node.item?.rightURL != nil {
+            lrBadge.configure(text: "L+R", color: NSColor(calibratedRed: 0.4, green: 0.8, blue: 1.0, alpha: 1.0), showDot: false)
+            lrBadge.isHidden = false
+        } else {
+            lrBadge.isHidden = true
+        }
         updateVisualState(isActive: isActive, status: status)
 
         if currentURL != node.url {

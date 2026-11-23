@@ -363,6 +363,36 @@
 "Model Settings…" = "Model Settings…";
 "Re-run" = "Re-run";
 
+/* Video 2D-to-3D Conversion */
+"Spatial Video (MV-HEVC .mov)" = "Spatial Video (MV-HEVC .mov)";
+"Full SBS 3D (.mp4)" = "Full SBS 3D (.mp4)";
+"Half SBS 3D (.mp4)" = "Half SBS 3D (.mp4)";
+"Anaglyph 3D (.mp4)" = "Anaglyph 3D (.mp4)";
+"Loading video metadata..." = "Loading video metadata...";
+"Failed to load video." = "Failed to load video.";
+"Video Frame %.2fs | %dx%d | %@" = "Video Frame %.2fs | %dx%d | %@";
+"Preparing video export..." = "Preparing video export...";
+"Video exported: %@" = "3D Video exported: %@";
+"Video export cancelled." = "Video export cancelled.";
+"Video export failed: %@" = "Video export failed: %@";
+"Video Info" = "Video Info";
+"video_depth_pro2_recommended" = "Apple Depth Pro 2 is recommended for 2D-to-3D video due to its temporal consistency.";
+"Switch to Depth Pro 2 Base" = "Switch to Depth Pro 2 Base";
+"Temporal Smoothing" = "Temporal Smoothing (EMA)";
+"Lock Depth Range" = "Lock Depth Range";
+"Auto Cut Detection" = "Auto Cut Detection";
+"Re-run Video Frame" = "Re-run Video Frame";
+"Video Format" = "Video Format";
+"Exporting 3D Video..." = "Exporting 3D Video...";
+"Cancel Export" = "Cancel Export";
+"Export 3D Video" = "Export 3D Video";
+"Export Video As..." = "Export Video As...";
+"Low Disk Space Warning" = "Low Disk Space Warning";
+"Estimated video size is ~%@, but only %@ is available on the destination drive. Continue anyway?" = "Estimated video size is ~%@, but only %@ is available on the destination drive. Continue anyway?";
+"Continue Anyway" = "Continue Anyway";
+
+
+
 /* Workspace File Browser & 3-Pane Workflow */
 "Ask for Workspace Folder" = "Ask for Workspace Folder";
 "Reopen Last Folder" = "Reopen Last Folder";
@@ -470,7 +500,13 @@
 "Choose a destination folder for processed images." = "Choose a destination folder for processed images.";
 "Select Output..." = "Select Output...";
 "Export cancelled (no output folder selected)." = "Export cancelled (no output folder selected).";
-"Open 2D Photos..." = "Open 2D Photos...";
+"Open 2D Photos..." = "Open 2D Photos / Videos...";
+"Video Source" = "Video Source";
+"2D Full Frame" = "2D Full Frame";
+"SBS → Left Eye" = "SBS → Left Eye";
+"SBS → Right Eye" = "SBS → Right Eye";
+"Likely SBS 3D video detected. You can extract one eye to reconstruct comfortable 3D:" = "Likely SBS 3D video detected. You can extract one eye to reconstruct comfortable 3D:";
+"Preserve HDR (10-bit HLG)" = "Preserve HDR (10-bit HLG)";
 
 
 

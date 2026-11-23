@@ -3,9 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ViewStereo ヘルプ - 公式マニュアル (v0.1.8)</title>
-    <link rel="icon" type="image/png" href="favicon.png?v=0.1.8">
-    <link rel="apple-touch-icon" href="apple-touch-icon.png?v=0.1.8">
+    <title>ViewStereo ヘルプ - 公式マニュアル (v0.1.9)</title>
+    <link rel="icon" type="image/png" href="favicon.png?v=0.1.9">
+    <link rel="apple-touch-icon" href="apple-touch-icon.png?v=0.1.9">
     <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;600;700;800;900&family=Noto+Sans+JP:wght@400;500;700;900&display=swap');
 
@@ -256,7 +256,7 @@ footer {
     <div class="mac-banner"> ViewStereo は macOS 専用アプリケーションです (macOS 14.0+ / Apple Silicon 推奨)</div>
 
     <header>
-        <div class="header-badge">ViewStereo Official Manual — v0.1.8</div>
+        <div class="header-badge">ViewStereo Official Manual — v0.1.9</div>
         <h1>ViewStereo オンラインマニュアル</h1>
         <p>19世紀ステレオカードの AI 自動検出・7自由度対称ホモグラフィ整準・インテリジェント・ステレオウィンドウ調整・デジタル・リマウント完全ガイド</p>
         <div class="header-nav">
@@ -287,7 +287,7 @@ footer {
                 <h2>1. 概要と特長</h2>
                 <p><strong>ViewStereo（ビューステレオ）</strong> は、19世紀〜20世紀初頭の歴史的ステレオカード（Stereoview / Stereograph）のスキャン画像や、現代の2眼・チャチャ（Cha-Cha）ステレオ写真を、<strong>Core ML</strong> と <strong>数理幾何最適化</strong> によって自動復元・整準し、Apple Vision Pro 空間写真（MV-HEVC）や各種3Dフォーマットへ変換する macOS ネイティブスタジオアプリです。</p>
                 <div class="callout">
-                    <strong>開発初期段階のお知らせ：</strong> ViewStereo (v0.1.8) は現在アクティブに開発中の初期リリースです。すべての AI モデルはアプリに同梱されており、100% オフライン・オンデバイスで動作します。
+                    <strong>開発初期段階のお知らせ：</strong> ViewStereo (v0.1.9) は現在アクティブに開発中の初期リリースです。すべての AI モデルはアプリに同梱されており、100% オフライン・オンデバイスで動作します。
                 </div>
             </section>
 
@@ -366,6 +366,7 @@ footer {
             <section id="export">
                 <h2>8. 立体視モード &amp; 書き出し</h2>
                 <p><strong>8種類のプレビュー表示</strong>（<code>2D</code> / <code>SBS</code> / <code>LR/RL</code> / <code>Dubois</code> / <code>Color Anaglyph</code> / <code>Gray Anaglyph</code> / <code>Polarized</code> / <code>Card</code>）と、<strong>11種類の書き出しレイアウト</strong>（上記8種 + <code>Separate L/R</code> / <code>Spatial Photo (HEIC / MV-HEVC)</code> / <code>MPO (3D Camera)</code>）に対応しています。調整レポート（<code>.txt</code>）の保存も可能です。</p>
+                <p>さらに v0.1.9 より <strong>動画 2D→3D 変換・空間ビデオ生成</strong> に対応。2D 動画（.mp4 / .mov / .m4v）を読み込み、時間的一貫性に優れた Apple Depth Pro 2 Stateful 深度推論と Metal GPU 高速化 DIBR により、Apple Vision Pro 空間ビデオ（MV-HEVC .mov）、Full / Half SBS 3D、アナグリフ 3D 動画を高品質に出力できます。</p>
             </section>
 
             <section id="batch">

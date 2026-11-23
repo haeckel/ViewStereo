@@ -28,6 +28,8 @@
 		SW0100210000000000000001 /* WorkspaceBrowserModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = SW0200210000000000000001 /* WorkspaceBrowserModels.swift */; };
 		SW0100220000000000000001 /* WorkspaceFileBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SW0200220000000000000001 /* WorkspaceFileBrowserView.swift */; };
 		SW0100230000000000000001 /* WorkspaceOutlineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SW0200230000000000000001 /* WorkspaceOutlineView.swift */; };
+		SW0100240000000000000001 /* ViewStereoVideoProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = SW0200240000000000000001 /* ViewStereoVideoProcessor.swift */; };
+		SW0100250000000000000001 /* ViewStereoMetalDIBR.swift in Sources */ = {isa = PBXBuildFile; fileRef = SW0200250000000000000001 /* ViewStereoMetalDIBR.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -52,6 +54,8 @@
 		SW0200210000000000000001 /* WorkspaceBrowserModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceBrowserModels.swift; sourceTree = "<group>"; };
 		SW0200220000000000000001 /* WorkspaceFileBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceFileBrowserView.swift; sourceTree = "<group>"; };
 		SW0200230000000000000001 /* WorkspaceOutlineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceOutlineView.swift; sourceTree = "<group>"; };
+		SW0200240000000000000001 /* ViewStereoVideoProcessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewStereoVideoProcessor.swift; sourceTree = "<group>"; };
+		SW0200250000000000000001 /* ViewStereoMetalDIBR.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewStereoMetalDIBR.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -109,6 +113,8 @@
 				SW0200090000000000000001 /* StereoCardSegmenter.swift */,
 				SW0200200000000000000001 /* ViewStereoDepthSynthesizer.swift */,
 				SW0200210000000000000001 /* WorkspaceBrowserModels.swift */,
+				SW0200240000000000000001 /* ViewStereoVideoProcessor.swift */,
+				SW0200250000000000000001 /* ViewStereoMetalDIBR.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -244,6 +250,8 @@
 				SW0100210000000000000001 /* WorkspaceBrowserModels.swift in Sources */,
 				SW0100220000000000000001 /* WorkspaceFileBrowserView.swift in Sources */,
 				SW0100230000000000000001 /* WorkspaceOutlineView.swift in Sources */,
+				SW0100240000000000000001 /* ViewStereoVideoProcessor.swift in Sources */,
+				SW0100250000000000000001 /* ViewStereoMetalDIBR.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -304,7 +312,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.1.8;
+				MARKETING_VERSION = 0.1.9;
 				PRODUCT_BUNDLE_IDENTIFIER = jp.p-media.ViewStereo;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -327,7 +335,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.1.8;
+				MARKETING_VERSION = 0.1.9;
 				PRODUCT_BUNDLE_IDENTIFIER = jp.p-media.ViewStereo;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

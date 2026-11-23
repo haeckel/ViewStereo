@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import Combine
 import Foundation
 import ImageIO
@@ -163,6 +164,27 @@ final class WorkspaceThumbnailCache {
         let op = BlockOperation()
         op.addExecutionBlock { [weak self, weak op] in
             guard let op, !op.isCancelled else { return }
+            if WorkspaceScanner.supportedVideoExtensions.contains(url.pathExtension.lowercased()) {
+                let asset = AVURLAsset(url: url)
+                let gen = AVAssetImageGenerator(asset: asset)
+                gen.appliesPreferredTrackTransform = true
+                gen.maximumSize = CGSize(width: bucket, height: bucket)
+                let t = CMTime(seconds: 0.25, preferredTimescale: 600)
+                if let cgThumb = (try? gen.copyCGImage(at: t, actualTime: nil))
+                    ?? (try? gen.copyCGImage(at: .zero, actualTime: nil)) {
+                    let nsImage = NSImage(cgImage: cgThumb, size: NSSize(width: cgThumb.width, height: cgThumb.height))
+                    self?.cache.setObject(nsImage, forKey: key)
+                    if !op.isCancelled {
+                        Task { @MainActor in completion(nsImage) }
+                    }
+                    return
+                }
+                if !op.isCancelled {
+                    Task { @MainActor in completion(nil) }
+                }
+                return
+            }
+
             let opts: [CFString: Any] = [
                 kCGImageSourceShouldCache: false
             ]
@@ -213,6 +235,10 @@ enum WorkspaceScanner {
         "dng", "cr2", "cr3", "nef", "arw", "orf", "rw2", "raf", "pef", "srw", "raw"
     ]
 
+    static let supportedVideoExtensions: Set<String> = [
+        "mp4", "mov", "m4v"
+    ]
+
     static func isOutputFolder(_ url: URL, customOutputFolder: URL?) -> Bool {
         let name = url.lastPathComponent
         if name == "ViewStereo_Output" { return true }
@@ -238,6 +264,7 @@ enum WorkspaceScanner {
 
         var dirNodes: [WorkspaceBrowserNode] = []
         var imageFiles: [URL] = []
+        var videoFiles: [URL] = []
 
         for url in contents {
             let vals = try? url.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey])
@@ -253,9 +280,13 @@ enum WorkspaceScanner {
                         item: nil
                     )
                 )
-            } else if vals?.isRegularFile == true,
-                      supportedImageExtensions.contains(url.pathExtension.lowercased()) {
-                imageFiles.append(url)
+            } else if vals?.isRegularFile == true {
+                let ext = url.pathExtension.lowercased()
+                if supportedImageExtensions.contains(ext) {
+                    imageFiles.append(url)
+                } else if supportedVideoExtensions.contains(ext) {
+                    videoFiles.append(url)
+                }
             }
         }
 
@@ -269,8 +300,20 @@ enum WorkspaceScanner {
         imageFiles.sort {
             $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending
         }
+        videoFiles.sort {
+            $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending
+        }
 
-        let batchItems = pairImageFiles(imageFiles, mode: pairingMode)
+        let videoItems = videoFiles.map { url in
+            StereoBatchItem(
+                baseName: url.deletingPathExtension().lastPathComponent,
+                displayLabel: url.lastPathComponent,
+                leftURL: url,
+                rightURL: nil
+            )
+        }
+        let batchItems = (pairImageFiles(imageFiles, mode: pairingMode) + videoItems)
+            .sorted { $0.baseName.localizedStandardCompare($1.baseName) == .orderedAscending }
         let fileNodes = batchItems.map { item in
             WorkspaceBrowserNode(
                 id: "item::" + item.id,

@@ -255,6 +255,93 @@ public final class ViewStereoDepthSynthesizer: @unchecked Sendable {
         return (res.disparity, res.width, res.height, compatEngine, res.elapsedMs)
     }
 
+    /// 動画セッション向け：未正規化（大きいほど手前）の生視差データとパーセンタイル範囲
+    public struct RawVideoDepthFrame: Sendable {
+        public let rawDisparity: [Float]
+        public let width: Int
+        public let height: Int
+        public let pLow: Float
+        public let pHigh: Float
+        public let validMask: [Bool]?
+        public let engineName: String
+        public let coreMLEngine: StudioDepthEngine?
+    }
+
+    /// 動画セッション用モデル解決＆ロード（動画処理中はモデルをキャッシュ常駐させる）
+    public func prepareVideoEngine(
+        preferredEngine: StudioDepthEngine
+    ) -> (model: MLModel, engine: StudioDepthEngine, isFallback: Bool)? {
+        guard let resolved = resolveDepthModelURL(preferredEngine: preferredEngine),
+              let model = try? loadMLModel(url: resolved.url, engine: resolved.engine) else {
+            return nil
+        }
+        return (model, resolved.engine, resolved.isFallback)
+    }
+
+    /// Depth Pro 2 動画セッション用の MLState を新規生成（macOS 15+）
+    public func makeVideoInferenceState(for model: MLModel, engine: StudioDepthEngine) -> AnyObject? {
+        if #available(macOS 15.0, *), engine.isDepthPro2Engine {
+            return model.makeState()
+        }
+        return nil
+    }
+
+    /// 動画フレーム1枚分の未正規化視差値とパーセンタイルを推論する（Depth Pumping 防止のため正規化はセッション側で行う）
+    public func estimateRawVideoDepth(
+        cgImage: CGImage,
+        prepared: (model: MLModel, engine: StudioDepthEngine, isFallback: Bool)?,
+        externalState: AnyObject?
+    ) -> RawVideoDepthFrame {
+        if let prep = prepared {
+            let label = prep.isFallback ? "\(prep.engine.shortLabel) [Fallback]" : prep.engine.shortLabel
+            do {
+                switch prep.engine {
+                case .depthPro2Small, .depthPro2Base, .depthPro2Large:
+                    let raw = try runDepthPro2RawInference(model: prep.model, cgImage: cgImage, externalState: externalState)
+                    let (pLow, pHigh) = Self.computeRobustPercentiles(raw.values, positiveOnly: true)
+                    return RawVideoDepthFrame(rawDisparity: raw.values, width: raw.width, height: raw.height, pLow: pLow, pHigh: pHigh, validMask: nil, engineName: label, coreMLEngine: prep.engine)
+
+                case .depthPro:
+                    let rawMeters = try runDepthProRawMeters(model: prep.model, cgImage: cgImage)
+                    let invDisp = rawMeters.values.map { m -> Float in
+                        let c: Float = (m.isFinite && m > 0.01) ? m : 100.0
+                        return 1.0 / c
+                    }
+                    let (pLow, pHigh) = Self.computeRobustPercentiles(invDisp, positiveOnly: true)
+                    return RawVideoDepthFrame(rawDisparity: invDisp, width: rawMeters.width, height: rawMeters.height, pLow: pLow, pHigh: pHigh, validMask: nil, engineName: label, coreMLEngine: prep.engine)
+
+                case .moge2ViTB, .moge2ViTL:
+                    let defaultSize = (prep.engine == .moge2ViTL) ? 1104 : 504
+                    let res = try runMoGeRawInference(model: prep.model, cgImage: cgImage, defaultSize: defaultSize)
+                    var validSamples = [Float]()
+                    let step = max(1, res.invDisp.count / 65536)
+                    for i in stride(from: 0, to: res.invDisp.count, by: step) where res.validMask[i] {
+                        validSamples.append(res.invDisp[i])
+                    }
+                    let (pLow, pHigh) = Self.computeRobustPercentiles(validSamples.isEmpty ? res.invDisp : validSamples, positiveOnly: true)
+                    return RawVideoDepthFrame(rawDisparity: res.invDisp, width: res.width, height: res.height, pLow: pLow, pHigh: pHigh, validMask: res.validMask, engineName: label, coreMLEngine: prep.engine)
+
+                case .depthAnythingV3Mono:
+                    let res = try runUniversalDepthInference(model: prep.model, cgImage: cgImage, isDirectDepth: true, defaultSize: 504)
+                    return RawVideoDepthFrame(rawDisparity: res.disparity, width: res.width, height: res.height, pLow: 0.0, pHigh: 1.0, validMask: nil, engineName: label, coreMLEngine: prep.engine)
+
+                case .depthAnythingV2Small, .depthAnythingV2Large:
+                    if let vnModel = (stateLock.withLock { cachedVNModel }),
+                       let visionRes = try? runVisionCoreMLInference(vnModel: vnModel, cgImage: cgImage) {
+                        return RawVideoDepthFrame(rawDisparity: visionRes.disparity, width: visionRes.width, height: visionRes.height, pLow: 0.0, pHigh: 1.0, validMask: nil, engineName: label, coreMLEngine: prep.engine)
+                    }
+                    let res = try runUniversalDepthInference(model: prep.model, cgImage: cgImage, isDirectDepth: false, defaultSize: 518)
+                    return RawVideoDepthFrame(rawDisparity: res.disparity, width: res.width, height: res.height, pLow: 0.0, pHigh: 1.0, validMask: nil, engineName: label, coreMLEngine: prep.engine)
+                }
+            } catch {
+                print("[ViewStereoDepthSynthesizer] Video inference fallback (\(label)): \(error.localizedDescription)")
+            }
+        }
+
+        let vis = runAppleVisionNativeDepth(cgImage: cgImage)
+        return RawVideoDepthFrame(rawDisparity: vis.disparity, width: vis.width, height: vis.height, pLow: 0.0, pHigh: 1.0, validMask: nil, engineName: DepthEngineType.visionNative.rawValue, coreMLEngine: nil)
+    }
+
     // MARK: - Engine-Specific Core ML Inference Dispatch
 
     private func runEngineSpecificInference(
@@ -290,11 +377,23 @@ public final class ViewStereoDepthSynthesizer: @unchecked Sendable {
         }
     }
 
-    /// Apple Depth Pro 2 (inverse_depth 出力、macOS 15+ ではフレッシュな MLState を使用)
+    /// Apple Depth Pro 2 (inverse_depth 出力、外部 MLState またはフレッシュな MLState を使用)
     private func runDepthPro2Inference(
         model: MLModel,
-        cgImage: CGImage
+        cgImage: CGImage,
+        externalState: AnyObject? = nil
     ) throws -> (disparity: [Float], width: Int, height: Int) {
+        let raw = try runDepthPro2RawInference(model: model, cgImage: cgImage, externalState: externalState)
+        // inverse_depth は値が大きいほど手前 → 正値の2%~98%パーセンタイル正規化で [0=奥, 1=手前] に統一
+        let norm = Self.normalizePositiveDisparityRobust(raw.values)
+        return (norm, raw.width, raw.height)
+    }
+
+    private func runDepthPro2RawInference(
+        model: MLModel,
+        cgImage: CGImage,
+        externalState: AnyObject?
+    ) throws -> (values: [Float], width: Int, height: Int) {
         let inputDescs = model.modelDescription.inputDescriptionsByName
         let frameDesc = inputDescs["frame"]?.multiArrayConstraint
         let shape = frameDesc?.shape.map { $0.intValue } ?? []
@@ -315,10 +414,9 @@ public final class ViewStereoDepthSynthesizer: @unchecked Sendable {
             "frame": MLFeatureValue(multiArray: frameArray)
         ])
 
-        // 静止画ごとに独立推論するため毎回クリーンな State を作る
         let prediction: MLFeatureProvider
         if #available(macOS 15.0, *) {
-            let state = model.makeState()
+            let state = (externalState as? MLState) ?? model.makeState()
             prediction = try model.prediction(from: inputProvider, using: state)
         } else {
             prediction = try model.prediction(from: inputProvider)
@@ -345,10 +443,113 @@ public final class ViewStereoDepthSynthesizer: @unchecked Sendable {
         guard let raw = extracted, raw.width > 0, raw.height > 0 else {
             throw NSError(domain: "ViewStereoDepthSynthesizer", code: -41, userInfo: [NSLocalizedDescriptionKey: "Missing inverse_depth output from Depth Pro 2"])
         }
+        return raw
+    }
 
-        // inverse_depth は値が大きいほど手前 → 正値の2%~98%パーセンタイル正規化で [0=奥, 1=手前] に統一
-        let norm = Self.normalizePositiveDisparityRobust(raw.values)
-        return (norm, raw.width, raw.height)
+    private func runDepthProRawMeters(
+        model: MLModel,
+        cgImage: CGImage
+    ) throws -> (values: [Float], width: Int, height: Int) {
+        let targetW = 1536
+        let targetH = 1536
+        let origW = Float(cgImage.width)
+
+        let pixelBuffer = try Self.createResizedPixelBuffer(from: cgImage, width: targetW, height: targetH)
+        let origWidthDesc = model.modelDescription.inputDescriptionsByName["originalWidth"]
+        let origWidthType = origWidthDesc?.multiArrayConstraint?.dataType ?? .float16
+        let origWidthArray = try MLMultiArray(shape: [1, 1, 1, 1], dataType: origWidthType)
+        origWidthArray[[0, 0, 0, 0] as [NSNumber]] = NSNumber(value: origW)
+
+        let inputProvider = try MLDictionaryFeatureProvider(dictionary: [
+            "image": MLFeatureValue(pixelBuffer: pixelBuffer),
+            "originalWidth": MLFeatureValue(multiArray: origWidthArray)
+        ])
+        let prediction = try model.prediction(from: inputProvider)
+
+        guard let depthMetersMA = prediction.featureValue(for: "depthMeters")?.multiArrayValue else {
+            throw NSError(domain: "ViewStereoDepthSynthesizer", code: -21, userInfo: [NSLocalizedDescriptionKey: "Missing depthMeters output from DepthPro"])
+        }
+
+        return Self.extractChannelFloats(from: depthMetersMA, channelIndex: 0)
+    }
+
+    private func runMoGeRawInference(
+        model: MLModel,
+        cgImage: CGImage,
+        defaultSize: Int
+    ) throws -> (invDisp: [Float], validMask: [Bool], width: Int, height: Int) {
+        let inputProvider = try Self.prepareUniversalInputProvider(for: model, cgImage: cgImage, defaultSize: defaultSize)
+        let prediction = try model.prediction(from: inputProvider)
+        let outNames = prediction.featureNames
+
+        var depthData: (values: [Float], width: Int, height: Int)?
+        if outNames.contains("depth"), let fVal = prediction.featureValue(for: "depth") {
+            if let ma = fVal.multiArrayValue {
+                depthData = Self.extractChannelFloats(from: ma, channelIndex: 0)
+            } else if let pb = fVal.imageBufferValue {
+                depthData = Self.extractFloatsFromPixelBuffer(pb)
+            }
+        }
+        if depthData == nil, outNames.contains("points"),
+           let pointsMA = prediction.featureValue(for: "points")?.multiArrayValue {
+            depthData = Self.extractChannelFloats(from: pointsMA, channelIndex: 2)
+        }
+        if depthData == nil {
+            for name in outNames {
+                if let ma = prediction.featureValue(for: name)?.multiArrayValue, ma.shape.count >= 2 {
+                    depthData = Self.extractChannelFloats(from: ma, channelIndex: 0)
+                    break
+                }
+            }
+        }
+
+        guard let extracted = depthData, extracted.width > 0, extracted.height > 0 else {
+            throw NSError(domain: "ViewStereoDepthSynthesizer", code: -30, userInfo: [NSLocalizedDescriptionKey: "Missing depth/points output from MoGe-2"])
+        }
+
+        let w = extracted.width
+        let h = extracted.height
+        var maskValues: [Float]? = nil
+        if outNames.contains("mask"), let maskMA = prediction.featureValue(for: "mask")?.multiArrayValue {
+            let exMask = Self.extractChannelFloats(from: maskMA, channelIndex: 0)
+            if exMask.width == w && exMask.height == h {
+                maskValues = exMask.values
+            } else if exMask.width > 0 && exMask.height > 0 {
+                maskValues = Self.resizeFloatMap(exMask.values, srcW: exMask.width, srcH: exMask.height, dstW: w, dstH: h)
+            }
+        }
+
+        let count = extracted.values.count
+        var invDisp = [Float](repeating: 0, count: count)
+        var validMask = [Bool](repeating: false, count: count)
+        for i in 0..<count {
+            let m = extracted.values[i]
+            let maskOk = (maskValues == nil) || (maskValues![i] >= 0.5)
+            if maskOk && m.isFinite && m > 0.005 && m < 10000.0 {
+                invDisp[i] = 1.0 / m
+                validMask[i] = true
+            }
+        }
+        return (invDisp, validMask, w, h)
+    }
+
+    private static func computeRobustPercentiles(_ raw: [Float], positiveOnly: Bool) -> (Float, Float) {
+        let step = max(1, raw.count / 65536)
+        var samples = [Float]()
+        samples.reserveCapacity(raw.count / step + 1)
+        var idx = 0
+        while idx < raw.count {
+            let v = raw[idx]
+            if v.isFinite && (!positiveOnly || v > 0) {
+                samples.append(v)
+            }
+            idx += step
+        }
+        guard !samples.isEmpty else { return (0.0, 1.0) }
+        samples.sort()
+        let pLow = samples[max(0, min(samples.count - 1, Int(Float(samples.count) * 0.02)))]
+        let pHigh = samples[max(0, min(samples.count - 1, Int(Float(samples.count) * 0.98)))]
+        return (pLow, max(pLow + 1e-6, pHigh))
     }
 
     /// Apple Depth Pro (1536x1536 CVPixelBuffer + originalWidth → depthMeters [m])
@@ -720,6 +921,22 @@ public final class ViewStereoDepthSynthesizer: @unchecked Sendable {
         let count = width * height
         guard baseRGB.count >= count * 3, depthW > 0, depthH > 0 else {
             return (baseRGB, baseRGB)
+        }
+
+        if count >= 65536,
+           let gpuResult = ViewStereoMetalDIBR.shared.synthesizeStereoPair(
+               baseRGB: baseRGB,
+               width: width,
+               height: height,
+               disparityMap: disparityMap,
+               depthW: depthW,
+               depthH: depthH,
+               targetDisparityPercent: targetDisparityPercent,
+               depthGamma: depthGamma,
+               depthContrast: depthContrast,
+               focusRatio: focusRatio
+           ) {
+            return gpuResult
         }
 
         let maxBaselinePx = Float(width) * Float(max(0.2, min(8.0, targetDisparityPercent)) / 100.0)

@@ -4,6 +4,42 @@ ViewStereo は現在開発中であり、特に開発初期段階のアプリケ
 
 ==================================================
 
+ViewStereo v0.1.9 リリースノート / Release Notes (2026.11.23)
+
+==================================================
+【ViewStereo v0.1.9 新機能・改善点 / New Features & Improvements】
+==================================================
+- 動画 2D→3D 変換＆空間ビデオ（MV-HEVC）生成機能を新搭載:
+  - 2D 動画（.mp4 / .mov / .m4v）から Apple Vision Pro 互換の空間ビデオ、Full SBS / Half SBS、アナグリフ 3D 動画への高品質変換に対応。
+  - 3-Pane ツリーブラウザでの動画プレビュー、再生タイムライン・シークバー、現在フレームのインタラクティブ再推論を統合。
+- Apple Depth Pro 2 連携 Stateful 深度推論:
+  - Core ML MLState（macOS 15+）による前フレーム隠れ状態の保持により、動画特有のフリッカー（深度チラつき）を大幅に抑制。
+  - 暗転復帰・クールダウン付きシーンカット自動検出、時間的平滑化（EMA）と奥行きレンジ固定（Lock Depth Range）を搭載。
+- Metal GPU 高速化 DIBR ＆ AVFoundation 最適化:
+  - Metal コンピュートシェーダー（ViewStereoMetalDIBR）による GPU ゼロコピー 3D 合成。
+  - 自動正立化（preferredTransform）、SDR Rec.709 トーンマッピング、CVPixelBufferPool 再利用、AAC 256kbps 音声再エンコード。
+  - 書き出し前ディスク空き容量チェックと警告シートを新設。
+- SBS 3D 動画の片眼抽出＆再構築:
+  - 既存の SBS 3D 動画から左眼または右眼を抽出し、パーシバル快適域に収まる自然な 3D 動画へ再合成・リマスター可能。
+
+==================================================
+[v0.1.9 New Features & Highlights]
+==================================================
+- Video 2D-to-3D Conversion & Spatial Video Generation:
+  - Transforms 2D videos (.mp4, .mov, .m4v) into Apple Vision Pro Spatial Video (MV-HEVC .mov), Full/Half SBS 3D, and Dubois Anaglyph 3D video.
+  - Features tree browser video preview, interactive playback timeline, and current-frame depth re-run.
+- Stateful Video Depth Inference via Apple Depth Pro 2:
+  - Preserves cross-frame hidden states using Core ML MLState (macOS 15+) to eliminate temporal depth flickering.
+  - Automated scene cut detection with blackout recovery, temporal smoothing (EMA), and depth range locking.
+- Metal GPU-Accelerated DIBR & Optimized AVFoundation Pipeline:
+  - Zero-copy Metal compute shader 3D synthesis engine (ViewStereoMetalDIBR).
+  - Auto-rotation handling (preferredTransform), SDR Rec.709 tone mapping, CVPixelBufferPool caching, and AAC 256kbps audio re-encoding.
+  - Pre-export available disk space validation and warning alert.
+- SBS 3D Video Salvage & Re-synthesis:
+  - Extract pristine left or right eye streams from existing SBS 3D footage and reconstruct comfortable, violation-free 3D stereoscopic videos.
+
+==================================================
+
 ViewStereo v0.1.8 リリースノート / Release Notes (2026.11.23)
 
 ==================================================
