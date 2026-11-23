@@ -1,4 +1,4 @@
-# ViewStereo Technical Specification (v0.2.0)
+# ViewStereo Technical Specification (v0.2.1)
 
 ## 1. System Overview
 **ViewStereo** is a native macOS 14.0+ (SwiftUI / AppKit) application designed for automated archival stereoview restoration, geometric rectification, stereo window optimization, and modern spatial media export. It builds upon `StereoStudioCore` and `StereoCore` (`stalign_src`) and leverages Apple Silicon Neural Engine (Core ML), Vision, and Accelerate (LAPACK).
@@ -14,15 +14,19 @@
   - Dual-file Left/Right image pairs (auto-paired in batch mode via filename suffix or consecutive ordering)
 - **Supported Formats**: JPEG, PNG, HEIC, TIFF, WebP, MPO, etc. (via `ImageIO` / `NSImage`).
 
-### Stage 2: Core ML Stereoview Card Segmentation (`StereoCardSegmenter`)
+### Stage 2: Core ML Stereoview Card Segmentation (`StereoCardSegmenter` + `StereoCardMountAnalyzer`)
 When `StereoCardMode` is `.cropInner` or `.keepArchBlack`:
-1. **Primary Localization (`StereoCardSeg.mlmodelc`)**:
-   - U-Net architecture operating at `512 × 256` input resolution.
+1. **3-Stage Cascade Mount Analysis (`StereoCardMountAnalyzer`)**:
+   - **Stage 0 (Scan Margin Removal & Deskewing)**: Uses 4-corner CIE Lab median/MAD outer-connected flood-fill to strip white/black scanner margins, RANSAC line fitting for card deskewing, and drop-shadow crossing (`refineShadowEdge`), guarded by 3-fold white-mount false-removal checks (separator penetration, mid-column split, aspect ratio).
+   - **Stage 1 (Card-Specific CIE Lab Mount Color Barrier)**: Adaptive `step=1` outer rim sampling (`collectAdaptiveEdgeRim`) builds a covariance/Euclidean color gate supporting ultra-thin (5–10px) mount borders; generates an outer/center-connected `connectedBarrierMask` to protect dark photographic interiors (e.g., lunar/night skies) while guarding U-Net/SAM boundaries.
+   - **Stage 2 (Coupled Parametric Twin-Window Fitting)**: SAT + Sobel gradient coordinate-descent optimization (`TwinWindowParams`) fits unified Left/Right print geometry (`.square` / `.rounded` / `.arch`).
+2. **Primary Localization (`StereoCardSeg.mlmodelc`)**:
+   - U-Net architecture operating at `512 × 256` input resolution via direct `CVPixelBufferCreate` rendering, masked by `connectedBarrierMask`.
    - Outputs left/right print probability masks, bounding boxes, arch-top curvature parameters (`ArchShapeParams`: `topRxRatio`, `topRyRatio`, `botRxRatio`, `botRyRatio`), card skew angle, and sampled mount RGB luminance.
-2. **Mask Refinement (Selectable)**:
-   - **SAM 2.1 Tiny** (`SAM2_1TinyImageEncoderFLOAT16.mlmodelc` + `PromptEncoder` + `MaskDecoder`)
-   - **U-Net Only**: Skips transformer refinement for maximum throughput.
-3. **Original Card Mount Context (`OriginalCardMountContext`)**:
+3. **Mask Refinement (Selectable) & Guarded Trimming**:
+   - **SAM 2.1 Tiny** (`SAM2_1TinyImageEncoderFLOAT16.mlmodelc` + `PromptEncoder` + `MaskDecoder`) with dark-background mask tolerance/candidate safeguards, or **U-Net Only** for maximum throughput.
+   - Top-edge mount barrier hard-stops, bottom caption trimmer dark-rule streak guards, and arch apex synchronization.
+4. **Original Card Mount Context (`OriginalCardMountContext`)**:
    - Captures source mount color, skew angle, print masks, and arch geometry for downstream Digital Remounting and OCR text extraction.
 
 ### Stage 3: 7-DoF Symmetric Homography Alignment (`StereoCore`)

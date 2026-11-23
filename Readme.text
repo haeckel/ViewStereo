@@ -4,6 +4,36 @@ ViewStereo は現在開発中であり、特に開発初期段階のアプリケ
 
 ==================================================
 
+ViewStereo v0.2.1 リリースノート / Release Notes (2026.11.24)
+
+==================================================
+【ViewStereo v0.2.1 新機能・改善点 / New Features & Improvements】
+==================================================
+- 3段階カスケード台紙解析エンジン（StereoCardMountAnalyzer）の導入とクロップ刷新:
+  - Stage 0（スキャン余白分離＆水平化）: 4隅 CIE Lab 中央値・MAD による外周連結フラッドフィル、RANSAC 傾き補正、ドロップシャドウ通過ロジックを搭載（白台紙カードの誤除去を防ぐ3重安全策付き）。
+  - Stage 1（カード固有 CIE Lab 台紙色バリア）: step=1 の適応的外縁リム走査により5〜10pxの極細台紙枠にも対応。外周・中央連結限定バリアマスクにより写真内部の暗部を保護しつつ U-Net / SAM の境界を厳密ガード。
+  - Stage 2（連結パラメトリック双子窓フィッティング）: 積分画像（SAT）＋ Sobel 勾配による座標降下法で左右共通のカット形状（直角 / 角丸 / アーチ）を最適化。
+- 暗背景写真・キャプション・アーチ頂点の過剰クロップ防止:
+  - SAM 2.1 Tiny のマスク許容度と候補選定を改善し、月写真など暗黒背景の過剰クロップを解消。
+  - 下端キャプション除去時の細い罫線やシミによる過剰クロップを修正し、アーチ頂点（apexY）検出との同期および異常曲率時の誤判定リセットを導入。
+- Core ML 入力処理の堅牢化:
+  - StereoCardSeg および SAM2_1TinyImageEncoder への入力を CVPixelBufferCreate 直接描画へ変更し、環境依存の CVPixelBuffer 生成エラーを解消。
+
+==================================================
+[v0.2.1 New Features & Highlights]
+==================================================
+- 3-Stage Cascade Mount Analyzer (StereoCardMountAnalyzer) & Crop Pipeline Renewal:
+  - Stage 0 (Scan Margin Removal & Deskewing): Outer-connected flood-fill using 4-corner CIE Lab median/MAD, RANSAC deskewing, and drop-shadow crossing with 3-fold safety guards against false white-mount removal.
+  - Stage 1 (Card-Specific CIE Lab Mount Barrier): Adaptive step=1 outer rim sampling supports ultra-thin 5-10px mount borders; outer/center-connected barrier mask protects dark photographic interiors while guarding U-Net/SAM boundaries.
+  - Stage 2 (Coupled Parametric Twin-Window Fitting): Coordinate-descent optimization via SAT + Sobel gradients for unified Left/Right cut shapes (.square / .rounded / .arch).
+- Dark-Background, Caption & Arch Apex Overcrop Prevention:
+  - Refined SAM 2.1 Tiny mask tolerance and candidate selection to eliminate overcropping on dark-background photos (such as lunar scenes).
+  - Fixed bottom caption trimmer false triggers from dark rule streaks and synchronized arch apex Y detection with automatic false-arch reset.
+- Hardened Core ML PixelBuffer Input:
+  - Switched StereoCardSeg and SAM2_1TinyImageEncoder inputs to direct CVPixelBufferCreate rendering, resolving environment-dependent CVPixelBuffer creation errors.
+
+==================================================
+
 ViewStereo v0.2.0 リリースノート / Release Notes (2026.11.24)
 
 ==================================================
