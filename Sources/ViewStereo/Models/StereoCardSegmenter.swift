@@ -491,18 +491,21 @@ final class StereoCardSegmenter: @unchecked Sendable {
                 rawLy0 = Double(vl.y0); rawLy1 = Double(vl.y1 + 1)
                 rawRy0 = Double(vr.y0); rawRy1 = Double(vr.y1 + 1)
             }
+            let hasTopArch = archParams.topRxRatio >= 0.05 || archParams.topRyRatio >= 0.05
             let insetRX = max(2.0, (rawRx1 - rawRx0) * 0.004)
             let insetRY = max(2.0, (rawRy1 - rawRy0) * 0.004)
             let insetLY = max(2.0, (rawLy1 - rawLy0) * 0.004)
+            let insetTopL = hasTopArch ? 0.0 : insetLY
+            let insetTopR = hasTopArch ? 0.0 : insetRY
 
             var cLx0 = max(0, Int(floor(rawLx0 + insetLX)))
             var cLx1 = min(width, Int(ceil(rawLx1 - insetLX)))
-            var cLy0 = max(0, Int(floor(rawLy0 + insetLY)))
+            var cLy0 = max(0, Int(floor(rawLy0 + insetTopL)))
             var cLy1 = min(height, Int(floor(rawLy1 - insetLY)))
 
             var cRx0 = max(0, Int(floor(rawRx0 + insetRX)))
             var cRx1 = min(width, Int(ceil(rawRx1 - insetRX)))
-            var cRy0 = max(0, Int(floor(rawRy0 + insetRY)))
+            var cRy0 = max(0, Int(floor(rawRy0 + insetTopR)))
             var cRy1 = min(height, Int(floor(rawRy1 - insetRY)))
 
             trimHorizontalCardBorders(rgb: rgb, srcW: width, srcH: height, x0: cLx0, x1: cLx1, y0: &cLy0, y1: &cLy1)
@@ -547,10 +550,10 @@ final class StereoCardSegmenter: @unchecked Sendable {
             }
 
             // 上端過剰クロップ防止セーフティガード（富士山頂・空等のグラデーション領域が台紙と誤認されて削られるのを防止）
+            var topBorderEnd = 0
             do {
                 let midLX = (cLx0 + cLx1) / 2
                 let midRX = (cRx0 + cRx1) / 2
-                var topBorderEnd = 0
                 while topBorderEnd < min(height / 8, 32) {
                     let offL = (topBorderEnd * width + midLX) * 3
                     let offR = (topBorderEnd * width + midRX) * 3
@@ -564,13 +567,81 @@ final class StereoCardSegmenter: @unchecked Sendable {
                 }
                 if topBorderEnd > 0 {
                     let safeTop = topBorderEnd + 1
-                    if cLy0 > safeTop + 6 {
+                    let fbLuma = cardLuma ?? 200.0
+                    let refRGB = effectiveCardRGB ?? (r: fbLuma, g: fbLuma, b: fbLuma)
+                    // topBorderEnd から cLy0 までの間に台紙色が支配的である場合、それは台紙余白なので cLy0 を safeTop に引き上げてはならない
+                    func isCardBetween(y0: Int, y1: Int, x: Int) -> Bool {
+                        guard y1 > y0 else { return false }
+                        var cardCount = 0
+                        let total = y1 - y0
+                        for y in y0..<y1 {
+                            let idx = (y * width + x) * 3
+                            let r = Double(rgb[idx]), g = Double(rgb[idx + 1]), b = Double(rgb[idx + 2])
+                            let dr = abs(r - refRGB.r)
+                            let dg = abs(g - refRGB.g)
+                            let db = abs(b - refRGB.b)
+                            if max(dr, max(dg, db)) <= 30.0 {
+                                cardCount += 1
+                            }
+                        }
+                        return Double(cardCount) / Double(total) >= 0.50
+                    }
+                    if cLy0 > safeTop + 6 && !isCardBetween(y0: safeTop, y1: cLy0, x: midLX) {
                         cLy0 = safeTop
                     }
-                    if cRy0 > safeTop + 6 {
+                    if cRy0 > safeTop + 6 && !isCardBetween(y0: safeTop, y1: cRy0, x: midRX) {
                         cRy0 = safeTop
                     }
                 }
+            }
+
+            // アーチ頂点精密検出（上部アーチがある場合、中央付近の列で台紙から写真への真の境界Yを検出）
+            if hasTopArch, let card = effectiveCardRGB ?? (cardLuma.map { (r: $0, g: $0, b: $0) }) {
+                func detectApexY(x0: Int, x1: Int, currentY0: Int) -> Int {
+                    let bw = x1 - x0
+                    let midX = (x0 + x1) / 2
+                    let scanX0 = max(0, midX - Int(Double(bw) * 0.08))
+                    let scanX1 = min(width - 1, midX + Int(Double(bw) * 0.08))
+                    guard scanX1 > scanX0 else { return currentY0 }
+                    let step = max(1, (scanX1 - scanX0) / 9)
+                    var apexYList: [Int] = []
+                    let minY = max(topBorderEnd + 8, currentY0 - 35)
+                    let maxY = min(height - 10, currentY0 + 35)
+                    guard maxY > minY + 8 else { return currentY0 }
+                    let runLen = 6
+                    for x in stride(from: scanX0, through: scanX1, by: step) {
+                        for y in minY..<(maxY - runLen) {
+                            var nonCard = 0
+                            for k in 0..<runLen {
+                                let idx = ((y + k) * width + x) * 3
+                                let r = Double(rgb[idx]), g = Double(rgb[idx + 1]), b = Double(rgb[idx + 2])
+                                let luma = (r + g + b) / 3.0
+                                if luma <= 35.0 {
+                                    // スキャナ黒枠は写真ではない
+                                    nonCard = 0
+                                    break
+                                }
+                                let dr = abs(r - card.r), dg = abs(g - card.g), db = abs(b - card.b)
+                                if max(dr, max(dg, db)) > 26.0 {
+                                    nonCard += 1
+                                }
+                            }
+                            if nonCard >= runLen - 1 {
+                                apexYList.append(y)
+                                break
+                            }
+                        }
+                    }
+                    if apexYList.count >= 3 {
+                        apexYList.sort()
+                        return apexYList[apexYList.count / 2]
+                    }
+                    return currentY0
+                }
+                let apexL = detectApexY(x0: cLx0, x1: cLx1, currentY0: cLy0)
+                let apexR = detectApexY(x0: cRx0, x1: cRx1, currentY0: cRy0)
+                cLy0 = apexL
+                cRy0 = apexR
             }
 
             let lw = cLx1 - cLx0, lh = cLy1 - cLy0
@@ -583,9 +654,17 @@ final class StereoCardSegmenter: @unchecked Sendable {
 
             // 中央セパレータ（内側エッジ cLx1, cRx0）を基準にして外側の余分な枠を切り落とす
             let startLX = max(0, cLx1 - cw)
-            let startLY = cLy0 + (lh - ch) / 2
+            let startLY: Int
             let startRX = min(width - cw, cRx0)
-            let startRY = cRy0 + (rh - ch) / 2
+            let startRY: Int
+            if hasTopArch {
+                // 上部アーチカードではアーチ頂点 (y0) を幾何学的基準として上端揃えにする
+                startLY = cLy0
+                startRY = cRy0
+            } else {
+                startLY = cLy0 + (lh - ch) / 2
+                startRY = cRy0 + (rh - ch) / 2
+            }
 
             let commonSkewAngle = Self.estimateSkewAngle(maskL: finalMaskL, boxL: boxL, maskR: finalMaskR, boxR: boxR, w: mw, h: mh)
             let centerLX = Double(startLX) + Double(cw) * 0.5
@@ -1199,14 +1278,7 @@ final class StereoCardSegmenter: @unchecked Sendable {
             $0.iou >= 0.65 && isAcceptableSAMMask($0.mask, w: w, h: h, promptBox: promptBox, refW: refW, refH: refH)
         }
         guard let best = valid.max(by: { $0.composite < $1.composite }) else { return nil }
-        // U-Net参照マスクが余白・黒枠・文字帯を含んでいる場合、複合スコアが僅差（0.03以内かつIoU 0.74以上）なら
-        // 余白を抱え込まない引き締まった（最小面積）マスクを優先する
-        let nearTop = valid.filter { $0.composite >= best.composite - 0.03 && $0.iou >= 0.74 }
-        guard !nearTop.isEmpty else { return best }
-        return nearTop.min { lhs, rhs in
-            if lhs.area != rhs.area { return lhs.area < rhs.area }
-            return lhs.composite > rhs.composite
-        }
+        return best
     }
 
     private func isAcceptableSAMMask(
@@ -1223,8 +1295,8 @@ final class StereoCardSegmenter: @unchecked Sendable {
         guard expectedW >= 8, expectedH >= 8 else { return false }
         let samW = Double(samBox.maxX - samBox.minX + 1)
         let samH = Double(samBox.maxY - samBox.minY + 1)
-        guard samW >= expectedW * 0.78 && samW <= expectedW * 1.05
-            && samH >= expectedH * 0.78 && samH <= expectedH * 1.05 else {
+        guard samW >= expectedW * 0.75 && samW <= expectedW * 1.18
+            && samH >= expectedH * 0.75 && samH <= expectedH * 1.20 else {
             return false
         }
         let area = Double(mask.reduce(0) { $0 + ($1 ? 1 : 0) })
@@ -2217,8 +2289,8 @@ final class StereoCardSegmenter: @unchecked Sendable {
         func measureCorners(mask: [Bool], box: IntBox) -> (tl: Double, tr: Double, bl: Double, br: Double) {
             let bw = max(16, box.maxX - box.minX + 1)
             let bh = max(16, box.maxY - box.minY + 1)
-            let cwTop = max(4, Int(Double(bw) * 0.36))
-            let chTop = max(4, Int(Double(bh) * 0.40))
+            let cwTop = max(4, Int(Double(bw) * 0.50))
+            let chTop = max(4, Int(Double(bh) * 0.45))
             let cwBot = max(4, Int(Double(bw) * 0.28))
             let chBot = max(4, Int(Double(bh) * 0.28))
 
@@ -2262,9 +2334,24 @@ final class StereoCardSegmenter: @unchecked Sendable {
 
         let hasTop = rTop >= 0.045
         let hasBot = rBot >= 0.045
+        let topRx: Double
+        let topRy: Double
+        if hasTop {
+            if rTop >= 0.28 {
+                // 大きなアーチの場合：半円ドームアーチに近い形状を想定
+                topRx = 0.50
+                topRy = min(0.40, (rTop * rTop) / 0.50)
+            } else {
+                topRx = min(0.50, rTop * 1.05)
+                topRy = min(0.40, rTop * 1.02)
+            }
+        } else {
+            topRx = 0.0
+            topRy = 0.0
+        }
         return ArchShapeParams(
-            topRxRatio: hasTop ? min(0.38, rTop * 1.02) : 0.0,
-            topRyRatio: hasTop ? min(0.35, rTop * 1.02) : 0.0,
+            topRxRatio: topRx,
+            topRyRatio: topRy,
             botRxRatio: hasBot ? min(0.34, rBot * 1.02) : 0.0,
             botRyRatio: hasBot ? min(0.34, rBot * 1.02) : 0.0
         )
@@ -2285,8 +2372,8 @@ final class StereoCardSegmenter: @unchecked Sendable {
             return nil
         }
 
-        let maxScanX = min(w / 2, Int(Double(w) * 0.44))
-        let maxScanY = min(h / 2, Int(Double(h) * 0.40))
+        let maxScanX = min(w / 2, Int(Double(w) * 0.52))
+        let maxScanY = min(h / 2, Int(Double(h) * 0.45))
         guard maxScanX >= 12, maxScanY >= 12 else { return nil }
 
         let runLen = max(6, min(14, Int(Double(h) * 0.014)))
@@ -2335,16 +2422,20 @@ final class StereoCardSegmenter: @unchecked Sendable {
             }
 
             func columnDrop(_ rgb: [UInt8], x: Int) -> Int {
-                guard maxScanY > runLen else { return 0 }
-                for dy in 0..<(maxScanY - runLen) {
-                    var nonCardRun = 0
-                    for k in 0..<runLen {
-                        let y = isTop ? (dy + k) : (h - 1 - (dy + k))
-                        if !isBg(rgb, x, y) { nonCardRun += 1 }
+                guard maxScanY > 4 else { return 0 }
+                // 台紙から非台紙（写真）へ遷移する位置をピクセル精度で検出
+                // 局所シミ・ゴミを回避するため、非台紙ピクセルが3点連続する最初の位置を採用
+                for dy in 0..<(maxScanY - 3) {
+                    let y = isTop ? dy : (h - 1 - dy)
+                    if !isBg(rgb, x, y) {
+                        let y1 = isTop ? (dy + 1) : (h - 1 - (dy + 1))
+                        let y2 = isTop ? (dy + 2) : (h - 1 - (dy + 2))
+                        if !isBg(rgb, x, y1) && !isBg(rgb, x, y2) {
+                            return dy
+                        }
                     }
-                    if nonCardRun >= nonCardReq { return dy }
                 }
-                return maxScanY - runLen
+                return maxScanY - 3
             }
 
             // 中央辺縁（x ∈ [0.35w ..< 0.65w]）のドロップ量を計測：上辺全体に台紙色の空がある場合を排除
@@ -2358,7 +2449,7 @@ final class StereoCardSegmenter: @unchecked Sendable {
                 centerDropSum += Double(columnDrop(rightRGB, x: cx))
             }
             let dropCenterRatio = (centerDropSum / Double(centerSamples * 2)) / Double(h)
-            guard dropCenterRatio <= 0.065 else { return nil }
+            guard dropCenterRatio <= 0.12 else { return nil }
 
             // L 外側・R 外側の隅先端に十分な背景色が存在することを確認（片側欠けでの誤爆防止）
             var cornerHitsL = 0
@@ -2385,19 +2476,23 @@ final class StereoCardSegmenter: @unchecked Sendable {
                 let dL = columnDrop(leftRGB, x: dx)
                 let dR = columnDrop(rightRGB, x: w - 1 - dx)
                 let drop: Double
-                if min(dL, dR) >= symMinThreshold || (dx <= stepX * 2 && min(dL, dR) >= 4) {
-                    let hi = max(dL, dR), lo = min(dL, dR)
-                    if Double(hi) > Double(lo) * 1.6 + Double(h) * 0.04 {
-                        drop = Double(lo)
+                let hi = Double(max(dL, dR))
+                let lo = Double(min(dL, dR))
+                if lo >= Double(symMinThreshold) || (dx <= stepX * 2 && lo >= 4.0) {
+                    if hi > lo * 1.6 + Double(h) * 0.04 {
+                        drop = lo
                     } else {
-                        drop = Double(dL + dR) * 0.5
+                        drop = (hi + lo) * 0.5
                     }
+                } else if hi >= Double(symMinThreshold) && isTop {
+                    // 片側に台紙ドロップが残っている場合、片側の暗部・汚れによる0急落を防ぐため重み付き平均
+                    drop = (hi + lo * 2.0) / 3.0
                 } else {
-                    drop = Double(min(dL, dR))
+                    drop = lo
                 }
                 let fy = drop / Double(h)
                 profile.append((Double(dx) / Double(w), fy))
-                if fy < 0.005 {
+                if !isTop && fy < 0.005 {
                     flatRun += 1
                     if flatRun >= 3 && profile.count >= 5 { break }
                 } else {
@@ -2442,7 +2537,7 @@ final class StereoCardSegmenter: @unchecked Sendable {
 
             guard let maxFy = mono.prefix(3).map(\.fy).max(),
                   maxFy >= 0.035,
-                  maxFy - dropCenterRatio >= 0.050 else {
+                  maxFy - dropCenterRatio >= 0.025 else {
                 return nil
             }
 
@@ -2450,11 +2545,11 @@ final class StereoCardSegmenter: @unchecked Sendable {
             var bestLoss = Double.greatestFiniteMagnitude
             var bestRx = 0.0
             var bestRy = 0.0
-            for ixStep in 6...42 {
+            for ixStep in 6...52 {
                 let rx = Double(ixStep) * 0.01
-                for iyStep in 6...36 {
+                for iyStep in 6...42 {
                     let ry = Double(iyStep) * 0.01
-                    guard rx >= ry * 0.88 && rx <= ry * 1.65 else { continue }
+                    guard rx >= ry * 0.60 && rx <= ry * 2.80 else { continue }
                     var loss = 0.0
                     for pt in mono {
                         let pred: Double
@@ -2475,7 +2570,15 @@ final class StereoCardSegmenter: @unchecked Sendable {
                 }
             }
             guard bestRx > 0.0 && bestRy > 0.0 else { return nil }
-            return (min(0.42, bestRx + 0.008), min(0.36, bestRy + 0.008))
+            let finalRx: Double
+            if bestRx >= 0.45 || (isTop && bestRy >= 0.14 && bestRx >= 0.28) {
+                // 歴史的ステレオカードの Arch Top (半円ドームアーチ)
+                // アーチ頂点付近の扁平性による過小評価を防ぎ、完全なアーチ (rx = 0.50) にスナップ
+                finalRx = 0.50
+            } else {
+                finalRx = min(0.50, bestRx + 0.008)
+            }
+            return (finalRx, min(0.42, bestRy + 0.008))
         }
 
         for (ref, tol) in [(cardRGB, 24.0), (localBg, 18.0), (localBg, 14.0)] {
