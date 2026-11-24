@@ -1648,6 +1648,7 @@ final class ViewStereoViewModel: ObservableObject {
         workspaceItemStatuses[url.path] = .processing
         leftURL = url
         rightURL = url
+        applySidecarIfPresent(for: url)
         isSingleSBSInput = true
         isProcessing = true
         let cardMode = stereoCardMode
@@ -1845,6 +1846,7 @@ final class ViewStereoViewModel: ObservableObject {
         workspaceItemStatuses[activeID] = .processing
         leftURL = left
         rightURL = right
+        applySidecarIfPresent(for: left)
         isSingleSBSInput = false
         isProcessing = true
         statusMessage = "Loading L/R images..."
@@ -3290,6 +3292,7 @@ final class ViewStereoViewModel: ObservableObject {
         workspaceItemStatuses[url.path] = .processing
         leftURL = url
         rightURL = url
+        applySidecarIfPresent(for: url)
         isSingleSBSInput = true
         isVideoLoaded = true
         currentVideoURL = url
@@ -4583,12 +4586,158 @@ final class ViewStereoViewModel: ObservableObject {
         }
     }
 
+    // MARK: - .vstereo ハイブリッド・サイドカー非破壊保存
+
+    struct ViewStereoSidecarPayload: Codable {
+        let version: Int
+        let updatedAt: Date
+        let sourceFilename: String
+        let isSwapped: Bool
+        let windowShiftX: Double
+        let stereoCardModeRaw: String
+        let frameStyleRaw: String
+        let autoColorModeRaw: String
+        let keepOriginalAspectRatio: Bool
+        let virtualDepthBasePercent: Double
+        let depthGamma: Double
+        let exportLayoutRaw: String
+        let exportImageFormatRaw: String
+    }
+
+    func saveSidecarForCurrentImage(silent: Bool = false) {
+        guard hasLoadedImages, !isVideoLoaded, let url = leftURL else { return }
+        let payload = ViewStereoSidecarPayload(
+            version: 1,
+            updatedAt: Date(),
+            sourceFilename: url.lastPathComponent,
+            isSwapped: isSwapped,
+            windowShiftX: windowShiftX,
+            stereoCardModeRaw: stereoCardMode.rawValue,
+            frameStyleRaw: frameStyle.rawValue,
+            autoColorModeRaw: autoColorMode.rawValue,
+            keepOriginalAspectRatio: keepOriginalAspectRatio,
+            virtualDepthBasePercent: virtualDepthBasePercent,
+            depthGamma: depthGamma,
+            exportLayoutRaw: exportLayout.rawValue,
+            exportImageFormatRaw: exportImageFormat.rawValue
+        )
+        do {
+            let result = try StudioSidecarStore.save(payload, for: url)
+            if !silent {
+                statusMessage = result.usedFallbackCache
+                    ? String(format: String(localized: "Saved adjustments to sidecar cache (%@)"), result.savedURL.lastPathComponent)
+                    : String(format: String(localized: "Saved non-destructive sidecar: %@"), result.savedURL.lastPathComponent)
+            }
+        } catch {
+            if !silent {
+                statusMessage = String(format: String(localized: "Failed to save sidecar: %@"), error.localizedDescription)
+            }
+        }
+    }
+
+    func applySidecarIfPresent(for url: URL) {
+        guard let loaded = StudioSidecarStore.load(ViewStereoSidecarPayload.self, for: url) else {
+            return
+        }
+        let s = loaded.payload
+        isSwapped = s.isSwapped
+        windowShiftX = s.windowShiftX
+        if let mode = StereoCardMode(rawValue: s.stereoCardModeRaw) { stereoCardMode = mode }
+        if let frame = StereoFrameStyle(rawValue: s.frameStyleRaw) { frameStyle = frame }
+        if let color = StereoAutoColorMode(rawValue: s.autoColorModeRaw) { autoColorMode = color }
+        keepOriginalAspectRatio = s.keepOriginalAspectRatio
+        virtualDepthBasePercent = s.virtualDepthBasePercent
+        depthGamma = s.depthGamma
+        if let layout = StereoExportLayout(rawValue: s.exportLayoutRaw) { exportLayout = layout }
+        if let fmt = StereoExportImageFormat(rawValue: s.exportImageFormatRaw) { exportImageFormat = fmt }
+    }
+
+    /// 現在の修復・整準済み画像を共有ステージング経由で他の StereoStudio アプリへハンドオフする
+    func sendToStudioApp(_ target: StudioAppTarget) {
+        guard hasLoadedImages, !isVideoLoaded else { return }
+        saveSidecarForCurrentImage(silent: true)
+
+        // 未インストール時は公式サイトへ案内するクロスセルダイアログを表示
+        if !StudioHandoffManager.isTargetAppInstalled(target) {
+            let alert = NSAlert()
+            alert.messageText = String(format: String(localized: "%@ is Not Installed"), target.displayName)
+            alert.informativeText = String(
+                format: String(localized: "To open this image directly in %@, please download and install it from the official StereoStudio Labs website."),
+                target.displayName
+            )
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: String(localized: "Open Official Website"))
+            alert.addButton(withTitle: String(localized: "Cancel"))
+            if alert.runModal() == .alertFirstButtonReturn {
+                NSWorkspace.shared.open(target.officialURL)
+            }
+            return
+        }
+
+        let swapped = isSwapped
+        let title = leftURL?.deletingPathExtension().lastPathComponent ?? "ViewStereo_Handoff"
+        let zeroPlane = max(0.0, min(1.0, 0.5 + (windowShiftX / 100.0)))
+
+        isProcessing = true
+        statusMessage = String(format: String(localized: "Preparing handoff to %@..."), target.displayName)
+
+        Task {
+            if isAligned {
+                _ = await ensureFullResAlignedSynced()
+            }
+            guard let lRaw = activeLeftRGB, let rRaw = activeRightRGB else {
+                isProcessing = false
+                statusMessage = String(localized: "Handoff failed: No active image.")
+                return
+            }
+            let primaryRGB = swapped ? rRaw : lRaw
+            let w = activeWidth
+            let h = activeHeight
+            let modeLabel = stereoReconstructionMode.isDepthSynthesized ? "2D3D" : "StereoPair"
+
+            let result: Result<(id: String, dir: URL), Error> = await Task.detached(priority: .userInitiated) {
+                guard let cgImage = Self.makeCGImage(from: primaryRGB, width: w, height: h) else {
+                    return .failure(StudioHandoffError.colorEncodingFailed)
+                }
+                do {
+                    let written = try StudioHandoffManager.writePackage(
+                        sourceApp: "ViewStereo",
+                        sourceTitle: title,
+                        colorImage: cgImage,
+                        depthValues: nil,
+                        depthConvention: .disparityNearHigh,
+                        zeroDisparityPlane: zeroPlane,
+                        includeRGBDSideBySide: false,
+                        metadata: [
+                            "mode": modeLabel
+                        ]
+                    )
+                    return .success((written.id, written.directoryURL))
+                } catch {
+                    return .failure(error)
+                }
+            }.value
+
+            isProcessing = false
+            switch result {
+            case .success(let written):
+                let opened = StudioHandoffManager.openTargetApp(target, id: written.id)
+                statusMessage = opened
+                    ? String(format: String(localized: "Sent to %@ (%@)"), target.displayName, title)
+                    : String(format: String(localized: "Failed to launch %@."), target.displayName)
+            case .failure(let error):
+                statusMessage = String(format: String(localized: "Handoff failed: %@"), error.localizedDescription)
+            }
+        }
+    }
+
     func exportImage() {
         if isVideoLoaded {
             exportVideo(toQuickOutput: false)
             return
         }
         guard hasLoadedImages else { return }
+        saveSidecarForCurrentImage(silent: true)
         let layout = exportLayout
         let imgFormat = exportImageFormat
         let style = frameStyle

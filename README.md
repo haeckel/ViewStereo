@@ -1,6 +1,6 @@
 # ViewStereo 🎞️✨
 
-[![Version](https://img.shields.io/badge/version-0.2.2-brightgreen.svg)](https://viewstereo.p-media.jp/)
+[![Version](https://img.shields.io/badge/version-0.2.3-brightgreen.svg)](https://viewstereo.p-media.jp/)
 [![Status](https://img.shields.io/badge/status-Early%20Development-amber.svg)](#development-status)
 [![Platform](https://img.shields.io/badge/platform-macOS%2014.0+-lightgrey.svg)](https://apple.co/macos)
 [![Technology](https://img.shields.io/badge/tech-Card%20Segmentation%20%7C%207--DoF%20Homography%20%7C%20Stereo%20Window%20%7C%20Digital%20Remount-orange.svg)](https://viewstereo.p-media.jp/)
@@ -17,7 +17,12 @@ Designed as the archival restoration and geometric alignment companion to **Spla
 
 ## 🚀 Key Features
 
-### 🏛️ v0.2.2 New: Deep Dome Arch Fitting & Keep Arch Precision Alignment
+### 🔄 v0.2.3 New: .vstereo Non-Destructive Sidecar, Studio Handoff & 3D Bakelite Icon
+- **.vstereo Non-Destructive Hybrid Sidecar Storage**: Introduced `.vstereo` JSON sidecars (`StudioSidecarStore`) with `⌘S` shortcut. Seamlessly saves and restores alignment, stereo window shifts, card segmentation modes, and color settings alongside source files (or within fallback Application Support cache) without touching original media.
+- **Cross-App Studio Handoff (`Send to Studio`)**: Deep integration with the StereoStudio suite. Export and handoff rectified stereoscopic images directly into **SplatStereo** (3DGS generation), **DepthStereo** (2.5D depth/spatial photos), and **PanorStereo** (360° VR) with zero-disparity plane alignment and automatic app launching.
+- **Unified 3D Bakelite App Icon**: Upgraded app icons and welcome illustrations to the new 19th-century Amber Gold 3D Bakelite physical button aesthetic across all resolutions (16px to 1024px).
+
+### 🏛️ v0.2.2: Deep Dome Arch Fitting & Keep Arch Precision Alignment
 - **Deep Dome Arch Fitting & Superellipse Exponent Optimization**: Enhanced `StereoCardMountAnalyzer` with parametric deep dome arch curve modeling (supporting $r_y \le 0.45$ drop ratios, variable superellipse exponents $p \in [1.6, 2.6]$, and Sobel edge attraction scoring), accurately capturing steep-domed 19th-century stereoviews without truncating upper architectural motifs.
 - **Shoulder Barrier Verification**: Introduced outer-connected mount barrier validation (`shoulderBarrierRatio` across 14% × 14% triangular corner zones) to safeguard rectangular/square cards from being falsely classified as arched frames.
 - **Sub-Pixel Keep Arch Inner Mask Offset & Anti-Aliased Blending**: Re-engineered Keep Arch masking in both `StereoCardSegmenter` and `StereoCardMountRenderer` with sub-pixel margin insetting and smooth signed-distance normal blending (`printAlphaAt`), completely eliminating dark fringes, border bleed, and residual scanner artifacts.

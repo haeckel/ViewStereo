@@ -1,10 +1,10 @@
 {
-  "latest_version": "0.2.2",
+  "latest_version": "0.2.3",
   "release_date": "2026/11/24",
   "download_url": "https://viewstereo.p-media.jp/ViewStereo.dmg",
   "changelog": {
-    "ja": "【ViewStereo 0.2.2 アップデート】\n・深いドーム型アーチ（Deep Dome Arch）の数理フィッティング強化：19世紀特有の急峻なドーム型アーチカード（降下率 ry 最大 0.45）に対応。超楕円指数（p=1.6〜2.6）の最適化探索と Sobel 勾配エッジ吸着スコアリングを導入し、上部被写体の欠けを防止。外周連結台紙バリアによる両肩三角領域の一致率検証（shoulderBarrierRatio）を新設し、直角写真カードでのアーチ誤判定を防止。\n・Keep Arch（アーチ保持）のサブピクセル内側オフセット＆アンチエイリアス境界処理：Keep Arch マスク適用時および台紙再構成レンダラーにおいて、黒枠フリンジや元台紙の境界残りをゼロにする内側オフセット・インセット処理を実装。符号付き距離関数（signedArchShapeDistance）に基づくスムーズなアルファブレンディングを導入し、滑らかで自然なアーチ縁を実現。",
-    "en": "[ViewStereo 0.2.2 Update]\n- Deep Dome Arch Parametric Fitting & Anti-False-Positive Guards: Overhauled Stage 2 twin-window upper arch fitting to support deep dome curves (drop ratio up to ry <= 0.45) with adaptive superellipse exponents (p = 1.6 - 2.6) and Sobel gradient attraction. Added shoulder barrier verification (shoulderBarrierRatio over 14% x 14% corner regions) to safeguard square/rectangular prints from false arch misclassifications.\n- Keep Arch Inner Mask Offset & Anti-Aliased Blending: Sub-pixel margin insetting and signed-distance field anti-aliased normal blending (printAlphaAt) across StereoCardSegmenter and StereoCardMountRenderer eliminate black fringes and mount border bleed."
+    "ja": "【ViewStereo 0.2.3 アップデート】\n・.vstereo ハイブリッド・サイドカー非破壊保存（⌘S）：元画像ファイルを一切変更することなく、整準結果・ステレオウィンドウ位置・台紙モード・カラー設定を JSON サイドカーとして自動保存・読み込み。\n・Studio Handoff（スタジオ間連携）：メニューバー「File > Send to Studio」から、整準済み立体写真を SplatStereo（3DGS生成）、DepthStereo（2.5D深度／空間写真）、PanorStereo（360°パノラマ）へ直接送信しターゲットアプリを自動起動。\n・3D ベークライト風アプリアイコン刷新：アンバーゴールドを基調とした立体感あふれる最新ブランドアイコンおよびウェルカムグラフィックを採用。",
+    "en": "[ViewStereo 0.2.3 Update]\n- .vstereo Non-Destructive Hybrid Sidecar Storage (⌘S): Preserves alignment, stereo window shifts, mount modes, and color profiles via lightweight JSON sidecars (.vstereo) next to original media or in cache, keeping original scans 100% pristine.\n- Cross-App Studio Handoff (File > Send to Studio): Seamlessly hand off rectified stereoscopic images into SplatStereo (3DGS), DepthStereo (2.5D/Spatial Media), or PanorStereo (360° VR) with zero-disparity plane alignment and automatic app launching.\n- 3D Bakelite App Icon Refresh: Upgraded app icon and welcome art to the new tactile Amber Gold 3D Bakelite emblem design across all system resolutions."
   },
   "minimum_supported_version": "0.0.1"
 }

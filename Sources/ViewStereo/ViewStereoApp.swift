@@ -9,11 +9,11 @@ extension AboutBrandInfo {
         badgeLetter: "V",
         subtitleKey: nil,
         engineTagline: "19th Century Stereoview Restoration & Intelligent Stereo Window Studio",
-        fallbackVersion: "0.2.2",
+        fallbackVersion: "0.2.3",
         fallbackBuild: "1",
         websiteURL: URL(string: "https://viewstereo.p-media.jp/"),
         websiteLabel: "viewstereo.p-media.jp",
-        copyrightText: "© 2026 ViewStereo Project. All rights reserved.",
+        copyrightText: "© 2026 StereoStudio Labs / P-Media. All rights reserved.",
         windowWidth: 540,
         windowHeight: 390
     )
@@ -121,6 +121,27 @@ struct ViewStereoApp: App {
                 }
                 .keyboardShortcut("e", modifiers: .command)
                 .disabled(!vm.hasLoadedImages || vm.isProcessing || vm.isBatchRunning)
+
+                Button("Save Adjustments (.vstereo)") {
+                    vm.saveSidecarForCurrentImage()
+                }
+                .keyboardShortcut("s", modifiers: .command)
+                .disabled(!vm.hasLoadedImages || vm.isVideoLoaded || vm.isProcessing || vm.isBatchRunning)
+
+                Divider()
+
+                Menu("Send to Studio") {
+                    Button("Send to SplatStereo (3DGS)...") {
+                        vm.sendToStudioApp(.splatstereo)
+                    }
+                    Button("Send to DepthStereo (2.5D)...") {
+                        vm.sendToStudioApp(.depthstereo)
+                    }
+                    Button("Send to PanorStereo (360°)...") {
+                        vm.sendToStudioApp(.panorstereo)
+                    }
+                }
+                .disabled(!vm.hasLoadedImages || vm.isVideoLoaded || vm.isProcessing || vm.isBatchRunning)
             }
             CommandMenu("Stereo") {
                 Button("Auto Align & Window") {

@@ -4,6 +4,30 @@ ViewStereo は現在開発中であり、特に開発初期段階のアプリケ
 
 ==================================================
 
+ViewStereo v0.2.3 リリースノート / Release Notes (2026.11.24)
+
+==================================================
+【ViewStereo v0.2.3 新機能・改善点 / New Features & Improvements】
+==================================================
+- .vstereo ハイブリッド・サイドカー非破壊保存（⌘S）の搭載:
+  - 元画像ファイルを一切変更することなく、整準結果・ステレオウィンドウ位置・台紙モード・カラー設定・書き出し形式を JSON サイドカー（.vstereo）として同フォルダ（またはアプリサポート内キャッシュ）に自動保存・読み込み。
+- Studio Handoff（スタジオ間シームレス連携）機能の新設:
+  - メニューバー「File > Send to Studio」から、整準・修復済みの立体写真をワンクリックで SplatStereo（3DGS生成）、DepthStereo（2.5D深度／空間写真）、PanorStereo（360°パノラマ）へ直接送信しターゲットアプリを自動起動。
+- 3D ベークライト風アプリアイコンへの刷新:
+  - 19世紀のアンバーゴールドを基調とした立体感あふれる最新ブランドアイコン（16px〜1024px）およびウェルカムグラフィックを採用。
+
+==================================================
+[v0.2.3 New Features & Highlights]
+==================================================
+- .vstereo Non-Destructive Hybrid Sidecar Storage (⌘S):
+  - Preserves alignment, stereo window shifts, mount modes, and color profiles via lightweight JSON sidecars (.vstereo) next to original media or in cache, keeping original scans 100% pristine.
+- Cross-App Studio Handoff (File > Send to Studio):
+  - Seamlessly hand off rectified stereoscopic images into SplatStereo (3DGS), DepthStereo (2.5D/Spatial Media), or PanorStereo (360° VR) with zero-disparity plane alignment and automatic app launching.
+- 3D Bakelite App Icon Refresh:
+  - Upgraded app icon and welcome art to the new tactile Amber Gold 3D Bakelite emblem design across all system resolutions.
+
+==================================================
+
 ViewStereo v0.2.2 リリースノート / Release Notes (2026.11.24)
 
 ==================================================
