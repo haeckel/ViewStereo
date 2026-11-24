@@ -1,6 +1,6 @@
 # ViewStereo 🎞️✨
 
-[![Version](https://img.shields.io/badge/version-0.2.4-brightgreen.svg)](https://viewstereo.p-media.jp/)
+[![Version](https://img.shields.io/badge/version-0.2.5-brightgreen.svg)](https://viewstereo.p-media.jp/)
 [![Status](https://img.shields.io/badge/status-Early%20Development-amber.svg)](#development-status)
 [![Platform](https://img.shields.io/badge/platform-macOS%2014.0+-lightgrey.svg)](https://apple.co/macos)
 [![Technology](https://img.shields.io/badge/tech-Card%20Segmentation%20%7C%207--DoF%20Homography%20%7C%20Stereo%20Window%20%7C%20Digital%20Remount-orange.svg)](https://viewstereo.p-media.jp/)
@@ -17,7 +17,11 @@ Designed as the archival restoration and geometric alignment companion to **Spla
 
 ## 🚀 Key Features
 
-### 🥽 v0.2.4 New: StereoStudioCore Engine Integration & Spatial Delivery Hub
+### 🥽 v0.2.5 New: Real-time Video 2D→3D Disparity Sampling & Zero-Latency Drag Following
+- **Automatic Disparity Sampling Grid (`makeDepthDisparitySamples`)**: Generates an optimized 16x12 disparity sample grid from depth maps upon AI inference, persisting `lastDisparitySamples` for smooth downstream operations.
+- **Zero-Latency Drag Following**: Enables smooth, instant preview updates when dragging parallax or focus sliders without re-running heavy GPU/Metal pipelines.
+
+### 🥽 v0.2.4: StereoStudioCore Engine Integration & Spatial Delivery Hub
 - **StereoStudioCore Native Engine Unification**: Refactored monolithic DIBR, video depth, and multi-model AI pipelines to delegate directly to `StereoStudioCore` (`StudioVideoDepthSynthesizer`, `StudioMetalDIBR`, and `StudioVideoDepthSession`), slashing codebase footprint while enhancing parity and execution stability.
 - **Unified Spatial Delivery Pipeline**: Integrated `SpatialDeliveryMenuButton` across photo and video master toolbars, enabling one-click spatial export into Apple Photos library (`PHPhotoLibrary`) and native macOS Share Sheet for instant Apple Vision Pro Spatial Media viewing.
 - **Stereo Depth Budget Visual Metering**: Embedded `StereoDepthBudgetMeterView` in both Stereo Window (⌥⌘2) and AI 2D→3D (⌥⌘7) panels, displaying real-time near/far parallax percentages, window violation warnings, and 1-click auto-optimization.

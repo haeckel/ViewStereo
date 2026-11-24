@@ -4,6 +4,23 @@ ViewStereo は現在開発中であり、特に開発初期段階のアプリケ
 
 ==================================================
 
+ViewStereo v0.2.5 リリースノート / Release Notes (2026.11.25)
+
+==================================================
+【ViewStereo v0.2.5 新機能・改善点 / New Features & Improvements】
+==================================================
+- 動画・写真 2D→3D 深度推論時のリアルタイム視差サンプリング生成:
+  - 深度推定結果から 16×12（192点）の均等視差サンプリング配列（lastDisparitySamples）を自動生成。
+  - 視差スライダーおよびフォーカススライダーのドラッグ操作時にゼロレイテンシでリアルタイムプレビューが追従し、快適で直感的なパラメータ調整を実現。
+
+--------------------------------------------------
+[v0.2.5 New Features & Highlights]
+- Real-time 2D-to-3D Disparity Sampling & Zero-Latency Drag:
+  - Automatically generates an optimized 16x12 disparity sampling grid (lastDisparitySamples) from synthesized depth maps.
+  - Delivers zero-latency preview tracking during parallax and focus slider dragging for effortless depth adjustment.
+
+==================================================
+
 ViewStereo v0.2.4 リリースノート / Release Notes (2026.11.25)
 
 ==================================================

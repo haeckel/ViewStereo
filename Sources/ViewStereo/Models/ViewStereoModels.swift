@@ -3532,6 +3532,16 @@ final class ViewStereoViewModel: ObservableObject {
             self.isAligned = true
             self.windowShiftX = 0.0
             self.autoOptimalShiftX = 0.0
+            self.lastDisparitySamples = Self.makeDepthDisparitySamples(
+                disparityMap: res.disp,
+                depthW: res.dw,
+                depthH: res.dh,
+                imageWidth: meta.naturalWidth,
+                imageHeight: meta.naturalHeight,
+                targetDisparityPercent: dispPct,
+                depthGamma: self.depthGamma,
+                focusRatio: res.focus
+            )
             self.maxDisparityPercent = dispPct
             self.nearParallaxPercent = -dispPct * (1.0 - res.focus)
             self.farParallaxPercent = dispPct * res.focus
@@ -3895,6 +3905,51 @@ final class ViewStereoViewModel: ObservableObject {
             cropWidth: w
         )
         return (optFocus, finalSamples, erg.hasWindowViolationRisk, erg.requiresFloatingWindow, erg.dispRangePct, erg.nearPct, erg.farPct)
+    }
+
+    /// 動画等の 2D→3D 推論結果から軽量な視差サンプル群を生成する（リアルタイムスライダー追従用）
+    nonisolated private static func makeDepthDisparitySamples(
+        disparityMap: [Float],
+        depthW: Int,
+        depthH: Int,
+        imageWidth w: Int,
+        imageHeight h: Int,
+        targetDisparityPercent: Double,
+        depthGamma: Double,
+        focusRatio: Double
+    ) -> [DisparitySample] {
+        guard w > 0, h > 0, depthW > 0, depthH > 0, disparityMap.count >= depthW * depthH else {
+            return []
+        }
+        let maxBaselinePx = Double(w) * max(0.2, min(8.0, targetDisparityPercent)) / 100.0
+        let cols = 16
+        let rows = 12
+        var samples: [DisparitySample] = []
+        samples.reserveCapacity(cols * rows)
+        for gy in 0..<rows {
+            let v = 0.02 + 0.96 * Double(gy) / Double(rows - 1)
+            let py = v * Double(h)
+            for gx in 0..<cols {
+                let u = 0.02 + 0.96 * Double(gx) / Double(cols - 1)
+                let px = u * Double(w)
+                let d = Double(ViewStereoDepthSynthesizer.sampleNormalizedDisparity(
+                    disparityMap: disparityMap,
+                    depthW: depthW,
+                    depthH: depthH,
+                    u: Float(u),
+                    v: Float(v),
+                    depthGamma: depthGamma
+                ))
+                samples.append(DisparitySample(
+                    x: px,
+                    y: py,
+                    parallax: -(d - focusRatio) * maxBaselinePx,
+                    saliency: 0.5,
+                    foregroundWeight: 0.7
+                ))
+            }
+        }
+        return samples
     }
 
     /// スライダードラッグ中のゼロレイテンシ追従プレビュー（Metal 呼び出しなし・1パス RGBA 合成）
