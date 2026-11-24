@@ -312,11 +312,12 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = ViewStereo;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "© 2026 ViewStereo Project. All rights reserved.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "作成した空間写真・空間動画を「写真」アプリへ保存し、Apple Vision Pro 等で閲覧するために使用します。";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.2.3;
+				MARKETING_VERSION = 0.2.4;
 				PRODUCT_BUNDLE_IDENTIFIER = jp.p-media.ViewStereo;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -335,11 +336,12 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = ViewStereo;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "© 2026 ViewStereo Project. All rights reserved.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "作成した空間写真・空間動画を「写真」アプリへ保存し、Apple Vision Pro 等で閲覧するために使用します。";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.2.3;
+				MARKETING_VERSION = 0.2.4;
 				PRODUCT_BUNDLE_IDENTIFIER = jp.p-media.ViewStereo;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

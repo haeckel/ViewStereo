@@ -404,21 +404,40 @@ private struct BrowserBottomActionBar: View {
                         .customTooltip(String(localized: "Check stereo alignment & warnings without exporting") + " (⇧⌘V)")
                     }
 
+                    let is2D3D = vm.workspaceMode == .convert2DTo3D
+                    let isBatchDisabled = batchCount == 0 || vm.isProcessing
+                    let btnGradient: [Color] = is2D3D
+                        ? [Color(red: 0.28, green: 0.22, blue: 0.82), Color(red: 0.02, green: 0.50, blue: 0.78)]
+                        : [Color(red: 0.02, green: 0.47, blue: 0.34), Color(red: 0.04, green: 0.58, blue: 0.42)]
+                    let btnStroke: Color = is2D3D ? .brightBlue : .brightTeal
+
                     Button {
                         vm.startBatchProcessingFromBrowser()
                     } label: {
                         HStack(spacing: 6) {
-                            Image(systemName: vm.workspaceMode == .convert2DTo3D ? "cube.transparent.fill" : "play.fill")
+                            Image(systemName: is2D3D ? "cube.transparent.fill" : "play.fill")
                             Text(batchButtonTitle(itemCount: batchCount, selectionCount: selectedCount))
                                 .appSystemFont(size: 11.5, weight: .bold)
                                 .lineLimit(1)
                         }
+                        .foregroundStyle(isBatchDisabled ? .white.opacity(0.4) : .white)
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 6)
+                        .padding(.vertical, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 7)
+                                .fill(
+                                    isBatchDisabled
+                                        ? LinearGradient(colors: [Color.white.opacity(0.08)], startPoint: .leading, endPoint: .trailing)
+                                        : LinearGradient(colors: btnGradient, startPoint: .topLeading, endPoint: .bottomTrailing)
+                                )
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 7)
+                                .stroke(isBatchDisabled ? Color.white.opacity(0.12) : btnStroke.opacity(0.75), lineWidth: 1)
+                        )
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(vm.workspaceMode == .convert2DTo3D ? .brightPurple : .brightTeal)
-                    .disabled(batchCount == 0 || vm.isProcessing)
+                    .buttonStyle(.plain)
+                    .disabled(isBatchDisabled)
                 }
             }
         }

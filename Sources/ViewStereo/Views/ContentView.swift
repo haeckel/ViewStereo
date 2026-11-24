@@ -297,39 +297,69 @@ struct ContentView: View {
 
     private var topWorkspaceModeBar: some View {
         let isStereoRestore = vm.workspaceMode == .stereoRestore
-        let accentColor: Color = isStereoRestore ? .brightAmber : .brightPurple
+        let accentColor: Color = isStereoRestore ? .brightAmber : .brightBlue
         let isLocked = vm.isBatchRunning || vm.isProcessing
+
+        // バー全体の背景グラデーション（暖色アンバー系 vs 寒色ディープインディゴ〜シアン系）
+        let barGradientColors: [Color] = isStereoRestore
+            ? [
+                Color(red: 0.36, green: 0.18, blue: 0.02),
+                Color(red: 0.22, green: 0.11, blue: 0.02),
+                Color(red: 0.29, green: 0.15, blue: 0.02)
+            ]
+            : [
+                Color(red: 0.09, green: 0.14, blue: 0.38),
+                Color(red: 0.05, green: 0.16, blue: 0.30),
+                Color(red: 0.08, green: 0.12, blue: 0.34)
+            ]
 
         return ZStack(alignment: .bottom) {
             HStack(spacing: 16) {
-                // 左: 上位階層の処理モード見出し（左右均等幅にして中央スイッチを厳密にセンター配置）
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(accentColor)
-                        .frame(width: 7, height: 7)
-                        .shadow(color: accentColor.opacity(0.8), radius: 4)
+                // 左: 動的モードステータスバッジ（周辺視野でも現在の運用モードが即座に判別可能）
+                HStack {
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(accentColor)
+                            .frame(width: 7, height: 7)
+                            .shadow(color: accentColor.opacity(0.9), radius: 4)
 
-                    Text(LocalizedStringKey("Processing Mode"))
-                        .appSystemFont(size: 11, weight: .bold)
-                        .foregroundStyle(.white.opacity(0.75))
-                        .tracking(0.4)
+                        Image(systemName: isStereoRestore ? "rectangle.split.2x1.fill" : "cube.transparent.fill")
+                            .appSystemFont(size: 11, weight: .bold)
+                            .foregroundStyle(accentColor)
+
+                        Text(LocalizedStringKey(isStereoRestore ? "Stereo Restore Mode" : "AI 2D→3D Mode"))
+                            .appSystemFont(size: 11.5, weight: .bold)
+                            .foregroundStyle(.white)
+                            .tracking(0.3)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(
+                        Capsule()
+                            .fill(accentColor.opacity(0.22))
+                            .overlay(
+                                Capsule()
+                                    .stroke(accentColor.opacity(0.75), lineWidth: 1)
+                            )
+                    )
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-                // 中央: アイコン＆カラーグラデーション付きモード切替カプセル（ウィンドウ中央・ツールバー中央群と揃える）
+                // 中央: アイコン＆高コントラストグラデーション付きモード切替カプセル
                 HStack(spacing: 4) {
                     ForEach(ViewStereoWorkspaceMode.allCases) { mode in
                         let isSelected = vm.workspaceMode == mode
                         let isStereo = mode == .stereoRestore
                         let iconName = isStereo ? "rectangle.split.2x1.fill" : "cube.transparent.fill"
+                        // スタイルガイド 2.6節準拠: 白飛びしない深層グラデーション＋純白太字
                         let gradientColors: [Color] = isStereo
-                            ? [.brightAmber, .darkAmber]
-                            : [.brightPurple, .brightBlue]
-                        let glowColor: Color = isStereo ? .brightAmber : .brightPurple
+                            ? [Color(red: 0.82, green: 0.46, blue: 0.04), Color(red: 0.60, green: 0.28, blue: 0.01)]
+                            : [Color(red: 0.28, green: 0.22, blue: 0.82), Color(red: 0.02, green: 0.50, blue: 0.78)]
+                        let strokeColor: Color = isStereo ? .brightAmber : .brightBlue
 
                         Button {
                             guard vm.workspaceMode != mode else { return }
-                            withAnimation(.spring(response: 0.25, dampingFraction: 0.82)) {
+                            withAnimation(.easeInOut(duration: 0.22)) {
                                 vm.workspaceMode = mode
                             }
                         } label: {
@@ -339,7 +369,7 @@ struct ContentView: View {
                                 Text(LocalizedStringKey(mode.rawValue))
                                     .appSystemFont(size: 12.5, weight: isSelected ? .bold : .medium)
                             }
-                            .foregroundStyle(isSelected ? .white : .white.opacity(0.65))
+                            .foregroundStyle(isSelected ? .white : .white.opacity(0.68))
                             .padding(.horizontal, 16)
                             .padding(.vertical, 6)
                             .background {
@@ -352,7 +382,11 @@ struct ContentView: View {
                                                 endPoint: .bottomTrailing
                                             )
                                         )
-                                        .shadow(color: glowColor.opacity(0.45), radius: 6, y: 1)
+                                        .overlay(
+                                            Capsule()
+                                                .stroke(strokeColor.opacity(0.85), lineWidth: 1)
+                                        )
+                                        .shadow(color: strokeColor.opacity(0.45), radius: 6, y: 1)
                                 } else {
                                     Capsule()
                                         .fill(Color.clear)
@@ -366,10 +400,10 @@ struct ContentView: View {
                 .padding(3)
                 .background(
                     Capsule()
-                        .fill(Color.black.opacity(0.42))
+                        .fill(Color.black.opacity(0.55))
                         .overlay(
                             Capsule()
-                                .stroke(Color.white.opacity(0.14), lineWidth: 1)
+                                .stroke(Color.white.opacity(0.18), lineWidth: 1)
                         )
                 )
                 .fixedSize()
@@ -380,7 +414,7 @@ struct ContentView: View {
                 // 右: 現在モードの簡潔な説明（左カラムと対称の maxWidth: .infinity で中央揃えを維持）
                 Text(LocalizedStringKey(isStereoRestore ? "mode_desc_stereo_restore" : "mode_desc_2d_to_3d"))
                     .appSystemFont(size: 11, weight: .medium)
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(.white.opacity(0.82))
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -389,26 +423,25 @@ struct ContentView: View {
             .padding(.vertical, 7)
             .background(
                 LinearGradient(
-                    colors: [
-                        accentColor.opacity(0.16),
-                        Color(red: 0.10, green: 0.10, blue: 0.12),
-                        accentColor.opacity(0.06)
-                    ],
+                    colors: barGradientColors,
                     startPoint: .leading,
                     endPoint: .trailing
                 )
             )
+            .animation(.easeInOut(duration: 0.22), value: vm.workspaceMode)
 
-            // 下辺のモード連動アクセントライン
+            // 下辺の全面モード連動発光アクセントライン
             Rectangle()
                 .fill(
                     LinearGradient(
-                        colors: [accentColor.opacity(0.75), accentColor.opacity(0.25), .clear],
+                        colors: [accentColor.opacity(0.9), accentColor.opacity(0.65), accentColor.opacity(0.9)],
                         startPoint: .leading,
                         endPoint: .trailing
                     )
                 )
-                .frame(height: 1.5)
+                .frame(height: 2.5)
+                .shadow(color: accentColor.opacity(0.55), radius: 4, y: 1)
+                .animation(.easeInOut(duration: 0.22), value: vm.workspaceMode)
         }
     }
 
@@ -1902,6 +1935,15 @@ struct ContentView: View {
                         .disabled(vm.isProcessing)
                 }
 
+                StereoDepthBudgetMeterView(
+                    nearPercent: vm.nearParallaxPercent,
+                    farPercent: vm.farParallaxPercent,
+                    hasWindowViolation: false,
+                    isAvailable: vm.isAligned || vm.isVideoLoaded,
+                    compact: false
+                )
+                .padding(.top, 2)
+
                 if vm.isVideoLoaded {
                     Divider().opacity(0.3)
 
@@ -2125,6 +2167,19 @@ struct ContentView: View {
                 .onChange(of: vm.windowShiftX) { _, _ in
                     vm.updateRealtimeDragPreview()
                 }
+
+                StereoDepthBudgetMeterView(
+                    nearPercent: vm.nearParallaxPercent,
+                    farPercent: vm.farParallaxPercent,
+                    hasWindowViolation: vm.hasWindowViolationRisk,
+                    isAvailable: vm.isAligned,
+                    compact: false,
+                    onAutoOptimize: (!vm.stereoReconstructionMode.isDepthSynthesized && abs(vm.windowShiftX - vm.autoOptimalShiftX) > 0.5) ? {
+                        vm.windowShiftX = vm.autoOptimalShiftX
+                        vm.applyManualWindowShift()
+                    } : nil
+                )
+                .padding(.top, 4)
             }
         }
         .opacity(vm.isAligned ? 1.0 : 0.65)
@@ -2831,6 +2886,16 @@ struct ContentView: View {
                         .buttonStyle(.bordered)
                         .disabled(vm.isProcessing || vm.videoMetadata == nil)
                         .customTooltip(String(localized: "Export Video As...") + " (⌘E)")
+
+                        SpatialDeliveryMenuButton(
+                            isEnabled: !vm.isProcessing && vm.videoMetadata != nil && !vm.isExportingVideo,
+                            prepareItems: {
+                                try await vm.prepareVideoForDelivery()
+                            },
+                            onStatusUpdate: { msg in
+                                vm.statusMessage = msg
+                            }
+                        )
                     }
                 }
             } else {
@@ -2950,6 +3015,20 @@ struct ContentView: View {
                 .buttonStyle(.bordered)
                 .disabled(!vm.hasLoadedImages || vm.isProcessing || vm.isBatchRunning)
                 .customTooltip(String(localized: "Export Image...") + " (⌘E)")
+
+                SpatialDeliveryMenuButton(
+                    isEnabled: (vm.hasLoadedImages || vm.browserStore.selectedBatchCount > 0 || vm.isVideoLoaded) && !vm.isProcessing && !vm.isBatchRunning && !vm.isExportingVideo,
+                    prepareItems: {
+                        if vm.isVideoLoaded {
+                            return try await vm.prepareVideoForDelivery()
+                        } else {
+                            return try await vm.prepareSelectedLayoutForDelivery()
+                        }
+                    },
+                    onStatusUpdate: { msg in
+                        vm.statusMessage = msg
+                    }
+                )
 
                 Button {
                     vm.exportAdjustmentReport()

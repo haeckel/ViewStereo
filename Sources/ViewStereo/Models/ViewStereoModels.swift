@@ -1163,6 +1163,8 @@ final class ViewStereoViewModel: ObservableObject {
         hasWindowViolationRisk = false
         requiresFloatingWindow = false
         maxDisparityPercent = 0.0
+        nearParallaxPercent = 0.0
+        farParallaxPercent = 0.0
         lastFullResShiftX = 0.0
         isPseudoscopicSuspected = false
         isStereoMismatchSuspected = false
@@ -1200,6 +1202,8 @@ final class ViewStereoViewModel: ObservableObject {
     @Published var hasWindowViolationRisk: Bool = false
     @Published var requiresFloatingWindow: Bool = false
     @Published var maxDisparityPercent: Double = 0.0
+    @Published var nearParallaxPercent: Double = 0.0
+    @Published var farParallaxPercent: Double = 0.0
 
     // テレメトリー
     @Published var processingTimeMs: Double = 0.0
@@ -1950,6 +1954,8 @@ final class ViewStereoViewModel: ObservableObject {
         hasWindowViolationRisk = false
         requiresFloatingWindow = false
         maxDisparityPercent = 0
+        nearParallaxPercent = 0.0
+        farParallaxPercent = 0.0
         verticalRMSE = 0
         inlierCount = 0
         isPseudoscopicSuspected = false
@@ -1988,6 +1994,8 @@ final class ViewStereoViewModel: ObservableObject {
         let windowDecision: StereoWindowDecision
         let elapsedMs: Double
         let dispRangePct: Double
+        let nearPct: Double
+        let farPct: Double
         let isPseudoscopicSuspected: Bool
         let isStereoMismatchSuspected: Bool
         let stereoQualityWarning: String?
@@ -2090,6 +2098,8 @@ final class ViewStereoViewModel: ObservableObject {
         hasWindowViolationRisk = out.windowDecision.hasWindowViolationRisk
         requiresFloatingWindow = out.windowDecision.requiresFloatingWindow
         maxDisparityPercent = out.dispRangePct
+        nearParallaxPercent = out.nearPct
+        farParallaxPercent = out.farPct
         isPseudoscopicSuspected = out.isPseudoscopicSuspected
         isStereoMismatchSuspected = out.isStereoMismatchSuspected
         stereoQualityWarning = out.stereoQualityWarning
@@ -2432,6 +2442,8 @@ final class ViewStereoViewModel: ObservableObject {
         }
 
         let elapsedMs = (CFAbsoluteTimeGetCurrent() - startTime) * 1000.0
+        let nearPct = cw > 0 ? (windowDecision.minShiftedParallax / Double(cw) * 100.0) : 0.0
+        let farPct = cw > 0 ? (windowDecision.farShiftedParallax / Double(cw) * 100.0) : 0.0
         let dispRangePct = cw > 0 ? ((windowDecision.farShiftedParallax - windowDecision.minShiftedParallax) / Double(cw) * 100.0) : 0.0
         let (prevL, prevCW, prevCH) = downsampleForPreview(warpedL, width: cw, height: ch, maxDim: previewMaxDimension)
         let (prevR, _, _) = downsampleForPreview(warpedR, width: cw, height: ch, maxDim: previewMaxDimension)
@@ -2508,6 +2520,8 @@ final class ViewStereoViewModel: ObservableObject {
             windowDecision: windowDecision,
             elapsedMs: elapsedMs,
             dispRangePct: max(0, dispRangePct),
+            nearPct: nearPct,
+            farPct: farPct,
             isPseudoscopicSuspected: isPseudoscopicSuspected,
             isStereoMismatchSuspected: stereoQuality.isMismatch,
             stereoQualityWarning: stereoQuality.warningText,
@@ -2922,6 +2936,8 @@ final class ViewStereoViewModel: ObservableObject {
                 self.hasWindowViolationRisk = winSetup.hasWindowViolationRisk
                 self.requiresFloatingWindow = winSetup.requiresFloatingWindow
                 self.maxDisparityPercent = winSetup.dispRangePct
+                self.nearParallaxPercent = winSetup.nearPct
+                self.farParallaxPercent = winSetup.farPct
                 self.isProcessing = false
                 self.statusMessage = String(format: String(localized: "3D Conversion Done (%@) | Disp: %.1f%% | %.0f ms"), depthRes.engineName, targetDispPct, depthRes.elapsedMs)
                 self.renderDisplayPreview()
@@ -3032,6 +3048,8 @@ final class ViewStereoViewModel: ObservableObject {
                 self.hasWindowViolationRisk = winSetup.hasWindowViolationRisk
                 self.requiresFloatingWindow = winSetup.requiresFloatingWindow
                 self.maxDisparityPercent = winSetup.dispRangePct
+                self.nearParallaxPercent = winSetup.nearPct
+                self.farParallaxPercent = winSetup.farPct
                 self.verticalRMSE = 0.0
                 self.lastDepthEngineLabel = depthRes.engineName
                 self.lastDepthInferenceMs = depthRes.elapsedMs
@@ -3208,6 +3226,8 @@ final class ViewStereoViewModel: ObservableObject {
                     self.hasWindowViolationRisk = winSetup.hasWindowViolationRisk
                     self.requiresFloatingWindow = winSetup.requiresFloatingWindow
                     self.maxDisparityPercent = winSetup.dispRangePct
+                    self.nearParallaxPercent = winSetup.nearPct
+                    self.farParallaxPercent = winSetup.farPct
                     self.renderDisplayPreview()
                 }
             }
@@ -3513,6 +3533,8 @@ final class ViewStereoViewModel: ObservableObject {
             self.windowShiftX = 0.0
             self.autoOptimalShiftX = 0.0
             self.maxDisparityPercent = dispPct
+            self.nearParallaxPercent = -dispPct * (1.0 - res.focus)
+            self.farParallaxPercent = dispPct * res.focus
             self.videoActiveEngineLabel = res.engineName
             self.statusMessage = String(format: String(localized: "Video Frame %.2fs | %dx%d | %@"), decoded.actualSeconds, meta.naturalWidth, meta.naturalHeight, res.engineName)
             self.renderDisplayPreview()
@@ -3568,8 +3590,15 @@ final class ViewStereoViewModel: ObservableObject {
     }
 
     /// 動画 2D→3D フル書き出し（Spatial Video MV-HEVC / Full SBS / Half SBS / Anaglyph）
-    func exportVideo(toQuickOutput: Bool) {
-        guard isVideoLoaded, let sourceURL = currentVideoURL, let meta = videoMetadata, !isExportingVideo else { return }
+    func exportVideo(
+        toQuickOutput: Bool,
+        outputURLOverride: URL? = nil,
+        onDeliveryComplete: ((Result<URL, Error>) -> Void)? = nil
+    ) {
+        guard isVideoLoaded, let sourceURL = currentVideoURL, let meta = videoMetadata, !isExportingVideo else {
+            onDeliveryComplete?(.failure(CancellationError()))
+            return
+        }
         if isVideoPlaying { toggleVideoPlayback() }
 
         let format = videoExportFormat
@@ -3577,7 +3606,9 @@ final class ViewStereoViewModel: ObservableObject {
         let defaultFilename = "\(baseName)\(format.suffix).\(format.fileExtension)"
 
         let targetURL: URL
-        if toQuickOutput {
+        if let overrideURL = outputURLOverride {
+            targetURL = overrideURL
+        } else if toQuickOutput {
             let outDir = batchOutputFolder ?? sourceURL.deletingLastPathComponent().appendingPathComponent("ViewStereo_Output", isDirectory: true)
             try? FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
             targetURL = outDir.appendingPathComponent(defaultFilename)
@@ -3586,7 +3617,10 @@ final class ViewStereoViewModel: ObservableObject {
             panel.nameFieldStringValue = defaultFilename
             panel.allowedContentTypes = format == .spatialVideo ? [.quickTimeMovie] : [.mpeg4Movie]
             panel.canCreateDirectories = true
-            guard panel.runModal() == .OK, let url = panel.url else { return }
+            guard panel.runModal() == .OK, let url = panel.url else {
+                onDeliveryComplete?(.failure(CancellationError()))
+                return
+            }
             targetURL = url
         }
 
@@ -3660,6 +3694,7 @@ final class ViewStereoViewModel: ObservableObject {
                     self.videoExportStatusText = ""
                     self.workspaceItemStatuses[sourceURL.path] = .aiConverted(format.rawValue)
                     self.statusMessage = String(format: String(localized: "Video exported: %@"), savedURL.lastPathComponent)
+                    onDeliveryComplete?(.success(savedURL))
                 }
             } catch is CancellationError {
                 await MainActor.run {
@@ -3667,6 +3702,7 @@ final class ViewStereoViewModel: ObservableObject {
                     self.videoExportProgress = 0.0
                     self.videoExportStatusText = ""
                     self.statusMessage = String(localized: "Video export cancelled.")
+                    onDeliveryComplete?(.failure(CancellationError()))
                 }
             } catch {
                 await MainActor.run {
@@ -3674,9 +3710,35 @@ final class ViewStereoViewModel: ObservableObject {
                     self.videoExportProgress = 0.0
                     self.videoExportStatusText = ""
                     self.statusMessage = String(format: String(localized: "Video export failed: %@"), error.localizedDescription)
+                    onDeliveryComplete?(.failure(error))
                 }
             }
         }
+    }
+
+    /// 動画（Spatial Video MV-HEVC / SBS / Anaglyph）を写真.app 登録・AirDrop 送信用の一時ファイルとして生成する
+    func prepareVideoForDelivery() async throws -> [SpatialDeliveryItem] {
+        guard isVideoLoaded, let sourceURL = currentVideoURL, !isExportingVideo else { return [] }
+        let format = videoExportFormat
+        let baseName = sourceURL.deletingPathExtension().lastPathComponent
+        let tempURL = try SpatialDeliveryService.makeTemporaryDeliveryURL(
+            filename: "\(baseName)\(format.suffix)",
+            ext: format.fileExtension
+        )
+
+        let exportedURL: URL = try await withCheckedThrowingContinuation { continuation in
+            exportVideo(toQuickOutput: false, outputURLOverride: tempURL) { result in
+                switch result {
+                case .success(let url):
+                    continuation.resume(returning: url)
+                case .failure(let err):
+                    try? FileManager.default.removeItem(at: tempURL)
+                    continuation.resume(throwing: err)
+                }
+            }
+        }
+        let kind: SpatialDeliverableKind = (format == .spatialVideo) ? .spatialVideo : .video
+        return [SpatialDeliveryItem(url: exportedURL, kind: kind, isTemporaryFile: true)]
     }
 
     func cancelVideoExport() {
@@ -3749,9 +3811,9 @@ final class ViewStereoViewModel: ObservableObject {
         saliencyMap: NormalizedFloatMap?,
         useSaliency: Bool,
         preserveArch: Bool
-    ) -> (focusRatio: Double, samples: [DisparitySample], hasWindowViolationRisk: Bool, requiresFloatingWindow: Bool, dispRangePct: Double) {
+    ) -> (focusRatio: Double, samples: [DisparitySample], hasWindowViolationRisk: Bool, requiresFloatingWindow: Bool, dispRangePct: Double, nearPct: Double, farPct: Double) {
         guard w > 0, h > 0, depthW > 0, depthH > 0, disparityMap.count >= depthW * depthH else {
-            return (0.75, [], false, false, targetDisparityPercent)
+            return (0.75, [], false, false, targetDisparityPercent, -targetDisparityPercent * 0.75, targetDisparityPercent * 0.25)
         }
 
         let maxBaselinePx = Double(w) * max(0.2, min(8.0, targetDisparityPercent)) / 100.0
@@ -3832,7 +3894,7 @@ final class ViewStereoViewModel: ObservableObject {
             imageHeight: Double(h),
             cropWidth: w
         )
-        return (optFocus, finalSamples, erg.hasWindowViolationRisk, erg.requiresFloatingWindow, erg.dispRangePct)
+        return (optFocus, finalSamples, erg.hasWindowViolationRisk, erg.requiresFloatingWindow, erg.dispRangePct, erg.nearPct, erg.farPct)
     }
 
     /// スライダードラッグ中のゼロレイテンシ追従プレビュー（Metal 呼び出しなし・1パス RGBA 合成）
@@ -3894,6 +3956,8 @@ final class ViewStereoViewModel: ObservableObject {
         hasWindowViolationRisk = erg.hasWindowViolationRisk
         requiresFloatingWindow = erg.requiresFloatingWindow
         maxDisparityPercent = erg.dispRangePct
+        nearParallaxPercent = erg.nearPct
+        farParallaxPercent = erg.farPct
         statusMessage = String(format: "Window Shift: %.1f px | Disparity: %.2f%%", tx, erg.dispRangePct)
     }
 
@@ -4035,6 +4099,8 @@ final class ViewStereoViewModel: ObservableObject {
             hasWindowViolationRisk = erg.hasWindowViolationRisk
             requiresFloatingWindow = erg.requiresFloatingWindow
             maxDisparityPercent = erg.dispRangePct
+            nearParallaxPercent = erg.nearPct
+            farParallaxPercent = erg.farPct
             renderDisplayPreview()
             return
         }
@@ -4079,7 +4145,7 @@ final class ViewStereoViewModel: ObservableObject {
         }
 
         Task {
-            let output = await Task.detached(priority: .userInitiated) { () -> ([UInt8], [UInt8], Int, Int, Int, Int, Bool, Bool, Double, NSImage?)? in
+            let output = await Task.detached(priority: .userInitiated) { () -> ([UInt8], [UInt8], Int, Int, Int, Int, Bool, Bool, Double, Double, Double, NSImage?)? in
                 let shiftL = HomographyGeometry.translation(dx: -0.5 * tx, dy: 0) * rectRes.homographyLeftPixel
                 let shiftR = HomographyGeometry.translation(dx: +0.5 * tx, dy: 0) * rectRes.homographyRightPixel
                 let corners = [SIMD2(0.0, 0.0), SIMD2(Double(w), 0.0), SIMD2(Double(w), Double(h)), SIMD2(0.0, Double(h))]
@@ -4232,11 +4298,11 @@ final class ViewStereoViewModel: ObservableObject {
                     mode: mode, isSwapped: swapped, transparentCorners: true,
                     cardConfig: cardCfg, mountContext: mountCtx
                 )
-                return (warpedPL, warpedPR, prevCW, prevCH, fullCW, fullCH, erg.hasWindowViolationRisk, erg.requiresFloatingWindow, erg.dispRangePct, previewImg)
+                return (warpedPL, warpedPR, prevCW, prevCH, fullCW, fullCH, erg.hasWindowViolationRisk, erg.requiresFloatingWindow, erg.dispRangePct, erg.nearPct, erg.farPct, previewImg)
             }.value
 
             isPreviewWarping = false
-            if let (warpedPL, warpedPR, prevCW, prevCH, fullCW, fullCH, wvRisk, fwReq, dispPct, previewImg) = output {
+            if let (warpedPL, warpedPR, prevCW, prevCH, fullCW, fullCH, wvRisk, fwReq, dispPct, nearPct, farPct, previewImg) = output {
                 previewAlignedLeftRGB = warpedPL
                 previewAlignedRightRGB = warpedPR
                 previewCroppedWidth = prevCW
@@ -4246,6 +4312,8 @@ final class ViewStereoViewModel: ObservableObject {
                 hasWindowViolationRisk = wvRisk
                 requiresFloatingWindow = fwReq
                 maxDisparityPercent = dispPct
+                nearParallaxPercent = nearPct
+                farParallaxPercent = farPct
                 if let previewImg {
                     displayImage = previewImg
                 }
@@ -4419,9 +4487,9 @@ final class ViewStereoViewModel: ObservableObject {
         imageWidth: Double,
         imageHeight: Double,
         cropWidth: Int
-    ) -> (hasWindowViolationRisk: Bool, requiresFloatingWindow: Bool, dispRangePct: Double) {
+    ) -> (hasWindowViolationRisk: Bool, requiresFloatingWindow: Bool, dispRangePct: Double, nearPct: Double, farPct: Double) {
         guard !samples.isEmpty, imageWidth > 1, imageHeight > 1, cropWidth > 0 else {
-            return (false, false, 0.0)
+            return (false, false, 0.0, 0.0, 0.0)
         }
         let sortedP = samples.map { $0.parallax }.sorted()
         let pMin = sortedP.first!
@@ -4441,8 +4509,11 @@ final class ViewStereoViewModel: ObservableObject {
             return onEdge && (s.parallax + tx < -0.5)
         }
         let exceedsComfort = farShifted > pMaxLimit + 0.5
-        let dispRangePct = max(0.0, (farShifted - minShifted) / Double(cropWidth) * 100.0)
-        return (edgeViolation, edgeViolation || exceedsComfort, dispRangePct)
+        let cw = Double(cropWidth)
+        let nearPct = minShifted / cw * 100.0
+        let farPct = farShifted / cw * 100.0
+        let dispRangePct = max(0.0, (farShifted - minShifted) / cw * 100.0)
+        return (edgeViolation, edgeViolation || exceedsComfort, dispRangePct, nearPct, farPct)
     }
 
     // MARK: - Auto Color Matching
@@ -5012,6 +5083,141 @@ final class ViewStereoViewModel: ObservableObject {
         }
     }
 
+    /// 選択中の「立体視方式（exportLayout）」および画像形式で、写真.app 登録 / AirDrop 送信用の一時ファイルを生成する（複数選択時は全選択項目を一括生成）
+    func prepareSelectedLayoutForDelivery() async throws -> [SpatialDeliveryItem] {
+        guard !isProcessing, !isBatchRunning else { return [] }
+
+        let selectedItems = resolveSelectedBatchItems().filter { !$0.isVideo }
+        if selectedItems.count > 1 || (!hasLoadedImages && !selectedItems.isEmpty) {
+            let sessionDir = FileManager.default.temporaryDirectory
+                .appendingPathComponent("StereoStudioDelivery", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            try FileManager.default.createDirectory(at: sessionDir, withIntermediateDirectories: true)
+
+            let targetDir = workspaceRootFolder ?? selectedItems[0].leftURL.deletingLastPathComponent()
+            startBatchProcessing(
+                inputDir: targetDir,
+                itemsOverride: selectedItems,
+                verifyOnly: false,
+                outputDirectoryOverride: sessionDir,
+                suppressCompletionUI: true
+            )
+            await batchTask?.value
+
+            let fm = FileManager.default
+            let allURLs = (try? fm.contentsOfDirectory(
+                at: sessionDir,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles]
+            )) ?? []
+
+            let allowedExts: Set<String> = ["png", "jpg", "jpeg", "heic", "mpo"]
+            var deliveryItems: [SpatialDeliveryItem] = []
+            for fileURL in allURLs.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+                let fileExt = fileURL.pathExtension.lowercased()
+                if allowedExts.contains(fileExt) {
+                    let itemKind: SpatialDeliverableKind = (fileExt == "heic") ? .spatialPhoto : .image
+                    deliveryItems.append(SpatialDeliveryItem(url: fileURL, kind: itemKind, isTemporaryFile: true))
+                } else {
+                    try? fm.removeItem(at: fileURL)
+                }
+            }
+
+            if deliveryItems.isEmpty {
+                try? fm.removeItem(at: sessionDir)
+                throw SpatialDeliveryError.photoLibrarySaveFailed("No images were exported from selection.")
+            }
+            return deliveryItems
+        }
+
+        guard hasLoadedImages else { return [] }
+
+        let layout = exportLayout
+        let imgFormat = exportImageFormat
+        let ext = imgFormat.fileExtension
+        let style = frameStyle
+        let swapped = isSwapped
+        let cardCfg = makeCardMountConfig()
+        let mountCtx = currentMountContext
+        let restOpts = isRestorationEnabled ? buildPendingVintageRestorationOptions() : VintageRestorationOptions()
+        let detailOpts = isRestorationEnabled ? buildPendingDetailRestorationOptions() : StereoDetailRestorationOptions(deblurStrength: 0.0, textureProtection: 0.60)
+        let colorOpts = buildPendingColorizationOptions()
+        let rawBase = leftURL?.deletingPathExtension().lastPathComponent ?? "ViewStereo_Output"
+        let base = stereoReconstructionMode.isDepthSynthesized ? "\(rawBase)_2D3D" : rawBase
+
+        if isAligned {
+            _ = await ensureFullResAlignedSynced()
+        }
+        guard let lRaw = activeLeftRGB, let rRaw = activeRightRGB else {
+            let dummyURL = FileManager.default.temporaryDirectory.appendingPathComponent("ViewStereo_Empty")
+            throw SpatialDeliveryError.invalidFileURL(dummyURL)
+        }
+        let w = activeWidth
+        let h = activeHeight
+
+        if layout == .separateLR {
+            let outL = try SpatialDeliveryService.makeTemporaryDeliveryURL(filename: "\(base)_L", ext: ext)
+            let outR = try SpatialDeliveryService.makeTemporaryDeliveryURL(filename: "\(base)_R", ext: ext)
+            let ok = await Task.detached(priority: .userInitiated) {
+                Self.renderAndSaveSeparateLR(
+                    left: swapped ? rRaw : lRaw,
+                    right: swapped ? lRaw : rRaw,
+                    width: w, height: h,
+                    style: style, imageFormat: imgFormat,
+                    restorationOptions: restOpts,
+                    detailOptions: detailOpts,
+                    colorOptions: colorOpts,
+                    outL: outL, outR: outR
+                )
+            }.value
+            guard ok else {
+                try? FileManager.default.removeItem(at: outL)
+                try? FileManager.default.removeItem(at: outR)
+                throw SpatialDeliveryError.photoLibrarySaveFailed("Failed to encode L/R images.")
+            }
+            return [
+                SpatialDeliveryItem(url: outL, kind: .image, isTemporaryFile: true),
+                SpatialDeliveryItem(url: outR, kind: .image, isTemporaryFile: true)
+            ]
+        }
+
+        let suffix: String
+        let targetExt: String
+        let kind: SpatialDeliverableKind
+        switch layout {
+        case .twoD: suffix = "_2D"; targetExt = ext; kind = .image
+        case .sbs: suffix = "_SBS"; targetExt = ext; kind = .image
+        case .lrrl: suffix = "_LRRL"; targetExt = ext; kind = .image
+        case .dubois: suffix = "_Dubois"; targetExt = ext; kind = .image
+        case .colorAnaglyph: suffix = "_ColorAnaglyph"; targetExt = ext; kind = .image
+        case .grayAnaglyph: suffix = "_GrayAnaglyph"; targetExt = ext; kind = .image
+        case .polarized: suffix = "_Polarized"; targetExt = ext; kind = .image
+        case .stereoviewCard: suffix = "_Card"; targetExt = ext; kind = .image
+        case .spatialPhoto: suffix = "_Spatial"; targetExt = "heic"; kind = .spatialPhoto
+        case .mpo: suffix = ""; targetExt = "mpo"; kind = .image
+        case .separateLR: suffix = ""; targetExt = ext; kind = .image
+        }
+
+        let tempURL = try SpatialDeliveryService.makeTemporaryDeliveryURL(filename: "\(base)\(suffix)", ext: targetExt)
+        let ok = await Task.detached(priority: .userInitiated) {
+            Self.renderAndSaveSingleFile(
+                left: lRaw, right: rRaw, width: w, height: h,
+                style: style, layout: layout, imageFormat: imgFormat, isSwapped: swapped,
+                cardConfig: cardCfg, mountContext: mountCtx,
+                restorationOptions: restOpts,
+                detailOptions: detailOpts,
+                colorOptions: colorOpts,
+                to: tempURL
+            )
+        }.value
+
+        guard ok else {
+            try? FileManager.default.removeItem(at: tempURL)
+            throw SpatialDeliveryError.photoLibrarySaveFailed("Failed to encode selected output.")
+        }
+        return [SpatialDeliveryItem(url: tempURL, kind: kind, isTemporaryFile: true)]
+    }
+
     // MARK: - Workspace File Browser Management
 
     func presentStartupFolderPromptIfNeeded(in window: NSWindow?) {
@@ -5187,7 +5393,13 @@ final class ViewStereoViewModel: ObservableObject {
         statusMessage = "Batch processing cancelled."
     }
 
-    func startBatchProcessing(inputDir: URL? = nil, itemsOverride: [StereoBatchItem]? = nil, verifyOnly: Bool = false) {
+    func startBatchProcessing(
+        inputDir: URL? = nil,
+        itemsOverride: [StereoBatchItem]? = nil,
+        verifyOnly: Bool = false,
+        outputDirectoryOverride: URL? = nil,
+        suppressCompletionUI: Bool = false
+    ) {
         guard !isBatchRunning else { return }
         let targetDir = inputDir ?? batchInputFolder ?? workspaceRootFolder ?? itemsOverride?.first?.leftURL.deletingLastPathComponent()
         guard let targetDir else {
@@ -5195,7 +5407,7 @@ final class ViewStereoViewModel: ObservableObject {
             return
         }
 
-        if browserStore.isVirtualSelection && !verifyOnly {
+        if browserStore.isVirtualSelection && !verifyOnly && outputDirectoryOverride == nil {
             let needsPrompt = (batchOutputFolder == nil) || batchOutputFolder.map(isTemporaryLocation) == true
             if needsPrompt {
                 guard promptOutputFolderForSelection() != nil else {
@@ -5205,11 +5417,13 @@ final class ViewStereoViewModel: ObservableObject {
             }
         }
 
-        let outDir = batchOutputFolder ?? targetDir.appendingPathComponent("ViewStereo_Output", isDirectory: true)
-        if !browserStore.isVirtualSelection {
-            batchInputFolder = targetDir
+        let outDir = outputDirectoryOverride ?? batchOutputFolder ?? targetDir.appendingPathComponent("ViewStereo_Output", isDirectory: true)
+        if outputDirectoryOverride == nil {
+            if !browserStore.isVirtualSelection {
+                batchInputFolder = targetDir
+            }
+            batchOutputFolder = outDir
         }
-        batchOutputFolder = outDir
 
         let pairingMode = effectiveBrowserPairingMode
         let rawItems: [StereoBatchItem]
@@ -5634,18 +5848,20 @@ final class ViewStereoViewModel: ObservableObject {
             let cancelled = Task.isCancelled
             isBatchRunning = false
             batchTask = nil
-            if !verifyOnly {
+            if !verifyOnly && !suppressCompletionUI {
                 refreshWorkspaceBrowser()
             }
-            batchCompletionSummary = BatchCompletionSummary(
-                succeeded: successCnt,
-                failed: failCnt,
-                warningCount: warnCnt,
-                total: items.count,
-                wasCancelled: cancelled,
-                isVerifyOnly: verifyOnly,
-                outputDirectory: outDir
-            )
+            if !suppressCompletionUI {
+                batchCompletionSummary = BatchCompletionSummary(
+                    succeeded: successCnt,
+                    failed: failCnt,
+                    warningCount: warnCnt,
+                    total: items.count,
+                    wasCancelled: cancelled,
+                    isVerifyOnly: verifyOnly,
+                    outputDirectory: outDir
+                )
+            }
             if cancelled {
                 statusMessage = verifyOnly
                     ? "Verification cancelled (\(successCnt)/\(items.count) checked)."

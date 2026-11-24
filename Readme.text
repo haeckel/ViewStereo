@@ -4,6 +4,34 @@ ViewStereo は現在開発中であり、特に開発初期段階のアプリケ
 
 ==================================================
 
+ViewStereo v0.2.4 リリースノート / Release Notes (2026.11.25)
+
+==================================================
+【ViewStereo v0.2.4 新機能・改善点 / New Features & Improvements】
+==================================================
+- StereoStudioCore 共通基盤への全面委譲によるアーキテクチャ統合:
+  - 深度推定・動画深度セッション・Metal GPU DIBR 処理を `StereoStudioCore`（StudioVideoDepthSynthesizer / StudioMetalDIBR / StudioVideoDepthSession）へ統合委譲し、コード冗長性を徹底排除するとともにシリーズ間での動作信頼性を強化。
+- 空間メディア配信（Spatial Delivery）機能の搭載:
+  - 静止画・動画ツールバーに共有・配信ボタン（SpatialDeliveryMenuButton）を新設。Apple「写真」アプリへの直接保存およびネイティブ共有シート（AirDrop / メッセージ等）へのワンクリック配信に対応。
+- ステレオ深度バジェットメーター（StereoDepthBudgetMeterView）の導入:
+  - ステレオウィンドウ（⌥⌘2）および 2D→3D 変換設定（⌥⌘7）パネル内に、最前景／最遠景の視差パーセントおよび枠抜け（バイオレーション）リスクを可視化するバジェットメーターを常設。
+- トップ作業モードバーの視認性向上:
+  - ステレオ修復モード（アンバー）と 2D→3D 変換モード（ブルー）の切り替えバーを高コントラストな深層グラデーションと動的バッジに刷新。
+
+==================================================
+[v0.2.4 New Features & Highlights]
+==================================================
+- StereoStudioCore Engine Architecture Integration:
+  - Delegated core AI monocular depth estimation, video depth sessions, and Metal compute DIBR directly to StereoStudioCore for unified performance and rock-solid cross-app stability.
+- Spatial Delivery Hub (Apple Photos & Share Sheet):
+  - Added SpatialDeliveryMenuButton to image and video master toolbars for instant one-click delivery into Apple Photos (Vision Pro Spatial Photo/Video library) and macOS Share Sheet.
+- Stereo Depth Budget Visual Metering:
+  - Real-time near/far parallax metering with window violation indicators and auto-optimization embedded directly into the Stereo Window and 2D-to-3D inspector panels.
+- Refined High-Contrast Mode Navigation Bar:
+  - Upgraded top workspace switcher with luminous accent gradients, contextual mode badges, and refined visual hierarchy.
+
+==================================================
+
 ViewStereo v0.2.3 リリースノート / Release Notes (2026.11.24)
 
 ==================================================

@@ -198,7 +198,7 @@ flowchart TD
 
 ---
 
-## 4. バージョン変遷と進化の軌跡（v0.1.0 〜 v0.2.3）
+## 4. バージョン変遷と進化の軌跡（v0.1.0 〜 v0.2.4）
 
 わずか数週間の間に、驚異的なペースで機能の洗練と拡張が行われています。
 
@@ -218,6 +218,7 @@ flowchart TD
 | **v0.2.1** | 2026.11.24 | **3段階カスケード台紙解析エンジン（`StereoCardMountAnalyzer`）導入**によるクロップ刷新（スキャン余白分離＆水平化、CIE Lab 台紙バリア、双子窓フィッティング）。暗背景写真・キャプション・アーチ頂点の過剰クロップ防止、Core ML 入力の堅牢化。 |
 | **v0.2.2** | 2026.11.24 | **深いドーム型アーチ（Deep Dome Arch）の数理フィッティング強化**（ry 最大0.45、超楕円指数探索、Sobelエッジ吸着、両肩台紙バリア一致率検証）。Keep Arch マスクのサブピクセル内側オフセット＆アンチエイリアス境界処理。 |
 | **v0.2.3** | 2026.11.24 | **.vstereo ハイブリッド・サイドカー非破壊保存（⌘S）**。**Studio Handoff 連携**（SplatStereo / DepthStereo / PanorStereo へのワンクリック送信・自動起動）。**3D ベークライト風アプリアイコン刷新**。 |
+| **v0.2.4** | 2026.11.25 | **StereoStudioCore 共通基盤への全面委譲統合**（StudioVideoDepthSynthesizer / StudioMetalDIBR / StudioVideoDepthSession）。**空間メディア配信（SpatialDeliveryMenuButton）搭載**（Apple「写真」直接保存・共有シート）。**ステレオ深度バジェットメーター**・作業モードバーの視認性刷新。 |
 
 ---
 

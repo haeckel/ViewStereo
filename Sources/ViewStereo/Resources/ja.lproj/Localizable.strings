@@ -491,11 +491,13 @@
 "Inference Time" = "推論時間";
 "Stereo Base" = "ステレオベース";
 "Stereo Base (%)" = "ステレオベース (%)";
-"Depth Offset / Pop-out (px)" = "奥行き・飛び出し位置 (px)";
+"Depth Offset / Pop-out (px)" = "ステレオウィンドウ (px)";
 "Batch 2D→3D (%lld)" = "2D→3D 一括変換 (%lld件)";
 "Convert Selected 2D→3D (%lld)" = "選択を 2D→3D 変換 (%lld件)";
 "Select a working folder and choose the processing mode." = "作業フォルダと処理モード（ステレオ修復／2D→3D専用）を選択してください。";
 "Processing Mode" = "処理モード";
+"Stereo Restore Mode" = "Stereo 修復モード";
+"AI 2D→3D Mode" = "AI 2D→3D 変換モード";
 "mode_desc_stereo_restore" = "ステレオカード・SBS・L/Rペアを自動修復します（通常の2D写真が混在している場合も自動で2D→3D変換します）。";
 "mode_desc_2d_to_3d" = "ステレオ検証や分割を行わず、フォルダ内のすべての画像を2D写真として高速にAI 3D変換します。";
 "Open Stereo Folder..." = "ステレオ修復フォルダを開く...";

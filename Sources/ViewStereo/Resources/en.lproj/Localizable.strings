@@ -484,11 +484,13 @@
 "Inference Time" = "Inference Time";
 "Stereo Base" = "Stereo Base";
 "Stereo Base (%)" = "Stereo Base (%)";
-"Depth Offset / Pop-out (px)" = "Depth Offset / Pop-out (px)";
+"Depth Offset / Pop-out (px)" = "Stereo Window (px)";
 "Batch 2D→3D (%lld)" = "Batch 2D→3D (%lld)";
 "Convert Selected 2D→3D (%lld)" = "Convert Selected 2D→3D (%lld)";
 "Select a working folder and choose the processing mode." = "Select a working folder and choose the processing mode.";
 "Processing Mode" = "Processing Mode";
+"Stereo Restore Mode" = "Stereo Restore Mode";
+"AI 2D→3D Mode" = "AI 2D→3D Mode";
 "mode_desc_stereo_restore" = "Restores stereoview cards, SBS, and L/R pairs (automatically detects and converts mixed 2D photos to 3D).";
 "mode_desc_2d_to_3d" = "Skips stereo verification & splitting; converts all images directly as 2D photos to 3D using AI depth.";
 "Open Stereo Folder..." = "Open Stereo Folder...";
