@@ -498,6 +498,14 @@
 "Processing Mode" = "処理モード";
 "Stereo Restore Mode" = "Stereo 修復モード";
 "AI 2D→3D Mode" = "AI 2D→3D 変換モード";
+"tab_basic_short" = "基本・整準";
+"tab_2d3d_short" = "2D→3D";
+"tab_mount_short" = "台紙";
+"tab_restore_short" = "退色復元";
+"tab_colorize_short" = "彩色";
+"tab_export_short" = "出力";
+"Toggle Export Panel" = "書き出し・出力パネルを表示";
+"EXPORT & BATCH OUTPUT" = "書き出し・一括出力";
 "mode_desc_stereo_restore" = "ステレオカード・SBS・L/Rペアを自動修復します（通常の2D写真が混在している場合も自動で2D→3D変換します）。";
 "mode_desc_2d_to_3d" = "ステレオ検証や分割を行わず、フォルダ内のすべての画像を2D写真として高速にAI 3D変換します。";
 "Open Stereo Folder..." = "ステレオ修復フォルダを開く...";

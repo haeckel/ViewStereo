@@ -495,6 +495,7 @@ final class ViewStereoViewModel: ObservableObject {
     }
 
     @Published var isShowingInspector: Bool = true
+    @Published var selectedInspectorTab: Int = 0
     @Published var isRecipeSectionExpanded: Bool = true
     @Published var isWindowSectionExpanded: Bool = false
     @Published var isCardMountSectionExpanded: Bool = false

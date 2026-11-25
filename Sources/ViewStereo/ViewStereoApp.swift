@@ -9,7 +9,7 @@ extension AboutBrandInfo {
         badgeLetter: "V",
         subtitleKey: nil,
         engineTagline: "19th Century Stereoview Restoration & Intelligent Stereo Window Studio",
-        fallbackVersion: "0.2.5",
+        fallbackVersion: "0.2.6",
         fallbackBuild: "1",
         websiteURL: URL(string: "https://viewstereo.p-media.jp/"),
         websiteLabel: "viewstereo.p-media.jp",
@@ -193,52 +193,44 @@ struct ViewStereoApp: App {
                 Divider()
 
                 Button("Toggle Basic Recipe Panel") {
-                    withAnimation(.easeInOut(duration: 0.18)) {
+                    withAnimation(.easeInOut(duration: 0.16)) {
                         if !vm.isShowingInspector { vm.isShowingInspector = true }
-                        vm.isRecipeSectionExpanded.toggle()
+                        vm.selectedInspectorTab = 0
                     }
                 }
                 .keyboardShortcut("1", modifiers: [.option, .command])
 
-                Button("Toggle Stereo Window Panel") {
-                    withAnimation(.easeInOut(duration: 0.18)) {
+                Button("Toggle Stereoview Card Mount Panel") {
+                    withAnimation(.easeInOut(duration: 0.16)) {
                         if !vm.isShowingInspector { vm.isShowingInspector = true }
-                        vm.isWindowSectionExpanded.toggle()
+                        vm.selectedInspectorTab = 1
                     }
                 }
                 .keyboardShortcut("2", modifiers: [.option, .command])
 
-                Button("Toggle Stereoview Card Mount Panel") {
-                    withAnimation(.easeInOut(duration: 0.18)) {
+                Button("Toggle Vintage Restoration Panel") {
+                    withAnimation(.easeInOut(duration: 0.16)) {
                         if !vm.isShowingInspector { vm.isShowingInspector = true }
-                        vm.isCardMountSectionExpanded.toggle()
+                        vm.selectedInspectorTab = 2
                     }
                 }
                 .keyboardShortcut("3", modifiers: [.option, .command])
 
-                Button("Toggle Vintage Restoration Panel") {
-                    withAnimation(.easeInOut(duration: 0.18)) {
+                Button("Toggle Colorization Panel") {
+                    withAnimation(.easeInOut(duration: 0.16)) {
                         if !vm.isShowingInspector { vm.isShowingInspector = true }
-                        vm.isRestorationSectionExpanded.toggle()
+                        vm.selectedInspectorTab = 3
                     }
                 }
                 .keyboardShortcut("4", modifiers: [.option, .command])
 
-                Button("Toggle Colorization Panel") {
-                    withAnimation(.easeInOut(duration: 0.18)) {
+                Button("Toggle Export Panel") {
+                    withAnimation(.easeInOut(duration: 0.16)) {
                         if !vm.isShowingInspector { vm.isShowingInspector = true }
-                        vm.isColorizationSectionExpanded.toggle()
+                        vm.selectedInspectorTab = 4
                     }
                 }
                 .keyboardShortcut("5", modifiers: [.option, .command])
-
-                Button("Toggle Batch Processing Panel") {
-                    withAnimation(.easeInOut(duration: 0.18)) {
-                        if !vm.isShowingInspector { vm.isShowingInspector = true }
-                        vm.isBatchSectionExpanded.toggle()
-                    }
-                }
-                .keyboardShortcut("6", modifiers: [.option, .command])
             }
             CommandGroup(replacing: .help) {
                 Button("ViewStereo Help") {

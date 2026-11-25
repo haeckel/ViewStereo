@@ -491,6 +491,14 @@
 "Processing Mode" = "Processing Mode";
 "Stereo Restore Mode" = "Stereo Restore Mode";
 "AI 2D→3D Mode" = "AI 2D→3D Mode";
+"tab_basic_short" = "Basic";
+"tab_2d3d_short" = "2D→3D";
+"tab_mount_short" = "Mount";
+"tab_restore_short" = "Restore";
+"tab_colorize_short" = "Colorize";
+"tab_export_short" = "Export";
+"Toggle Export Panel" = "Show Export & Output Panel";
+"EXPORT & BATCH OUTPUT" = "EXPORT & BATCH OUTPUT";
 "mode_desc_stereo_restore" = "Restores stereoview cards, SBS, and L/R pairs (automatically detects and converts mixed 2D photos to 3D).";
 "mode_desc_2d_to_3d" = "Skips stereo verification & splitting; converts all images directly as 2D photos to 3D using AI depth.";
 "Open Stereo Folder..." = "Open Stereo Folder...";

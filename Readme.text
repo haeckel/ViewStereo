@@ -4,6 +4,27 @@ ViewStereo は現在開発中であり、特に開発初期段階のアプリケ
 
 ==================================================
 
+ViewStereo v0.2.6 リリースノート / Release Notes (2026.11.26)
+
+==================================================
+【ViewStereo v0.2.6 新機能・改善点 / New Features & Improvements】
+==================================================
+- インスペクターの 5 タブ統合アーキテクチャへの全面刷新:
+  - 従来の複数セクション開閉方式から、専用 5 タブ構成（0: 基本・整準/2D→3D、1: 台紙、2: 退色復元、3: 彩色、4: 出力）へ完全リファクタリング。
+  - メインツールバーのアイコンボタンおよびショートカットキー（⌥⌘1〜⌥⌘5）が選択タブ（selectedInspectorTab）と1対1で完全同期し、瞬時のタブ切り替えとクリーンなアニメーション遷移を実現。
+- 書き出し・一括出力（Export & Batch）の統合:
+  - 単一ファイル書き出し、空間写真出力、およびバッチフォルダ一括出力をタブ4（書き出し・出力）へ統合し、作業フローを整理。
+
+--------------------------------------------------
+[v0.2.6 New Features & Highlights]
+- Unified 5-Tab Inspector Architecture & Toolbar Sync:
+  - Completely refactored the right inspector into a dedicated 5-tab interface (0: Basic/2D→3D, 1: Mount, 2: Restoration, 3: Colorization, 4: Export).
+  - Main toolbar buttons and keyboard shortcuts (⌥⌘1 - ⌥⌘5) are now strictly synchronized with the active inspector tab.
+- Integrated Export & Batch Master Panel:
+  - Consolidated single export, spatial photo, and batch directory processing into a dedicated Tab 4 workflow.
+
+==================================================
+
 ViewStereo v0.2.5 リリースノート / Release Notes (2026.11.25)
 
 ==================================================

@@ -158,68 +158,57 @@ struct ContentView: View {
 
                     toolbarDivider
 
-                    // Zone 3: インスペクタ連動（色分けアイコン＋ショートラベル）
+                    // Zone 3: インスペクタ連動（5タブと1対1同期）
                     HStack(spacing: 4) {
-                        if vm.workspaceMode == .convert2DTo3D || vm.isVideoLoaded {
-                            toolbarTabButton(
-                                titleKey: "Toolbar 2D3D",
-                                systemImage: "cube.transparent.fill",
-                                color: .brightPurple,
-                                isExpanded: vm.is2D3DSectionExpanded,
-                                tooltip: String(localized: "Toggle 2D → 3D Conversion Panel")
-                            ) {
-                                toggleInspectorTab(\.is2D3DSectionExpanded)
-                            }
-                        } else {
-                            toolbarTabButton(
-                                titleKey: "Toolbar Recipe",
-                                systemImage: "slider.horizontal.3",
-                                color: .brightPurple,
-                                isExpanded: vm.isRecipeSectionExpanded,
-                                tooltip: String(localized: "Toggle Basic Recipe Panel") + " (⌥⌘1)"
-                            ) {
-                                toggleInspectorTab(\.isRecipeSectionExpanded)
-                            }
-
-                            toolbarTabButton(
-                                titleKey: "Toolbar Window",
-                                systemImage: "rectangle.inset.filled.and.person.filled",
-                                color: .brightAmber,
-                                isExpanded: vm.isWindowSectionExpanded,
-                                tooltip: String(localized: "Toggle Stereo Window Panel") + " (⌥⌘2)"
-                            ) {
-                                toggleInspectorTab(\.isWindowSectionExpanded)
-                            }
+                        let is2D3DMode = vm.workspaceMode == .convert2DTo3D || vm.isVideoLoaded
+                        toolbarTabButton(
+                            titleKey: is2D3DMode ? "Toolbar 2D3D" : "Toolbar Recipe",
+                            systemImage: is2D3DMode ? "cube.transparent.fill" : "slider.horizontal.3",
+                            color: .brightPurple,
+                            isExpanded: vm.selectedInspectorTab == 0,
+                            tooltip: String(localized: is2D3DMode ? "Toggle 2D → 3D Conversion Panel" : "Toggle Basic Recipe Panel") + " (⌥⌘1)"
+                        ) {
+                            selectInspectorTab(0)
                         }
 
                         toolbarTabButton(
                             titleKey: "Toolbar Mount",
                             systemImage: "photo.artframe",
                             color: .brightBlue,
-                            isExpanded: vm.isCardMountSectionExpanded,
-                            tooltip: String(localized: "Toggle Stereoview Card Mount Panel") + " (⌥⌘3)"
+                            isExpanded: vm.selectedInspectorTab == 1,
+                            tooltip: String(localized: "Toggle Stereoview Card Mount Panel") + " (⌥⌘2)"
                         ) {
-                            toggleInspectorTab(\.isCardMountSectionExpanded)
+                            selectInspectorTab(1)
                         }
 
                         toolbarTabButton(
                             titleKey: "Toolbar Restore",
                             systemImage: "sparkles",
                             color: .brightPink,
-                            isExpanded: vm.isRestorationSectionExpanded,
-                            tooltip: String(localized: "Toggle Vintage Restoration Panel") + " (⌥⌘4)"
+                            isExpanded: vm.selectedInspectorTab == 2,
+                            tooltip: String(localized: "Toggle Vintage Restoration Panel") + " (⌥⌘3)"
                         ) {
-                            toggleInspectorTab(\.isRestorationSectionExpanded)
+                            selectInspectorTab(2)
                         }
 
                         toolbarTabButton(
                             titleKey: "Toolbar Colorize",
                             systemImage: "paintpalette.fill",
                             color: Color(red: 0.20, green: 0.85, blue: 0.98),
-                            isExpanded: vm.isColorizationSectionExpanded,
-                            tooltip: String(localized: "Toggle Colorization Panel") + " (⌥⌘5)"
+                            isExpanded: vm.selectedInspectorTab == 3,
+                            tooltip: String(localized: "Toggle Colorization Panel") + " (⌥⌘4)"
                         ) {
-                            toggleInspectorTab(\.isColorizationSectionExpanded)
+                            selectInspectorTab(3)
+                        }
+
+                        toolbarTabButton(
+                            titleKey: "tab_export_short",
+                            systemImage: "square.and.arrow.up.fill",
+                            color: .brightTeal,
+                            isExpanded: vm.selectedInspectorTab == 4,
+                            tooltip: String(localized: "Toggle Export Panel") + " (⌥⌘5)"
+                        ) {
+                            selectInspectorTab(4)
                         }
                     }
 
@@ -1259,8 +1248,7 @@ struct ContentView: View {
                         desc: "7-DoF Rectification & Tone",
                         color: .brightPink
                     ) {
-                        vm.isRecipeSectionExpanded = true
-                        vm.isRestorationSectionExpanded = true
+                        selectInspectorTab(0)
                     }
 
                     chevronSpacer
@@ -1271,8 +1259,7 @@ struct ContentView: View {
                         desc: "Archival Mount & Tinting",
                         color: Color(red: 0.20, green: 0.85, blue: 0.98)
                     ) {
-                        vm.isCardMountSectionExpanded = true
-                        vm.isColorizationSectionExpanded = true
+                        selectInspectorTab(1)
                     }
 
                     chevronSpacer
@@ -1283,7 +1270,7 @@ struct ContentView: View {
                         desc: "Spatial Photo & 3D Card",
                         color: .brightTeal
                     ) {
-                        vm.exportImage()
+                        selectInspectorTab(4)
                     }
                 }
                 .padding(.vertical, 28)
@@ -1404,55 +1391,180 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - Anti-Jitter 1-Pane Utility Inspector
+    // MARK: - Anti-Jitter 5-Tab Studio Inspector (完全統一型)
 
     private var inspectorPanel: some View {
-        let sidePadding: CGFloat = 16
+        let sidePadding: CGFloat = 12
         let contentWidth = inspectorWidth - (sidePadding * 2)
 
         return VStack(alignment: .leading, spacing: 0) {
             // 上端固定ヘッダー：ソース表示 ＋ クイック操作
             inspectorHeader
+                .padding(.top, 8)
                 .padding(.horizontal, sidePadding)
-                .padding(.vertical, 12)
+                .padding(.bottom, 8)
                 .frame(width: inspectorWidth, alignment: .leading)
-                .background(Color.black.opacity(0.22))
 
-            Divider().opacity(0.35)
+            Divider().opacity(0.15)
 
-            // 中央スクロール領域（ステータス / 2D→3Dまたは基本設定・ウィンドウ / カード台紙設定 / 復元 / 彩色）
-            ScrollView([.vertical], showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 14) {
-                    statusSummarySection
-                    if vm.workspaceMode == .convert2DTo3D || vm.isVideoLoaded {
-                        depth2D3DConversionSection
-                    } else {
-                        basicRecipeDisclosure
-                        stereoWindowSection
+            // 5-Tab Studio Navigation Bar (SplatStereo / DepthStereo / PanorStereo と完全同一レイアウト)
+            inspectorTabBar(contentWidth: contentWidth)
+                .padding(.horizontal, sidePadding)
+                .padding(.vertical, 7)
+                .frame(width: inspectorWidth, alignment: .leading)
+
+            Divider().opacity(0.15)
+
+            // 中央スクロール領域（下端フッター廃止により縦スペースを最大化）
+            ScrollViewReader { proxy in
+                ScrollView([.vertical], showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        switch vm.selectedInspectorTab {
+                        case 0:
+                            VStack(alignment: .leading, spacing: 14) {
+                                statusSummarySection
+                                if vm.workspaceMode == .convert2DTo3D || vm.isVideoLoaded {
+                                    depth2D3DConversionSection
+                                } else {
+                                    basicRecipeDisclosure
+                                    stereoWindowSection
+                                }
+                            }
+                            .id("tab_top_0")
+                        case 1:
+                            stereoviewCardMountSection
+                                .id("tab_top_1")
+                        case 2:
+                            vintageRestorationSection
+                                .id("tab_top_2")
+                        case 3:
+                            colorizationSection
+                                .id("tab_top_3")
+                        case 4:
+                            exportTabSection
+                                .id("tab_top_4")
+                        default:
+                            EmptyView()
+                        }
                     }
-                    stereoviewCardMountSection
-                    vintageRestorationSection
-                    colorizationSection
+                    .frame(width: contentWidth, alignment: .topLeading)
+                    .padding(.horizontal, sidePadding)
+                    .padding(.vertical, 12)
+                    .background(ScrollViewAntiJitterConfigurator())
                 }
-                .frame(width: contentWidth, alignment: .topLeading)
-                .padding(.horizontal, sidePadding)
-                .padding(.vertical, 14)
-                .background(ScrollViewAntiJitterConfigurator())
+                .scrollIndicators(.never)
+                .frame(width: inspectorWidth, alignment: .topLeading)
+                .onChange(of: vm.selectedInspectorTab) { _, newTab in
+                    withAnimation(.easeInOut(duration: 0.16)) {
+                        proxy.scrollTo("tab_top_\(newTab)", anchor: .top)
+                    }
+                }
             }
-            .scrollIndicators(.never)
-            .frame(width: inspectorWidth, alignment: .topLeading)
-
-            Divider().opacity(0.35)
-
-            // 下端固定フッター：常時アクセス可能な書き出しエリア
-            exportFooter
-                .padding(.horizontal, sidePadding)
-                .padding(.vertical, 12)
-                .frame(width: inspectorWidth, alignment: .leading)
-                .background(Color.black.opacity(0.28))
         }
         .frame(width: inspectorWidth, alignment: .topLeading)
         .clipped()
+    }
+
+    @ViewBuilder
+    private func inspectorTabBar(contentWidth: CGFloat) -> some View {
+        let is2D3DMode = vm.workspaceMode == .convert2DTo3D || vm.isVideoLoaded
+        let tab0Pending = !is2D3DMode && vm.hasPendingRecipeChanges
+
+        HStack(spacing: 5) {
+            tabButtonWithPendingBadge(
+                titleKey: is2D3DMode ? "tab_2d3d_short" : "tab_basic_short",
+                icon: is2D3DMode ? "cube.transparent.fill" : "slider.horizontal.3",
+                darkColor: .darkPurple,
+                brightColor: .brightPurple,
+                shortcut: "⌥⌘1",
+                isSelected: vm.selectedInspectorTab == 0,
+                hasPendingChanges: tab0Pending
+            ) {
+                selectInspectorTab(0)
+            }
+
+            tabButtonWithPendingBadge(
+                titleKey: "tab_mount_short",
+                icon: "photo.artframe",
+                darkColor: .darkBlue,
+                brightColor: .brightBlue,
+                shortcut: "⌥⌘2",
+                isSelected: vm.selectedInspectorTab == 1,
+                hasPendingChanges: vm.hasPendingCardMountChanges
+            ) {
+                selectInspectorTab(1)
+            }
+
+            tabButtonWithPendingBadge(
+                titleKey: "tab_restore_short",
+                icon: "sparkles",
+                darkColor: .motionPink,
+                brightColor: .brightPink,
+                shortcut: "⌥⌘3",
+                isSelected: vm.selectedInspectorTab == 2,
+                hasPendingChanges: vm.hasPendingRestorationChanges
+            ) {
+                selectInspectorTab(2)
+            }
+
+            tabButtonWithPendingBadge(
+                titleKey: "tab_colorize_short",
+                icon: "paintpalette.fill",
+                darkColor: Color(red: 0.0, green: 0.45, blue: 0.65),
+                brightColor: Color(red: 0.20, green: 0.85, blue: 0.98),
+                shortcut: "⌥⌘4",
+                isSelected: vm.selectedInspectorTab == 3,
+                hasPendingChanges: vm.hasPendingColorizationChanges
+            ) {
+                selectInspectorTab(3)
+            }
+
+            tabButtonWithPendingBadge(
+                titleKey: "tab_export_short",
+                icon: "square.and.arrow.up.fill",
+                darkColor: .videoTeal,
+                brightColor: .brightTeal,
+                shortcut: "⌥⌘5",
+                isSelected: vm.selectedInspectorTab == 4,
+                hasPendingChanges: false
+            ) {
+                selectInspectorTab(4)
+            }
+        }
+        .frame(width: contentWidth, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func tabButtonWithPendingBadge(
+        titleKey: String,
+        icon: String,
+        darkColor: Color,
+        brightColor: Color,
+        shortcut: String,
+        isSelected: Bool,
+        hasPendingChanges: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        InspectorTabButton(
+            titleKey: titleKey,
+            icon: icon,
+            darkColor: darkColor,
+            brightColor: brightColor,
+            shortcut: shortcut,
+            isSelected: isSelected,
+            action: action
+        )
+        .overlay(alignment: .topTrailing) {
+            if hasPendingChanges {
+                Circle()
+                    .fill(Color.brightAmber)
+                    .frame(width: 7, height: 7)
+                    .shadow(color: Color.brightAmber.opacity(0.9), radius: 3)
+                    .padding(.top, 5)
+                    .padding(.trailing, 5)
+                    .allowsHitTesting(false)
+            }
+        }
     }
 
     // MARK: - Inspector Header (Branding Header)
@@ -2817,8 +2929,18 @@ struct ContentView: View {
 
     // MARK: - Fixed Footer: Unified Export & Batch
 
-    private var exportFooter: some View {
-        VStack(alignment: .leading, spacing: 8) {
+    // MARK: - Section 5: Export & Batch Output Tab (⌘5 / ⌥⌘5)
+
+    private var exportTabSection: some View {
+        InspectorAccordionSection(
+            title: "EXPORT & BATCH OUTPUT",
+            accentColor: .brightTeal,
+            shortcutHint: "⌥⌘5",
+            summary: nil,
+            borderColor: Color.brightTeal.opacity(0.35),
+            isExpanded: .constant(true)
+        ) {
+            VStack(alignment: .leading, spacing: 12) {
             if vm.isVideoLoaded {
                 HStack(spacing: 8) {
                     Text("Video Format")
@@ -3042,6 +3164,7 @@ struct ContentView: View {
             }
             }
         }
+        }
     }
 
     private var batchSettingsPopoverContent: some View {
@@ -3185,14 +3308,12 @@ struct ContentView: View {
         .customTooltip(tooltip)
     }
 
-    private func toggleInspectorTab(_ keyPath: ReferenceWritableKeyPath<ViewStereoViewModel, Bool>) {
-        withAnimation(.easeInOut(duration: 0.18)) {
+    private func selectInspectorTab(_ index: Int) {
+        withAnimation(.easeInOut(duration: 0.16)) {
             if !vm.isShowingInspector {
                 vm.isShowingInspector = true
-                vm[keyPath: keyPath] = true
-            } else {
-                vm[keyPath: keyPath].toggle()
             }
+            vm.selectedInspectorTab = index
         }
     }
 
@@ -3271,81 +3392,43 @@ private struct InspectorAccordionSection<Content: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Button {
-                withAnimation(.easeInOut(duration: 0.18)) {
-                    isExpanded.toggle()
-                }
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundColor(accentColor)
-                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                        .frame(width: 12, height: 12)
+            HStack(spacing: 8) {
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(accentColor)
+                    .frame(width: 4, height: 16)
 
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(accentColor)
-                        .frame(width: 4, height: 16)
+                Text(LocalizedStringKey(title))
+                    .appSystemFont(size: 12.5, weight: .bold)
+                    .foregroundColor(.white)
+                    .tracking(0.3)
+                    .lineLimit(1)
 
-                    Text(LocalizedStringKey(title))
-                        .appSystemFont(size: 12.5, weight: .bold)
-                        .foregroundColor(.white)
-                        .tracking(0.3)
-                        .lineLimit(1)
-
-                    if hasPendingChanges {
-                        HStack(spacing: 3) {
-                            Circle()
-                                .fill(Color.brightAmber)
-                                .frame(width: 6, height: 6)
-                            Text(LocalizedStringKey("Pending"))
-                                .appSystemFont(size: 9.5, weight: .bold)
-                                .foregroundColor(Color.brightAmber)
-                        }
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 2)
-                        .background(Color.brightAmber.opacity(0.18), in: Capsule())
+                if hasPendingChanges {
+                    HStack(spacing: 3) {
+                        Circle()
+                            .fill(Color.brightAmber)
+                            .frame(width: 6, height: 6)
+                        Text(LocalizedStringKey("Pending"))
+                            .appSystemFont(size: 9.5, weight: .bold)
+                            .foregroundColor(Color.brightAmber)
                     }
-
-                    Spacer(minLength: 6)
-
-                    if let summary, !summary.isEmpty {
-                        Text(summary)
-                            .appSystemFont(size: 10.5, weight: .medium)
-                            .foregroundColor(.white.opacity(0.68))
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                    }
-
-                    Text(shortcutHint)
-                        .appSystemFont(size: 9.5, weight: .semibold, design: .monospaced)
-                        .foregroundColor(.white.opacity(0.55))
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 2)
-                        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 4))
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(Color.brightAmber.opacity(0.18), in: Capsule())
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    accentColor.opacity(
-                        isExpanded ? (isHovered ? 0.20 : 0.14) : (isHovered ? 0.11 : 0.05)
-                    )
-                )
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .onHover { hovering in
-                isHovered = hovering
-            }
 
-            if isExpanded {
-                Divider()
-                    .background(accentColor.opacity(0.28))
-
-                content()
-                    .padding(12)
+                Spacer(minLength: 6)
             }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(accentColor.opacity(0.14))
+
+            Divider()
+                .background(accentColor.opacity(0.28))
+
+            content()
+                .padding(12)
         }
         .background(Color.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 10))
         .clipShape(RoundedRectangle(cornerRadius: 10))
