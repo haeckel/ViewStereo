@@ -4,6 +4,29 @@ ViewStereo は現在開発中であり、特に開発初期段階のアプリケ
 
 ==================================================
 
+ViewStereo v0.2.7 リリースノート / Release Notes (2026.11.26)
+
+==================================================
+【ViewStereo v0.2.7 新機能・改善点 / New Features & Improvements】
+==================================================
+- アーチ型ステレオ写真の幾何補正（ホモグラフィ）における未マスク元画素ワープ処理の導入:
+  - アーチ枠や角丸のマスク適用前の元画像画素（unmaskedLeftRGB / unmaskedRightRGB）を保持・参照して Metal ワープを実行。視差調整やウィンドウシフト時に境界部の黒滲みや欠落を徹底防止。
+- アーチ検出およびスキャナー白余白誤検出の抑制:
+  - カード外縁のスキャナー余白（高輝度・低彩度）を写真領域から除外する判定ロジックとテクスチャ分散チェックを追加し、アーチ天頂の検出精度を向上。
+- 台紙マウント描画におけるアーチ黒縁除去の最適化:
+  - StereoCardMountRenderer において、アーチ外縁の微小なスキャナー黒筋を自動検出しクリーンに除去。
+
+--------------------------------------------------
+[v0.2.7 New Features & Highlights]
+- Unmasked Original Photo Rectification Warping:
+  - Uses unmasked source pixels (unmaskedLeftRGB / unmaskedRightRGB) during Metal homography and disparity shifting, eliminating edge artifacts and black bleed around arch contours.
+- Robust Arch Detection & Scan Margin Filtering:
+  - Improved arch apex detection by ignoring scanner whitespace and validating color texture variance.
+- Clean Arch Edge Mounting:
+  - Enhanced mount renderer to automatically trim stray black scanner borders along curved arch edges.
+
+==================================================
+
 ViewStereo v0.2.6 リリースノート / Release Notes (2026.11.26)
 
 ==================================================

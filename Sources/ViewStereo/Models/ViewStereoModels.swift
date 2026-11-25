@@ -2393,13 +2393,25 @@ final class ViewStereoViewModel: ObservableObject {
         guard let renderer else {
             return .failure(.metalWarpFailed)
         }
+        let warpSrcL: [UInt8]
+        let warpSrcR: [UInt8]
+        if preserveArch,
+           let mctx = StereoCardSegmenter.shared.currentMountContext,
+           mctx.unmaskedWidth == w, mctx.unmaskedHeight == h,
+           mctx.unmaskedLeftRGB.count == w * h * 3, mctx.unmaskedRightRGB.count == w * h * 3 {
+            warpSrcL = mctx.unmaskedLeftRGB
+            warpSrcR = mctx.unmaskedRightRGB
+        } else {
+            warpSrcL = lRGB
+            warpSrcR = rRGB
+        }
         var rawWarpedL: [UInt8]? = nil
         var rawWarpedR: [UInt8]? = nil
         DispatchQueue.concurrentPerform(iterations: 2) { side in
             if side == 0 {
-                rawWarpedL = try? renderer.warpRGB8(rgbData: lRGB, srcWidth: w, srcHeight: h, forwardHomography: shiftL, cropOrigin: cropOrigin, dstWidth: rawCW, dstHeight: rawCH)
+                rawWarpedL = try? renderer.warpRGB8(rgbData: warpSrcL, srcWidth: w, srcHeight: h, forwardHomography: shiftL, cropOrigin: cropOrigin, dstWidth: rawCW, dstHeight: rawCH)
             } else {
-                rawWarpedR = try? renderer.warpRGB8(rgbData: rRGB, srcWidth: w, srcHeight: h, forwardHomography: shiftR, cropOrigin: cropOrigin, dstWidth: rawCW, dstHeight: rawCH)
+                rawWarpedR = try? renderer.warpRGB8(rgbData: warpSrcR, srcWidth: w, srcHeight: h, forwardHomography: shiftR, cropOrigin: cropOrigin, dstWidth: rawCW, dstHeight: rawCH)
             }
         }
         guard let rawWarpedL, let rawWarpedR else {
@@ -4261,8 +4273,29 @@ final class ViewStereoViewModel: ObservableObject {
                 let prevShiftL = scaleMat * shiftL * invScaleMat
                 let prevShiftR = scaleMat * shiftR * invScaleMat
 
-                guard let rawWarpedPL = try? renderer.warpRGB8(rgbData: pL, srcWidth: pw, srcHeight: ph, forwardHomography: prevShiftL, cropOrigin: prevOrigin, dstWidth: rawPrevCW, dstHeight: rawPrevCH),
-                      let rawWarpedPR = try? renderer.warpRGB8(rgbData: pR, srcWidth: pw, srcHeight: ph, forwardHomography: prevShiftR, cropOrigin: prevOrigin, dstWidth: rawPrevCW, dstHeight: rawPrevCH) else {
+                let prevSrcL: [UInt8]
+                let prevSrcR: [UInt8]
+                let prevSrcW: Int
+                let prevSrcH: Int
+                if preserveArch,
+                   let mctx = mountCtx,
+                   mctx.unmaskedWidth == w, mctx.unmaskedHeight == h,
+                   mctx.unmaskedLeftRGB.count == w * h * 3, mctx.unmaskedRightRGB.count == w * h * 3 {
+                    let (ul, ulw, ulh) = Self.downsampleForPreview(mctx.unmaskedLeftRGB, width: w, height: h, maxDim: Self.previewMaxDimension)
+                    let (ur, _, _) = Self.downsampleForPreview(mctx.unmaskedRightRGB, width: w, height: h, maxDim: Self.previewMaxDimension)
+                    prevSrcL = ul
+                    prevSrcR = ur
+                    prevSrcW = ulw
+                    prevSrcH = ulh
+                } else {
+                    prevSrcL = pL
+                    prevSrcR = pR
+                    prevSrcW = pw
+                    prevSrcH = ph
+                }
+
+                guard let rawWarpedPL = try? renderer.warpRGB8(rgbData: prevSrcL, srcWidth: prevSrcW, srcHeight: prevSrcH, forwardHomography: prevShiftL, cropOrigin: prevOrigin, dstWidth: rawPrevCW, dstHeight: rawPrevCH),
+                      let rawWarpedPR = try? renderer.warpRGB8(rgbData: prevSrcR, srcWidth: prevSrcW, srcHeight: prevSrcH, forwardHomography: prevShiftR, cropOrigin: prevOrigin, dstWidth: rawPrevCW, dstHeight: rawPrevCH) else {
                     return nil
                 }
 
@@ -4460,6 +4493,7 @@ final class ViewStereoViewModel: ObservableObject {
         let maxArchShift = Double(w) * 0.150
         let tx = preserveArch ? min(maxArchShift, max(-maxArchShift, rawTx)) : rawTx
         let keepAR = keepOriginalAspectRatio
+        let mountCtxForWarp = currentMountContext
 
         let res = await Task.detached(priority: .userInitiated) { () -> ([UInt8], [UInt8], Int, Int)? in
             let shiftL = HomographyGeometry.translation(dx: -0.5 * tx, dy: 0) * rectRes.homographyLeftPixel
@@ -4499,8 +4533,20 @@ final class ViewStereoViewModel: ObservableObject {
                 rawCH = max(16, Int(floor(maair.maxY - inset) - cropOrigin.y))
             }
 
-            guard let rawWarpedL = try? renderer.warpRGB8(rgbData: lRGB, srcWidth: w, srcHeight: h, forwardHomography: shiftL, cropOrigin: cropOrigin, dstWidth: rawCW, dstHeight: rawCH),
-                  let rawWarpedR = try? renderer.warpRGB8(rgbData: rRGB, srcWidth: w, srcHeight: h, forwardHomography: shiftR, cropOrigin: cropOrigin, dstWidth: rawCW, dstHeight: rawCH) else {
+            let warpSrcL: [UInt8]
+            let warpSrcR: [UInt8]
+            if preserveArch,
+               let mctx = mountCtxForWarp,
+               mctx.unmaskedWidth == w, mctx.unmaskedHeight == h,
+               mctx.unmaskedLeftRGB.count == w * h * 3, mctx.unmaskedRightRGB.count == w * h * 3 {
+                warpSrcL = mctx.unmaskedLeftRGB
+                warpSrcR = mctx.unmaskedRightRGB
+            } else {
+                warpSrcL = lRGB
+                warpSrcR = rRGB
+            }
+            guard let rawWarpedL = try? renderer.warpRGB8(rgbData: warpSrcL, srcWidth: w, srcHeight: h, forwardHomography: shiftL, cropOrigin: cropOrigin, dstWidth: rawCW, dstHeight: rawCH),
+                  let rawWarpedR = try? renderer.warpRGB8(rgbData: warpSrcR, srcWidth: w, srcHeight: h, forwardHomography: shiftR, cropOrigin: cropOrigin, dstWidth: rawCW, dstHeight: rawCH) else {
                 return nil
             }
             var (warpedL, warpedR, cw, ch) = preserveArch

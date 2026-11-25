@@ -39,6 +39,7 @@ scratch_*.jpg
 scratch_*.png
 ViewStereo_Output/
 学習用データ/
+再学習用データ/
 test/
 test2/
 test_assets/

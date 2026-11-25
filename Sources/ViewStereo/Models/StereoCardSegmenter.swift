@@ -38,6 +38,10 @@ final class StereoCardSegmenter: @unchecked Sendable {
         let skewAngleRad: Double
         let sampledCardRGB: (r: UInt8, g: UInt8, b: UInt8)
         let archParams: ArchShapeParams
+        let unmaskedLeftRGB: [UInt8]
+        let unmaskedRightRGB: [UInt8]
+        let unmaskedWidth: Int
+        let unmaskedHeight: Int
     }
 
     private var cachedModel: MLModel? = nil
@@ -520,7 +524,6 @@ final class StereoCardSegmenter: @unchecked Sendable {
                 finalMaskR = refined.maskR
                 mw = refined.w
                 mh = refined.h
-            } else {
             }
 
             let invScaleX = Double(width) / Double(mw)
@@ -684,6 +687,33 @@ final class StereoCardSegmenter: @unchecked Sendable {
                     var y = y0
                     while y < limit {
                         let ny = CGFloat(y) / CGFloat(max(1, height - 1))
+                        // 実際のRGB画素と台紙色(effectiveCardRGB)を比較し、既に写真領域（色差大またはテクスチャ分散大）に入っていれば押し下げを中止
+                        do {
+                            var nonCardCnt = 0, sampleTot = 0
+                            var lumaSum = 0.0, lumaSq = 0.0
+                            let sxStart = x0 + (x1 - x0) / 4
+                            let sxEnd = x1 - (x1 - x0) / 4
+                            for sx in stride(from: sxStart, through: sxEnd, by: max(1, (sxEnd - sxStart) / 24)) {
+                                let idx = (y * width + sx) * 3
+                                let r = Double(rgb[idx]), g = Double(rgb[idx + 1]), b = Double(rgb[idx + 2])
+                                let l = (r + g + b) / 3.0
+                                lumaSum += l; lumaSq += l * l
+                                sampleTot += 1
+                                if let cRGB = effectiveCardRGB {
+                                    let dr = abs(r - cRGB.r), dg = abs(g - cRGB.g), db = abs(b - cRGB.b)
+                                    if max(dr, max(dg, db)) > 24.0 {
+                                        nonCardCnt += 1
+                                    }
+                                }
+                            }
+                            if sampleTot > 0 {
+                                let meanL = lumaSum / Double(sampleTot)
+                                let rowStd = sqrt(max(0.0, lumaSq / Double(sampleTot) - meanL * meanL))
+                                if rowStd >= 12.0 || Double(nonCardCnt) / Double(sampleTot) >= 0.25 {
+                                    break
+                                }
+                            }
+                        }
                         // 連結バリアマスクまたは行バリアが支配的なら押し下げる
                         var connCnt = 0, tot = 0
                         for sx in stride(from: x0 + (x1 - x0) / 4, through: x1 - (x1 - x0) / 4, by: max(1, (x1 - x0) / 32)) {
@@ -719,7 +749,7 @@ final class StereoCardSegmenter: @unchecked Sendable {
                     guard scanX1 > scanX0 else { return currentY0 }
                     let step = max(1, (scanX1 - scanX0) / 9)
                     var apexYList: [Int] = []
-                    let minY = max(topBorderEnd + 2, currentY0 - 35)
+                    let minY = max(topBorderEnd + 4, currentY0 - 14)
                     let maxY = min(height - 10, currentY0 + 35)
                     guard maxY > minY + 8 else { return currentY0 }
                     let runLen = 6
@@ -736,6 +766,12 @@ final class StereoCardSegmenter: @unchecked Sendable {
                                     nonCard = 0
                                     break
                                 }
+                                // カード外縁の白スキャン余白（低彩度・高輝度）は写真ではない
+                                let chroma = max(r, max(g, b)) - min(r, min(g, b))
+                                if py < currentY0 && luma >= 232.0 && chroma <= 18.0 {
+                                    nonCard = 0
+                                    break
+                                }
                                 if let bMap = barrier, bMap.model.confidence >= 0.25,
                                    bMap.isConnectedBarrierAt(normX: Double(x) / Double(max(1, width - 1)), normY: Double(py) / Double(max(1, height - 1))) {
                                     // Stage 1 外周連結台紙バリア（および外縁ドロップシャドウ）上は写真頂点ではない
@@ -748,8 +784,29 @@ final class StereoCardSegmenter: @unchecked Sendable {
                                 }
                             }
                             if nonCard >= runLen - 1 {
-                                apexYList.append(y)
-                                break
+                                // y が currentY0 より上にある場合、y+runLen ..< currentY0 の間に台紙帯が挟まっていればカード外縁の誤認なので棄却
+                                var hasCardGapBelow = false
+                                if y + runLen < currentY0 {
+                                    var cardGapCount = 0
+                                    let checkEnd = currentY0
+                                    let checkStart = y + runLen
+                                    for gy in checkStart..<checkEnd {
+                                        let gIdx = (gy * width + x) * 3
+                                        let dr = abs(Double(rgb[gIdx]) - card.r)
+                                        let dg = abs(Double(rgb[gIdx + 1]) - card.g)
+                                        let db = abs(Double(rgb[gIdx + 2]) - card.b)
+                                        if max(dr, max(dg, db)) <= 24.0 {
+                                            cardGapCount += 1
+                                        }
+                                    }
+                                    if cardGapCount >= max(3, (checkEnd - checkStart) / 2) {
+                                        hasCardGapBelow = true
+                                    }
+                                }
+                                if !hasCardGapBelow {
+                                    apexYList.append(y)
+                                    break
+                                }
                             }
                         }
                     }
@@ -810,9 +867,13 @@ final class StereoCardSegmenter: @unchecked Sendable {
                 if cLuma >= 95.0 || max(cRGB.r, max(cRGB.g, cRGB.b)) >= 140.0 { // 明色・有彩色台紙を対象（暗黒月写真の宇宙空間は絶対保護）
                     let maxTopTrim = min(14, ch / 16)
                     var topTrim = 0
+                    // 上部アーチ画像では左右の肩が元から台紙にかかっているため中央20%のみを検査し、誤って頂点ごと削るのを防ぐ
+                    let x0 = hasTopArch ? (cw * 2) / 5 : cw / 4
+                    let x1 = hasTopArch ? (cw * 3) / 5 : (cw * 3) / 4
+                    let colorTol = hasTopArch ? 24.0 : 42.0
+                    let reqRate = hasTopArch ? 0.70 : 0.40
                     for y in 0..<maxTopTrim {
                         var matchL = 0, matchR = 0, n = 0
-                        let x0 = cw / 4, x1 = (cw * 3) / 4
                         let step = max(1, (x1 - x0) / 32)
                         for x in stride(from: x0, to: x1, by: step) {
                             let off = (y * cw + x) * 3
@@ -820,13 +881,14 @@ final class StereoCardSegmenter: @unchecked Sendable {
                             let rR = Double(fullOutR[off]), gR = Double(fullOutR[off + 1]), bR = Double(fullOutR[off + 2])
                             let dL = max(abs(rL - cRGB.r), max(abs(gL - cRGB.g), abs(bL - cRGB.b)))
                             let dR = max(abs(rR - cRGB.r), max(abs(gR - cRGB.g), abs(bR - cRGB.b)))
-                            if dL <= 42.0 { matchL += 1 }
-                            if dR <= 42.0 { matchR += 1 }
+                            if dL <= colorTol { matchL += 1 }
+                            if dR <= colorTol { matchR += 1 }
                             n += 1
                         }
                         let rateL = Double(matchL) / Double(max(1, n))
                         let rateR = Double(matchR) / Double(max(1, n))
-                        if max(rateL, rateR) >= 0.40 {
+                        let hit = hasTopArch ? (min(rateL, rateR) >= reqRate) : (max(rateL, rateR) >= reqRate)
+                        if hit {
                             topTrim = y + 1
                         } else if y < 4 {
                             // 最上端 1〜4px の薄い影線や境界グラデーションを跨いでその直下に台紙帯が続いていれば続行
@@ -1003,7 +1065,11 @@ final class StereoCardSegmenter: @unchecked Sendable {
                 maskHeight: mh,
                 skewAngleRad: commonSkewAngle,
                 sampledCardRGB: sampledU8,
-                archParams: archParams
+                archParams: archParams,
+                unmaskedLeftRGB: (mode == .keepArchBlack) ? fullOutL : [],
+                unmaskedRightRGB: (mode == .keepArchBlack) ? fullOutR : [],
+                unmaskedWidth: (mode == .keepArchBlack) ? cw : 0,
+                unmaskedHeight: (mode == .keepArchBlack) ? ch : 0
             )
             lock.lock()
             latestArchParams = archParams
@@ -2138,7 +2204,8 @@ final class StereoCardSegmenter: @unchecked Sendable {
             }
 
             // 2. 台紙帯・キャプション文字帯（行の多くが cardRGB で構成され、写真本体との間に明確な境界がある帯）を検出
-            let capLimitY = max(yTop + 48, yBot - maxScan)
+            let capScanMax = min(Int(Double(bh) * 0.08), Int(Double(srcH) * 0.07))
+            let capLimitY = max(yTop + 48, yBot - capScanMax)
             if currentY1 > capLimitY + 3 {
                 var sumBgRatio = 0.0
                 var rowCount = 0
@@ -2150,7 +2217,13 @@ final class StereoCardSegmenter: @unchecked Sendable {
                 // 外縁から内側（上）へ向かって台紙・文字行を辿る
                 for y in stride(from: currentY1 - 1, through: capLimitY, by: -1) {
                     let st = analyzeRow(y, x0: sx0, x1: sx1)
-                    let isMarginOrTextRow = st.bgRatio >= 0.42
+                    // 写真内の床模様や足元（草履・靴・椅子脚などで std が高く bgRatio が不完全）に入ったら即座に探索を停止
+                    if st.bgRatio < 0.72 && (st.std >= 14.0 || st.darkRatio >= 0.14) {
+                        photoStreak += 1
+                        if photoStreak >= 2 { break }
+                        continue
+                    }
+                    let isMarginOrTextRow = st.bgRatio >= 0.60 && st.std <= 18.0
                     let isDarkRuleRow = st.darkRatio >= 0.62 && st.std <= 28.0
                     if isMarginOrTextRow {
                         sumBgRatio += st.bgRatio
@@ -2168,16 +2241,16 @@ final class StereoCardSegmenter: @unchecked Sendable {
                         missBudget = 0
                         darkRuleStreak += 1
                         lastMarginY = y
-                    } else if st.bgRatio >= 0.28 && missBudget < 2 && rowCount >= 1 {
-                        // キャプション文字密度が濃い1〜2行を跨ぐための極小許容（写真側侵入は連続判定で弾く）
+                    } else if st.bgRatio >= 0.42 && missBudget < 1 && rowCount >= 2 {
+                        // キャプション文字密度が濃い1行のみ許容
                         sumBgRatio += st.bgRatio
                         rowCount += 1
                         missBudget += 1
                         darkRuleStreak = 0
                     } else {
                         photoStreak += 1
-                        if photoStreak >= 3 {
-                            // 連続3行以上明確な写真領域に突入 → 直前までが台紙/文字帯の候補
+                        if photoStreak >= 2 {
+                            // 連続2行以上写真領域に突入 → 直前までが台紙/文字帯の候補
                             break
                         }
                     }
@@ -2189,9 +2262,9 @@ final class StereoCardSegmenter: @unchecked Sendable {
                     let inside2 = analyzeRow(max(yTop + 8, borderY - 4), x0: sx0, x1: sx1)
                     let diff = stepDiff(borderY, x0: sx0, x1: sx1)
                     let hasBoundaryTransition =
-                        inside1.bgRatio < 0.40 && inside2.bgRatio < 0.40 &&
-                        (diff >= 18.0 || inside1.distCard >= 18.0 || inside1.std >= 11.0)
-                    if overallBgMean >= 0.50 && hasBoundaryTransition {
+                        inside1.bgRatio < 0.50 && inside2.bgRatio < 0.50 &&
+                        (diff >= 18.0 || inside1.distCard >= 18.0 || inside1.std >= 12.0)
+                    if overallBgMean >= 0.68 && hasBoundaryTransition {
                         currentY1 = min(currentY1, max(yTop + 32, borderY))
                     }
                 }
@@ -3444,9 +3517,9 @@ final class StereoCardSegmenter: @unchecked Sendable {
             )
         }
 
-        // 外側から内側へ向かって最大 20% 範囲でマージン/縦文字/黒枠境界を探索（dir = +1: cLx0→右, -1: cRx1-1→左）
+        // 外側から内側へ向かって最大 12% 範囲でマージン/縦文字/黒枠境界を探索（dir = +1: cLx0→右, -1: cRx1-1→左）
         func scanOuterEdge(startEdge: Int, dir: Int, widthBound: Int, y0: Int, y1: Int) -> Int? {
-            let maxTrim = min(Int(Double(widthBound) * 0.20), max(4, widthBound - 64))
+            let maxTrim = min(Int(Double(widthBound) * 0.12), max(4, widthBound - 64))
             guard maxTrim >= 4 else { return nil }
 
             // 開始位置の外側にすでに明るい台紙色があるか事前チェック（U-Netが黒枠の直前で止まったケース向け）
@@ -3488,19 +3561,23 @@ final class StereoCardSegmenter: @unchecked Sendable {
             guard validLen >= 1 else { return nil }
 
             // 1. 最も内側にある連続クリーン台紙ギャップ（または外側文字を越えた境界クリーンギャップ）終端を探す
+            // ただし、一度でも明確な写真テクスチャ（bgRatio < 0.35 かつ darkRatio < 0.50、または std >= 26.0 かつ bgRatio < 0.55）に入った後は写真内部の空・壁とみなして停止
             var pureRun = 0
             var bestCutIdx: Int? = nil
             var prefixBgSum = 0.0
             for idx in 0..<validLen {
                 let st = cols[idx]
+                if (st.bgRatio < 0.35 && st.darkRatio < 0.50) || (st.std >= 26.0 && st.bgRatio < 0.55) {
+                    break
+                }
                 prefixBgSum += st.bgRatio
-                let isPure = st.bgRatio >= 0.66 && st.std <= 20.0
-                let prevIsNearPure = idx > 0 && cols[idx - 1].bgRatio >= 0.64
+                let isPure = st.bgRatio >= 0.78 && st.std <= 14.0
+                let prevIsNearPure = idx > 0 && cols[idx - 1].bgRatio >= 0.74
                 if isPure {
                     pureRun += 1
-                    if idx < 4 || pureRun >= 2 || (prevIsNearPure && st.std <= 16.0) {
+                    if idx < 4 || pureRun >= 2 || (prevIsNearPure && st.std <= 15.0) {
                         let meanPrefixBg = prefixBgSum / Double(idx + 1)
-                        if meanPrefixBg >= 0.36 {
+                        if meanPrefixBg >= 0.42 {
                             bestCutIdx = idx + 1
                         }
                     }
@@ -3560,14 +3637,25 @@ final class StereoCardSegmenter: @unchecked Sendable {
             return dir > 0 ? (startEdge + finalSteps) : (startEdge - finalSteps + 1)
         }
 
-        if let newLx0 = scanOuterEdge(startEdge: cLx0, dir: 1, widthBound: cLx1 - cLx0, y0: cLy0, y1: cLy1),
-           newLx0 > cLx0 && cLx1 - newLx0 >= 64 {
-            cLx0 = newLx0
+        let candLx0 = scanOuterEdge(startEdge: cLx0, dir: 1, widthBound: cLx1 - cLx0, y0: cLy0, y1: cLy1)
+        let candRx1 = scanOuterEdge(startEdge: cRx1 - 1, dir: -1, widthBound: cRx1 - cRx0, y0: cRy0, y1: cRy1)
+
+        let origLW = cLx1 - cLx0
+        let origRW = cRx1 - cRx0
+        let nextLW = (candLx0.map { $0 > cLx0 && cLx1 - $0 >= 64 ? cLx1 - $0 : origLW }) ?? origLW
+        let nextRW = (candRx1.map { $0 < cRx1 && $0 - cRx0 >= 64 ? $0 - cRx0 : origRW }) ?? origRW
+
+        // 片側だけが反対側の幅を大きく下回る（8%以上狭い）過剰トリムは、写真内部の無地背景（空・壁等）への誤侵食とみなして抑止する
+        if let newLx0 = candLx0, newLx0 > cLx0 && cLx1 - newLx0 >= 64 {
+            if Double(nextLW) >= Double(nextRW) * 0.92 {
+                cLx0 = newLx0
+            }
         }
 
-        if let newRx1 = scanOuterEdge(startEdge: cRx1 - 1, dir: -1, widthBound: cRx1 - cRx0, y0: cRy0, y1: cRy1),
-           newRx1 < cRx1 && newRx1 - cRx0 >= 64 {
-            cRx1 = newRx1
+        if let newRx1 = candRx1, newRx1 < cRx1 && newRx1 - cRx0 >= 64 {
+            if Double(nextRW) >= Double(nextLW) * 0.92 {
+                cRx1 = newRx1
+            }
         }
 
         // 3. 中央セパレータ（cLx1, cRx0）の半端残りの太黒枠エッジを微調整除去（cardLuma >= 115 のみ）
@@ -5164,13 +5252,45 @@ enum StereoCardMountRenderer {
         let hasBotRound = (archParams.botRxRatio > 0.005 && archParams.botRyRatio > 0.005)
         let isFullTopArch = hasTopRound && archParams.topRxRatio >= 0.45
 
-        let insetX = hasKeepArchBlackFrame ? (w * 0.008 + 0.5) : 0.0
-        let insetYTop = hasKeepArchBlackFrame ? (h * 0.008 + 0.5) : 0.0
-        let insetYBot = hasKeepArchBlackFrame ? ((hasBotRound ? (h * 0.008) : max(1.5, h * 0.004)) + 0.5) : 0.0
-        let archOff = (hasKeepArchBlackFrame && hasTopRound) ? 2.2 : 0.0
+        // 黒マスク済みプリントの縁に残った追加黒帯（residualBorderInsets 由来等）の厚みを実測して内側に寄せる
+        var blackEdgeTop = 0, blackEdgeBot = 0, blackEdgeLeft = 0, blackEdgeRight = 0
+        if hasKeepArchBlackFrame && pw >= 32 && ph >= 32 && printRGB.count >= pw * ph * 3 {
+            let maxEdgeScanY = max(4, Int(h * 0.035))
+            let maxEdgeScanX = max(4, Int(w * 0.035))
+            func isBlackRow(_ y: Int) -> Bool {
+                let x0 = pw / 5, x1 = (pw * 4) / 5
+                var b = 0, n = 0
+                for x in stride(from: x0, to: x1, by: max(1, (x1 - x0) / 48)) {
+                    let i = (y * pw + x) * 3
+                    n += 1
+                    if printRGB[i] <= 12 && printRGB[i + 1] <= 12 && printRGB[i + 2] <= 12 { b += 1 }
+                }
+                return n > 0 && Double(b) / Double(n) >= 0.90
+            }
+            func isBlackCol(_ x: Int) -> Bool {
+                let y0 = ph / 4, y1 = (ph * 3) / 4
+                var b = 0, n = 0
+                for y in stride(from: y0, to: y1, by: max(1, (y1 - y0) / 48)) {
+                    let i = (y * pw + x) * 3
+                    n += 1
+                    if printRGB[i] <= 12 && printRGB[i + 1] <= 12 && printRGB[i + 2] <= 12 { b += 1 }
+                }
+                return n > 0 && Double(b) / Double(n) >= 0.90
+            }
+            for dy in 0..<maxEdgeScanY { if isBlackRow(dy) { blackEdgeTop = dy + 1 } else { break } }
+            for dy in 0..<maxEdgeScanY { if isBlackRow(ph - 1 - dy) { blackEdgeBot = dy + 1 } else { break } }
+            for dx in 0..<maxEdgeScanX { if isBlackCol(dx) { blackEdgeLeft = dx + 1 } else { break } }
+            for dx in 0..<maxEdgeScanX { if isBlackCol(pw - 1 - dx) { blackEdgeRight = dx + 1 } else { break } }
+        }
+
+        let insetX = hasKeepArchBlackFrame ? max(Double(blackEdgeLeft) + 1.0, w * 0.009 + 1.2) : 0.0
+        let insetXRight = hasKeepArchBlackFrame ? max(Double(blackEdgeRight) + 1.0, w * 0.009 + 1.2) : 0.0
+        let insetYTop = hasKeepArchBlackFrame ? max(Double(blackEdgeTop) + 1.0, h * 0.009 + 1.2) : 0.0
+        let insetYBot = hasKeepArchBlackFrame ? max(Double(blackEdgeBot) + 1.0, (hasBotRound ? (h * 0.009) : max(2.2, h * 0.005)) + 1.2) : 0.0
+        let archOff = (hasKeepArchBlackFrame && hasTopRound) ? 2.6 : 0.0
 
         let x0 = insetX
-        let x1 = w - insetX
+        let x1 = w - insetXRight
         let y0 = insetYTop
         let y1 = h - insetYBot
         let innerW = max(8.0, x1 - x0)
@@ -5194,6 +5314,14 @@ enum StereoCardMountRenderer {
                 isFullTopArch: isFullTopArch, topArchExp: archParams.topArchExp
             )
             if d <= -1.2 { return 0.0 }
+            if hasKeepArchBlackFrame && d < 3.5 {
+                let ipx = min(pw - 1, max(0, Int(px)))
+                let ipy = min(ph - 1, max(0, Int(py)))
+                let pOff = (ipy * pw + ipx) * 3
+                if printRGB[pOff] <= 10 && printRGB[pOff + 1] <= 10 && printRGB[pOff + 2] <= 10 {
+                    return 0.0
+                }
+            }
             if d >= 1.2 { return 1.0 }
             let t = (d + 1.2) / 2.4
             return t * t * (3.0 - 2.0 * t)

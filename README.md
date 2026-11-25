@@ -1,6 +1,6 @@
 # ViewStereo 🎞️✨
 
-[![Version](https://img.shields.io/badge/version-0.2.6-brightgreen.svg)](https://viewstereo.p-media.jp/)
+[![Version](https://img.shields.io/badge/version-0.2.7-brightgreen.svg)](https://viewstereo.p-media.jp/)
 [![Status](https://img.shields.io/badge/status-Early%20Development-amber.svg)](#development-status)
 [![Platform](https://img.shields.io/badge/platform-macOS%2014.0+-lightgrey.svg)](https://apple.co/macos)
 [![Technology](https://img.shields.io/badge/tech-Card%20Segmentation%20%7C%207--DoF%20Homography%20%7C%20Stereo%20Window%20%7C%20Digital%20Remount-orange.svg)](https://viewstereo.p-media.jp/)
@@ -17,7 +17,12 @@ Designed as the archival restoration and geometric alignment companion to **Spla
 
 ## 🚀 Key Features
 
-### 🥽 v0.2.6 New: Unified 5-Tab Inspector Architecture & Toolbar Synchronization
+### 🥽 v0.2.7 New: Unmasked Original Photo Warp & Arch Masking Edge Optimization
+- **Unmasked Source Warping (`unmaskedLeftRGB` / `unmaskedRightRGB`)**: Preserves pristine photographic pixels outside arch cutouts prior to rectification warping, preventing black edge bleed and seam artifacts during stereo window adjustment and homography transformation.
+- **Robust Arch Detection & Scan Margin Filtering**: Added high-luma/low-chroma filtering to ignore scanning whitespace outside stereoview cards, paired with texture variance checks to prevent premature arch apex cutoff.
+- **Arch Frame Margin & Black Border Removal**: Enhanced `StereoCardMountRenderer` with automatic edge darkness detection to cleanly eliminate stray black scanner lines along rounded arch borders.
+
+### 🥽 v0.2.6: Unified 5-Tab Inspector Architecture & Toolbar Synchronization
 - **Unified 5-Tab Inspector Integration**: Consolidated multiple disparate disclosure sections into a dedicated 5-tab inspector panel (`0: 基本・整準/2D→3D`, `1: 台紙`, `2: 退色復元`, `3: 彩色`, `4: 出力`).
 - **1-to-1 Toolbar & Keyboard Synchronization**: Main toolbar tab buttons and shortcuts (⌥⌘1〜⌥⌘5) are now perfectly mapped to the active inspector tab index with clean animated transitions, eliminating redundant expansion state toggling.
 - **Export & Batch Master Panel**: Grouped single image export, spatial photo, and batch directory output into a unified Tab 4 (`EXPORT & BATCH OUTPUT`).
