@@ -1,4 +1,4 @@
-# ViewStereo Technical Specification (v0.2.7)
+# ViewStereo Technical Specification (v0.2.8)
 
 ## 1. System Overview
 **ViewStereo** is a native macOS 14.0+ (SwiftUI / AppKit) application designed for automated archival stereoview restoration, geometric rectification, stereo window optimization, and modern spatial media export. It builds upon `StereoStudioCore` and `StereoCore` (`stalign_src`) and leverages Apple Silicon Neural Engine (Core ML), Vision, and Accelerate (LAPACK).

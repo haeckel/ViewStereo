@@ -1,6 +1,6 @@
 # ViewStereo 技術検討書および機能仕様書：深度推定 AI モデル管理・オンデマンド導入・マルチエンジン対応（AI Depth Model Manager Specification）
 
-**対象バージョン**: ViewStereo v0.2.7  
+**対象バージョン**: ViewStereo v0.2.8  
 **作成日**: 2026年11月22日  
 **関連プロダクト**: `ViewStereo`, `StereoStudioCore`, `DepthStereo`, `PanorStereo`, `SplatStereo`
 

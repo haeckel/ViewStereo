@@ -1,6 +1,6 @@
 # ViewStereo 🎞️✨
 
-[![Version](https://img.shields.io/badge/version-0.2.7-brightgreen.svg)](https://viewstereo.p-media.jp/)
+[![Version](https://img.shields.io/badge/version-0.2.8-brightgreen.svg)](https://viewstereo.p-media.jp/)
 [![Status](https://img.shields.io/badge/status-Early%20Development-amber.svg)](#development-status)
 [![Platform](https://img.shields.io/badge/platform-macOS%2014.0+-lightgrey.svg)](https://apple.co/macos)
 [![Technology](https://img.shields.io/badge/tech-Card%20Segmentation%20%7C%207--DoF%20Homography%20%7C%20Stereo%20Window%20%7C%20Digital%20Remount-orange.svg)](https://viewstereo.p-media.jp/)
@@ -16,6 +16,12 @@ Designed as the archival restoration and geometric alignment companion to **Spla
 ---
 
 ## 🚀 Key Features
+
+### 🥽 v0.2.8 New: 1-Click Mask Editor & SAM 2.1 Interactive Masking, Stereo Workbench Window & Folder Settings
+- **1-Click Mask Editor (SAM 2.1 連動)**: 抽出マスクの微小な欠落や誤認識領域を、1クリック（ポジティブ/ネガティブポイント）または矩形指定で直感的に追加・除外補正。
+- **StereoCard Workbench（ワークベンチウィンドウ）**: カードの抽出結果、左右の写真境界、マスク補正、幾何補正をリアルタイムプレビューしながら調整可能な新UI。
+- **フォルダ単位の一括設定管理 (`ViewStereo_Settings.json`)**: 各作業フォルダごとの設定やパラメータを保持・自動復元。
+- **StereoCardSeg v3 セグメンテーションモデル統合**: マウントカード認識精度の大幅向上と左右写真抽出の安定化。
 
 ### 🥽 v0.2.7 New: Unmasked Original Photo Warp & Arch Masking Edge Optimization
 - **Unmasked Source Warping (`unmaskedLeftRGB` / `unmaskedRightRGB`)**: Preserves pristine photographic pixels outside arch cutouts prior to rectification warping, preventing black edge bleed and seam artifacts during stereo window adjustment and homography transformation.

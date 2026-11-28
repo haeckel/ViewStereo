@@ -128,6 +128,7 @@ struct WorkspaceOutlineView: NSViewRepresentable {
         private var lastIsLargeText: Bool = false
         private var lastActiveItemID: String? = nil
         private var lastItemStatuses: [String: WorkspaceItemStatus] = [:]
+        private var lastAdjustedItemKeys: Set<String> = []
 
         private var isSyncingSelectionFromOutline = false
         private var isSyncingSelectionFromStore = false
@@ -162,17 +163,19 @@ struct WorkspaceOutlineView: NSViewRepresentable {
                 }
                 .store(in: &cancellables)
 
-            Publishers.Merge(
+            Publishers.Merge3(
                 store.$activeItemID.dropFirst().map { _ in () },
-                store.$itemStatuses.dropFirst().map { _ in () }
+                store.$itemStatuses.dropFirst().map { _ in () },
+                store.$adjustedItemKeys.dropFirst().map { _ in () }
             )
             .receive(on: DispatchQueue.main)
             .sink { [weak self] in
                 guard let self, let outline = self.outlineView else { return }
                 let s = self.parent.store
-                if self.lastActiveItemID != s.activeItemID || self.lastItemStatuses != s.itemStatuses {
+                if self.lastActiveItemID != s.activeItemID || self.lastItemStatuses != s.itemStatuses || self.lastAdjustedItemKeys != s.adjustedItemKeys {
                     self.lastActiveItemID = s.activeItemID
                     self.lastItemStatuses = s.itemStatuses
+                    self.lastAdjustedItemKeys = s.adjustedItemKeys
                     self.refreshVisibleRowStates(in: outline)
                 }
             }
@@ -204,6 +207,7 @@ struct WorkspaceOutlineView: NSViewRepresentable {
                 lastIsLargeText = parent.isLargeText
                 lastActiveItemID = store.activeItemID
                 lastItemStatuses = store.itemStatuses
+                lastAdjustedItemKeys = store.adjustedItemKeys
 
                 isSyncingExpansion = true
                 outline.reloadData()
@@ -218,9 +222,10 @@ struct WorkspaceOutlineView: NSViewRepresentable {
                 applyStoreSelection(to: outline)
             }
 
-            if lastActiveItemID != store.activeItemID || lastItemStatuses != store.itemStatuses {
+            if lastActiveItemID != store.activeItemID || lastItemStatuses != store.itemStatuses || lastAdjustedItemKeys != store.adjustedItemKeys {
                 lastActiveItemID = store.activeItemID
                 lastItemStatuses = store.itemStatuses
+                lastAdjustedItemKeys = store.adjustedItemKeys
                 refreshVisibleRowStates(in: outline)
             }
         }
@@ -273,7 +278,8 @@ struct WorkspaceOutlineView: NSViewRepresentable {
                 }
                 let isActive = node.item.map { $0.id == store.activeItemID } ?? false
                 let status = node.item.flatMap { store.itemStatuses[$0.id] } ?? .idle
-                cell.updateVisualState(isActive: isActive, status: status)
+                let isAdjusted = store.isNodeAdjusted(node)
+                cell.updateVisualState(isActive: isActive, status: status, isAdjusted: isAdjusted)
             }
         }
 
@@ -401,10 +407,12 @@ struct WorkspaceOutlineView: NSViewRepresentable {
 
             let isActive = node.item.map { $0.id == parent.store.activeItemID } ?? false
             let status = node.item.flatMap { parent.store.itemStatuses[$0.id] } ?? .idle
+            let isAdjusted = parent.store.isNodeAdjusted(node)
             cell.configure(
                 node: node,
                 isActive: isActive,
                 status: status,
+                isAdjusted: isAdjusted,
                 isLargeText: parent.isLargeText
             )
             return cell
@@ -754,6 +762,7 @@ final class WorkspaceOutlineCellView: NSTableCellView {
     private let thumbView = NSImageView()
     private let titleField = NSTextField(labelWithString: "")
     private let subtitleField = NSTextField(labelWithString: "")
+    private let adjustedBadge = PillBadgeView()
     private let lrBadge = PillBadgeView()
     private let outputBadge = PillBadgeView()
     private let statusPill = PillBadgeView()
@@ -784,6 +793,7 @@ final class WorkspaceOutlineCellView: NSTableCellView {
         thumbnailOp = nil
         currentURL = nil
         thumbView.image = nil
+        adjustedBadge.isHidden = true
         warningHoverView.resetHover()
     }
 
@@ -851,6 +861,7 @@ final class WorkspaceOutlineCellView: NSTableCellView {
         case .compact:
             thumbView.imageScaling = .scaleProportionallyUpOrDown
             addSubview(subtitleField)
+            addSubview(adjustedBadge)
             addSubview(lrBadge)
             addSubview(statusPill)
             addSubview(spinner)
@@ -863,7 +874,7 @@ final class WorkspaceOutlineCellView: NSTableCellView {
             textStack.translatesAutoresizingMaskIntoConstraints = false
             addSubview(textStack)
 
-            let rightAccessoryStack = NSStackView(views: [lrBadge, statusPill, spinner, warningHoverView])
+            let rightAccessoryStack = NSStackView(views: [adjustedBadge, lrBadge, statusPill, spinner, warningHoverView])
             rightAccessoryStack.orientation = .horizontal
             rightAccessoryStack.spacing = 4
             rightAccessoryStack.alignment = .centerY
@@ -890,12 +901,13 @@ final class WorkspaceOutlineCellView: NSTableCellView {
 
         case .largeThumbnail:
             thumbView.imageScaling = .scaleProportionallyUpOrDown
+            addSubview(adjustedBadge)
             addSubview(lrBadge)
             addSubview(statusPill)
             addSubview(spinner)
             addSubview(warningHoverView)
 
-            let overlayBadges = NSStackView(views: [lrBadge, statusPill, spinner, warningHoverView])
+            let overlayBadges = NSStackView(views: [adjustedBadge, lrBadge, statusPill, spinner, warningHoverView])
             overlayBadges.orientation = .horizontal
             overlayBadges.spacing = 4
             overlayBadges.alignment = .centerY
@@ -918,7 +930,7 @@ final class WorkspaceOutlineCellView: NSTableCellView {
         }
     }
 
-    func configure(node: WorkspaceBrowserNode, isActive: Bool, status: WorkspaceItemStatus, isLargeText: Bool) {
+    func configure(node: WorkspaceBrowserNode, isActive: Bool, status: WorkspaceItemStatus, isAdjusted: Bool, isLargeText: Bool) {
         let fontScale: CGFloat = isLargeText ? 1.2 : 1.0
         titleField.stringValue = node.displayName
 
@@ -935,6 +947,7 @@ final class WorkspaceOutlineCellView: NSTableCellView {
             }
             outputBadge.isHidden = !node.isOutputFolder
             activeBar.isHidden = true
+            adjustedBadge.isHidden = true
             return
         }
 
@@ -960,7 +973,7 @@ final class WorkspaceOutlineCellView: NSTableCellView {
         } else {
             lrBadge.isHidden = true
         }
-        updateVisualState(isActive: isActive, status: status)
+        updateVisualState(isActive: isActive, status: status, isAdjusted: isAdjusted)
 
         if currentURL != node.url {
             thumbnailOp?.cancel()
@@ -982,12 +995,24 @@ final class WorkspaceOutlineCellView: NSTableCellView {
         }
     }
 
-    func updateVisualState(isActive: Bool, status: WorkspaceItemStatus) {
+    func updateVisualState(isActive: Bool, status: WorkspaceItemStatus, isAdjusted: Bool = false) {
         activeBar.isHidden = !isActive
         layer?.backgroundColor = isActive
             ? NSColor(calibratedRed: 0.96, green: 0.66, blue: 0.18, alpha: 0.14).cgColor
             : NSColor.clear.cgColor
         layer?.cornerRadius = 6
+
+        if isAdjusted {
+            adjustedBadge.isHidden = false
+            adjustedBadge.configure(
+                text: "✓",
+                color: NSColor(calibratedRed: 0.16, green: 0.82, blue: 0.55, alpha: 1.0),
+                showDot: false
+            )
+            adjustedBadge.toolTip = String(localized: "Adjusted (ViewStereo_Settings.json)")
+        } else {
+            adjustedBadge.isHidden = true
+        }
 
         spinner.stopAnimation(nil)
         spinner.isHidden = true

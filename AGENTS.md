@@ -25,3 +25,12 @@
 - **Dark-First Studio UI**: `../StereoStudioCore` および `../macOS_App_Development_Style_Guide.md` に完全準拠（強制 Dark Aqua、Anti-Jitter 固定幅インスペクター、3点セット入力、AboutView / HelpView）。
 - **テーマカラー**: 19世紀のセピア・真鍮を想起させる「アンバーゴールド」をキーカラーとし、Trilogyのセマンティックカラー（パープル、ブルー、アンバー、ピンク、グリーン）を踏襲。
 - **Metal 1パス Lanczos-3 ワープ**: 高精細なアーカイブ解像度（4K〜8Kスキャン）でも破綻なく高速・シャープに再サンプリング。
+
+## 4. ビルド＆成果物保存規則（Build & Application Packaging）
+- **アプリ保存の義務化**: `swift build` や `xcodebuild` によるビルド後、必ずビルド済み実行ファイル（Releaseまたは最新バイナリ）およびリソースバンドルをアプリケーションバンドル（`.app`）へ同期し、以下のプロジェクトフォルダ内に保存・更新すること。
+  - `ViewStereo/ViewStereo.app`（プロジェクト直下）
+  - `ViewStereo/build/ViewStereo.app`
+- **コード署名の整合性**: バイナリ配置後、ローカルで即座にダブルクリック起動できるよう、必ず `codesign --force --deep --sign -` によるアドホック署名を適用すること。
+- **アーチ幾何学仕様の遵守**:
+  - ステレオカード写真の上部アーチ（Arch-top）は、中央を半円に切り落とさず、上辺中央の水平フラット天井を保護し、左右2隅のみに角丸（$r_x \approx 0.26, r_y \approx 0.14$）を適用すること。
+  - 下部2隅は100%完全な水平直角（Square Corner、90度）を堅持すること。

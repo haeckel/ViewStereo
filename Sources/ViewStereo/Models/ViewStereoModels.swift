@@ -607,12 +607,16 @@ final class ViewStereoViewModel: ObservableObject {
         rawRightRGB = nil
         alignedLeftRGB = nil
         alignedRightRGB = nil
+        alignedCardMask = nil
         previewRawLeftRGB = nil
         previewRawRightRGB = nil
         previewAlignedLeftRGB = nil
         previewAlignedRightRGB = nil
+        previewAlignedCardMask = nil
         rectifiedPreviewLeftRGB = nil
         rectifiedPreviewRightRGB = nil
+        rectifiedPreviewAlphaL = nil
+        rectifiedPreviewAlphaR = nil
         originalTrueStereoAlignedL = nil
         originalTrueStereoAlignedR = nil
         clearDepthSynthesisCache()
@@ -676,7 +680,28 @@ final class ViewStereoViewModel: ObservableObject {
     }
     @Published var isRunningCardOCR: Bool = false
     @Published var currentMountContext: StereoCardSegmenter.OriginalCardMountContext? = nil
+    @Published var isShowingMaskEditor: Bool = false
+    var onOpenWorkbenchRequested: (() -> Void)? = nil
+    @Published var autoExportTrainingDatasetOnMaskApply: Bool = true {
+        didSet {
+            UserDefaults.standard.set(autoExportTrainingDatasetOnMaskApply, forKey: "VS.autoExportTrainingDatasetOnMaskApply")
+        }
+    }
+    @Published var trainingDatasetDirectoryPath: String = StereoCardDatasetExporter.defaultDatasetDirectoryURL.path {
+        didSet {
+            UserDefaults.standard.set(trainingDatasetDirectoryPath, forKey: "VS.trainingDatasetDirectoryPath")
+        }
+    }
     private var ocrGeneration: Int = 0
+
+    // フォルダ単位の個別設定（ViewStereo_Settings.json）
+    @Published var folderSettingsMap: [String: FolderItemSettings] = [:]
+    @Published var hasUnsavedFolderSettings: Bool = false
+    private var currentItemBaselineSettings: FolderItemSettings? = nil
+    var currentMaskGuideOverride: FolderMaskGuideOverride? = nil
+    private var pendingRestoredWindowShiftX: Double? = nil
+    private var pendingRestoredIsSwapped: Bool? = nil
+    private var pendingRestoredMaskGuideOverride: FolderMaskGuideOverride? = nil
 
     @Published private(set) var appliedCardMountConfig: StereoCardMountConfig = StereoCardMountConfig()
 
@@ -693,6 +718,178 @@ final class ViewStereoViewModel: ObservableObject {
 
     var hasOriginalCardMount: Bool {
         currentMountContext != nil
+    }
+
+    /// 補正シートを閉じずに現在の左右マスクを GPU 仕上げして 3クラス教師データ (PNG) のみ書き出す
+    func exportTrainingDatasetOnly(
+        maskL: [Bool],
+        softProbL: [Float],
+        maskR: [Bool],
+        softProbR: [Float],
+        maskW: Int,
+        maskH: Int,
+        points: [InteractivePromptPoint],
+        wasManuallyEdited: Bool,
+        overrideArchParams: StereoCardSegmenter.ArchShapeParams? = nil,
+        overrideBoxes: (left: InteractivePromptBox, right: InteractivePromptBox)? = nil
+    ) async -> Result<StereoCardDatasetExportResult, Error> {
+        guard let ctx = currentMountContext else {
+            return .failure(StereoCardDatasetExporterError.invalidDimensions)
+        }
+        let sourceURL = leftURL
+        let rootURL = URL(fileURLWithPath: trainingDatasetDirectoryPath, isDirectory: true)
+        return await Task.detached(priority: .userInitiated) {
+            guard let refined = StereoCardSegmenter.shared.renderFullCardAlphaMasks(
+                cardRGB: ctx.cardRGB,
+                cardWidth: ctx.cardWidth,
+                cardHeight: ctx.cardHeight,
+                maskL: maskL,
+                softProbL: softProbL,
+                maskR: maskR,
+                softProbR: softProbR,
+                maskW: maskW,
+                maskH: maskH,
+                skewAngleRad: ctx.skewAngleRad,
+                overrideArchParams: overrideArchParams,
+                overrideBoxes: overrideBoxes
+            ) else {
+                return .failure(StereoCardDatasetExporterError.invalidDimensions)
+            }
+            do {
+                let exported = try StereoCardDatasetExporter.export(
+                    cardRGB: ctx.cardRGB,
+                    width: ctx.cardWidth,
+                    height: ctx.cardHeight,
+                    fullAlphaL: refined.alphaL,
+                    fullAlphaR: refined.alphaR,
+                    sourceFileURL: sourceURL,
+                    outputRootURL: rootURL,
+                    points: points,
+                    wasManuallyEdited: wasManuallyEdited
+                )
+                return .success(exported)
+            } catch {
+                return .failure(error)
+            }
+        }.value
+    }
+
+    /// 1クリック正負点補正で確定したマスクを GPU 仕上げ・切り出しし、Step 1 の再ワープ＋交差マスクパイプラインへ反映する
+    func applyInteractiveMaskCorrection(
+        maskL: [Bool],
+        softProbL: [Float],
+        maskR: [Bool],
+        softProbR: [Float],
+        maskW: Int,
+        maskH: Int,
+        points: [InteractivePromptPoint],
+        exportTrainingData: Bool,
+        overrideArchParams: StereoCardSegmenter.ArchShapeParams? = nil,
+        overrideBoxes: (left: InteractivePromptBox, right: InteractivePromptBox)? = nil
+    ) async -> Bool {
+        guard let ctx = currentMountContext else { return false }
+        let extMode: StereoCardCropper.ExtractionMode = (stereoCardMode == .keepArchBlack) ? .keepArchBlack : .cropInner
+        let sourceURL = leftURL
+        let rootURL = URL(fileURLWithPath: trainingDatasetDirectoryPath, isDirectory: true)
+        let wasEdited = !points.isEmpty || overrideBoxes != nil || overrideArchParams != nil
+
+        let workerTask = Task.detached(priority: .userInitiated) { () -> (InteractiveFinalizedOutput, ([UInt8], Int, Int), ([UInt8], Int, Int), StereoCardDatasetExportResult?)? in
+            guard let finalized = StereoCardSegmenter.shared.finalizeInteractiveMasks(
+                mountContext: ctx,
+                maskL: maskL,
+                softProbL: softProbL,
+                maskR: maskR,
+                softProbR: softProbR,
+                maskW: maskW,
+                maskH: maskH,
+                mode: extMode,
+                overrideArchParams: overrideArchParams,
+                overrideBoxes: overrideBoxes
+            ) else {
+                return nil
+            }
+            let prevL = Self.downsampleForPreview(finalized.cropResult.leftRGB, width: finalized.cropResult.width, height: finalized.cropResult.height, maxDim: Self.previewMaxDimension)
+            let prevR = Self.downsampleForPreview(finalized.cropResult.rightRGB, width: finalized.cropResult.width, height: finalized.cropResult.height, maxDim: Self.previewMaxDimension)
+
+            var exported: StereoCardDatasetExportResult? = nil
+            if exportTrainingData {
+                exported = try? StereoCardDatasetExporter.export(
+                    cardRGB: ctx.cardRGB,
+                    width: ctx.cardWidth,
+                    height: ctx.cardHeight,
+                    fullAlphaL: finalized.fullAlphaL,
+                    fullAlphaR: finalized.fullAlphaR,
+                    sourceFileURL: sourceURL,
+                    outputRootURL: rootURL,
+                    points: points,
+                    wasManuallyEdited: wasEdited
+                )
+            }
+            return (finalized, prevL, prevR, exported)
+        }
+        let processed = await workerTask.value
+
+        guard let (finalized, prevL, prevR, exported) = processed else {
+            return false
+        }
+
+        let crop = finalized.cropResult
+        currentMountContext = finalized.mountContext
+        hasPreservedArch = crop.preservedArch
+        rawLeftRGB = crop.leftRGB
+        rawRightRGB = crop.rightRGB
+        alignedLeftRGB = nil
+        alignedRightRGB = nil
+        alignedCardMask = nil
+        previewRawLeftRGB = prevL.0
+        previewRawRightRGB = prevR.0
+        previewAlignedLeftRGB = nil
+        previewAlignedRightRGB = nil
+        previewAlignedCardMask = nil
+        rectifiedPreviewLeftRGB = nil
+        rectifiedPreviewRightRGB = nil
+        rectifiedPreviewAlphaL = nil
+        rectifiedPreviewAlphaR = nil
+        originalTrueStereoAlignedL = nil
+        originalTrueStereoAlignedR = nil
+        clearDepthSynthesisCache()
+
+        imageWidth = crop.width
+        imageHeight = crop.height
+        croppedWidth = crop.width
+        croppedHeight = crop.height
+        previewWidth = prevL.1
+        previewHeight = prevL.2
+        previewCroppedWidth = prevL.1
+        previewCroppedHeight = prevL.2
+        isAligned = false
+        appliedCardMountConfig = makeCardMountConfig()
+
+        if let ovBoxes = overrideBoxes {
+            currentMaskGuideOverride = FolderMaskGuideOverride(
+                boxL: ovBoxes.left,
+                boxR: ovBoxes.right,
+                topArchRatio: overrideArchParams?.topRyRatio ?? 0.0,
+                botRoundRatio: overrideArchParams?.botRyRatio ?? 0.0
+            )
+        } else {
+            currentMaskGuideOverride = nil
+        }
+        captureActiveItemSettingsToFolderMap(force: true)
+        saveWorkspaceFolderSettings()
+
+        if let exported {
+            statusMessage = "Updated mask & saved 3-class PNG: \(exported.maskURL.lastPathComponent)"
+        } else {
+            statusMessage = "Updated stereoview extraction mask (\(crop.width)×\(crop.height))."
+        }
+
+        if autoAlignOnLoad {
+            runAutoAlignment()
+        } else {
+            renderDisplayPreview()
+        }
+        return true
     }
 
     func makeCardMountConfig(filename: String? = nil, preservedArch: Bool? = nil) -> StereoCardMountConfig {
@@ -1121,12 +1318,16 @@ final class ViewStereoViewModel: ObservableObject {
         rawRightRGB = nil
         alignedLeftRGB = nil
         alignedRightRGB = nil
+        alignedCardMask = nil
         previewRawLeftRGB = nil
         previewRawRightRGB = nil
         previewAlignedLeftRGB = nil
         previewAlignedRightRGB = nil
+        previewAlignedCardMask = nil
         rectifiedPreviewLeftRGB = nil
         rectifiedPreviewRightRGB = nil
+        rectifiedPreviewAlphaL = nil
+        rectifiedPreviewAlphaR = nil
 
         leftURL = nil
         rightURL = nil
@@ -1134,6 +1335,11 @@ final class ViewStereoViewModel: ObservableObject {
         isSingleSBSInput = false
         hasPreservedArch = false
         currentMountContext = nil
+        currentItemBaselineSettings = nil
+        currentMaskGuideOverride = nil
+        pendingRestoredWindowShiftX = nil
+        pendingRestoredIsSwapped = nil
+        pendingRestoredMaskGuideOverride = nil
         clearCardMountTexts()
         isRunningCardOCR = false
 
@@ -1157,6 +1363,7 @@ final class ViewStereoViewModel: ObservableObject {
         lastRectResult = nil
         lastCommonPolygon = []
         lastDisparitySamples = []
+        lastDenseEdgeSamples = []
         lastRawSaliencyMap = nil
 
         windowShiftX = 0.0
@@ -1326,11 +1533,12 @@ final class ViewStereoViewModel: ObservableObject {
         isBatchQueueActive = false
     }
 
-    // 内部バッファ（元画像・補正後画像）
+    // 内部バッファ（元画像・補正後画像・左右交差カードマスク）
     private var rawLeftRGB: [UInt8]? = nil
     private var rawRightRGB: [UInt8]? = nil
     private var alignedLeftRGB: [UInt8]? = nil
     private var alignedRightRGB: [UInt8]? = nil
+    private var alignedCardMask: [UInt8]? = nil
 
     // プレビュー用軽量バッファ（長辺最大 1440px）
     nonisolated private static let previewMaxDimension = 1440
@@ -1339,6 +1547,7 @@ final class ViewStereoViewModel: ObservableObject {
     private var previewRawRightRGB: [UInt8]? = nil
     private var previewAlignedLeftRGB: [UInt8]? = nil
     private var previewAlignedRightRGB: [UInt8]? = nil
+    private var previewAlignedCardMask: [UInt8]? = nil
     private var previewWidth: Int = 0
     private var previewHeight: Int = 0
     private var previewCroppedWidth: Int = 0
@@ -1347,6 +1556,8 @@ final class ViewStereoViewModel: ObservableObject {
     // ドラッグ中 60fps 追従用の平行化済み（tx=0）軽量バッファ
     private var rectifiedPreviewLeftRGB: [UInt8]? = nil
     private var rectifiedPreviewRightRGB: [UInt8]? = nil
+    private var rectifiedPreviewAlphaL: [UInt8]? = nil
+    private var rectifiedPreviewAlphaR: [UInt8]? = nil
     private var rectifiedPreviewWidth: Int = 0
     private var rectifiedPreviewHeight: Int = 0
 
@@ -1362,10 +1573,11 @@ final class ViewStereoViewModel: ObservableObject {
     private var lastRectResult: RectificationResult? = nil
     private var lastCommonPolygon: [SIMD2<Double>] = []
     private var lastDisparitySamples: [DisparitySample] = []
+    private var lastDenseEdgeSamples: [DisparitySample] = []
     private var lastRawSaliencyMap: NormalizedFloatMap? = nil
 
-    var leftURL: URL? = nil
-    var rightURL: URL? = nil
+    @Published var leftURL: URL? = nil
+    @Published var rightURL: URL? = nil
     var isSingleSBSInput: Bool = false
 
     private let metalRenderer: MetalWarpRenderer?
@@ -1461,6 +1673,12 @@ final class ViewStereoViewModel: ObservableObject {
         if ud.object(forKey: "VS.cardUseFilenameAsCaption") != nil {
             self.cardUseFilenameAsCaption = ud.bool(forKey: "VS.cardUseFilenameAsCaption")
         }
+        if ud.object(forKey: "VS.autoExportTrainingDatasetOnMaskApply") != nil {
+            self.autoExportTrainingDatasetOnMaskApply = ud.bool(forKey: "VS.autoExportTrainingDatasetOnMaskApply")
+        }
+        if let dsPath = ud.string(forKey: "VS.trainingDatasetDirectoryPath"), !dsPath.isEmpty {
+            self.trainingDatasetDirectoryPath = dsPath
+        }
         if let bpm = ud.string(forKey: "VS.batchPairingMode"), let mode = StereoBatchPairingMode(rawValue: bpm) {
             self.batchPairingMode = mode
         }
@@ -1499,11 +1717,13 @@ final class ViewStereoViewModel: ObservableObject {
 
     var activeLeftRGB: [UInt8]? { alignedLeftRGB ?? rawLeftRGB }
     var activeRightRGB: [UInt8]? { alignedRightRGB ?? rawRightRGB }
+    var activeCardMask: [UInt8]? { isAligned ? alignedCardMask : nil }
     var activeWidth: Int { isAligned ? croppedWidth : imageWidth }
     var activeHeight: Int { isAligned ? croppedHeight : imageHeight }
 
     private var activePreviewLeftRGB: [UInt8]? { previewAlignedLeftRGB ?? previewRawLeftRGB }
     private var activePreviewRightRGB: [UInt8]? { previewAlignedRightRGB ?? previewRawRightRGB }
+    private var activePreviewCardMask: [UInt8]? { isAligned ? previewAlignedCardMask : nil }
     private var activePreviewWidth: Int { isAligned ? previewCroppedWidth : previewWidth }
     private var activePreviewHeight: Int { isAligned ? previewCroppedHeight : previewHeight }
 
@@ -1630,6 +1850,7 @@ final class ViewStereoViewModel: ObservableObject {
         interpretationOverride: StereoInputInterpretation? = nil
     ) {
         currentImageLoadTask?.cancel()
+        captureActiveItemSettingsToFolderMap(force: false)
         clearVideoState()
         imageLoadGeneration += 1
         let gen = imageLoadGeneration
@@ -1653,7 +1874,12 @@ final class ViewStereoViewModel: ObservableObject {
         workspaceItemStatuses[url.path] = .processing
         leftURL = url
         rightURL = url
-        applySidecarIfPresent(for: url)
+        let restoredFolderSettings = applyFolderItemSettingsBeforeLoad(for: url)
+        if restoredFolderSettings == nil {
+            applySidecarIfPresent(for: url)
+        }
+        currentMaskGuideOverride = restoredFolderSettings?.maskGuideOverride
+        let pendingMaskOverride = pendingRestoredMaskGuideOverride
         isSingleSBSInput = true
         isProcessing = true
         let cardMode = stereoCardMode
@@ -1710,12 +1936,39 @@ final class ViewStereoViewModel: ObservableObject {
                 // ステレオカード台紙検出
                 let extMode: StereoCardCropper.ExtractionMode = (cardMode == .keepArchBlack) ? .keepArchBlack : .cropInner
                 if cardMode != .off,
-                   let card = (useCoreML ? StereoCardSegmenter.shared.extractPhotoPair(from: rgb, width: fw, height: fh, mode: extMode) : nil)
-                           ?? StereoCardCropper.extractPhotoPair(from: rgb, width: fw, height: fh, mode: extMode) {
+                   var card = Self.extractCardPhotoPair(from: rgb, width: fw, height: fh, mode: extMode, useCoreML: useCoreML) {
                     if Task.isCancelled { return nil }
+                    var mountCtx = StereoCardSegmenter.shared.currentMountContext
+                    if let ov = pendingMaskOverride, let baseCtx = mountCtx {
+                        let arch = StereoCardSegmenter.makeGuideArchParams(
+                            topRyRatio: ov.topArchRatio,
+                            botRyRatio: ov.botRoundRatio
+                        )
+                        let direct = StereoCardSegmenter.buildGuideDirectMasks(
+                            boxL: ov.boxL,
+                            boxR: ov.boxR,
+                            archParams: arch,
+                            maskW: baseCtx.maskWidth,
+                            maskH: baseCtx.maskHeight
+                        )
+                        if let finalized = StereoCardSegmenter.shared.finalizeInteractiveMasks(
+                            mountContext: baseCtx,
+                            maskL: direct.maskL,
+                            softProbL: direct.probL,
+                            maskR: direct.maskR,
+                            softProbR: direct.probR,
+                            maskW: baseCtx.maskWidth,
+                            maskH: baseCtx.maskHeight,
+                            mode: extMode,
+                            overrideArchParams: arch,
+                            overrideBoxes: (left: ov.boxL, right: ov.boxR)
+                        ) {
+                            card = finalized.cropResult
+                            mountCtx = finalized.mountContext
+                        }
+                    }
                     let (pL, pw, ph) = Self.downsampleForPreview(card.leftRGB, width: card.width, height: card.height, maxDim: Self.previewMaxDimension)
                     let (pR, _, _) = Self.downsampleForPreview(card.rightRGB, width: card.width, height: card.height, maxDim: Self.previewMaxDimension)
-                    let mountCtx = StereoCardSegmenter.shared.currentMountContext
                     return LoadedSingleResult(
                         left: card.leftRGB, right: card.rightRGB, width: card.width, height: card.height,
                         prevL: pL, prevR: pR, prevW: pw, prevH: ph,
@@ -1766,19 +2019,24 @@ final class ViewStereoViewModel: ObservableObject {
             isSingleSBSInput = !res.isContainerStereo && !res.is2DPhoto
             hasPreservedArch = res.preservedArch
             currentMountContext = res.mountCtx
-            if cardTextMode == .ocrAuto {
+            pendingRestoredMaskGuideOverride = nil
+            if cardTextMode == .ocrAuto && restoredFolderSettings == nil {
                 clearCardMountTexts()
             }
             rawLeftRGB = res.left
             rawRightRGB = res.right
             alignedLeftRGB = nil
             alignedRightRGB = nil
+            alignedCardMask = nil
             previewRawLeftRGB = res.prevL
             previewRawRightRGB = res.prevR
             previewAlignedLeftRGB = nil
             previewAlignedRightRGB = nil
+            previewAlignedCardMask = nil
             rectifiedPreviewLeftRGB = nil
             rectifiedPreviewRightRGB = nil
+            rectifiedPreviewAlphaL = nil
+            rectifiedPreviewAlphaR = nil
             previewWidth = res.prevW
             previewHeight = res.prevH
             previewCroppedWidth = res.prevW
@@ -1815,12 +2073,21 @@ final class ViewStereoViewModel: ObservableObject {
 
             isProcessing = false
             statusMessage = res.isContainerStereo ? "Loaded Stereo Container (\(res.width)×\(res.height))" : "Loaded SBS (\(res.width)×\(res.height))"
-            if cardTextMode == .ocrAuto, res.mountCtx != nil {
+            if cardTextMode == .ocrAuto, res.mountCtx != nil, restoredFolderSettings == nil {
                 extractTextsFromOriginalCardMount()
             }
             if autoAlignOnLoad {
                 runAutoAlignment()
             } else {
+                if let savedShift = pendingRestoredWindowShiftX {
+                    windowShiftX = savedShift
+                    pendingRestoredWindowShiftX = nil
+                }
+                if let savedSwapped = pendingRestoredIsSwapped {
+                    isSwapped = savedSwapped
+                    pendingRestoredIsSwapped = nil
+                }
+                currentItemBaselineSettings = snapshotCurrentItemSettings()
                 renderDisplayPreview()
             }
         }
@@ -1828,6 +2095,7 @@ final class ViewStereoViewModel: ObservableObject {
 
     func loadSeparateImages(left: URL, right: URL) {
         currentImageLoadTask?.cancel()
+        captureActiveItemSettingsToFolderMap(force: false)
         clearVideoState()
         imageLoadGeneration += 1
         let gen = imageLoadGeneration
@@ -1851,7 +2119,12 @@ final class ViewStereoViewModel: ObservableObject {
         workspaceItemStatuses[activeID] = .processing
         leftURL = left
         rightURL = right
-        applySidecarIfPresent(for: left)
+        let restoredFolderSettings = applyFolderItemSettingsBeforeLoad(for: left)
+        if restoredFolderSettings == nil {
+            applySidecarIfPresent(for: left)
+        }
+        currentMaskGuideOverride = nil
+        pendingRestoredMaskGuideOverride = nil
         isSingleSBSInput = false
         isProcessing = true
         statusMessage = "Loading L/R images..."
@@ -1887,12 +2160,16 @@ final class ViewStereoViewModel: ObservableObject {
             }
             alignedLeftRGB = nil
             alignedRightRGB = nil
+            alignedCardMask = nil
             previewRawLeftRGB = pL
             previewRawRightRGB = pR
             previewAlignedLeftRGB = nil
             previewAlignedRightRGB = nil
+            previewAlignedCardMask = nil
             rectifiedPreviewLeftRGB = nil
             rectifiedPreviewRightRGB = nil
+            rectifiedPreviewAlphaL = nil
+            rectifiedPreviewAlphaR = nil
             previewWidth = pw
             previewHeight = ph
             previewCroppedWidth = pw
@@ -1921,6 +2198,15 @@ final class ViewStereoViewModel: ObservableObject {
             if autoAlignOnLoad {
                 runAutoAlignment()
             } else {
+                if let savedShift = pendingRestoredWindowShiftX {
+                    windowShiftX = savedShift
+                    pendingRestoredWindowShiftX = nil
+                }
+                if let savedSwapped = pendingRestoredIsSwapped {
+                    isSwapped = savedSwapped
+                    pendingRestoredIsSwapped = nil
+                }
+                currentItemBaselineSettings = snapshotCurrentItemSettings()
                 renderDisplayPreview()
             }
         }
@@ -1974,23 +2260,112 @@ final class ViewStereoViewModel: ObservableObject {
 
     // MARK: - Auto Alignment + Intelligent Window Pipeline
 
+    private struct IntersectionMaskResult: Sendable {
+        let mask: [UInt8]
+        let areaL: Int
+        let areaR: Int
+        let areaInter: Int
+        let lrAreaRatio: Double
+        let interAreaRatio: Double
+        let usedFallback: Bool
+        let warningMessage: String?
+    }
+
+    /// 同時ワープ後の左右実輪郭マスクを交差（AND = min）し、片側の大きな欠けによる道連れ防止のため面積比乖離チェックを行う
+    nonisolated private static func buildIntersectionMask(
+        alphaL: [UInt8],
+        alphaR: [UInt8],
+        width w: Int,
+        height h: Int
+    ) -> IntersectionMaskResult {
+        let count = w * h
+        guard w > 0, h > 0, alphaL.count >= count, alphaR.count >= count else {
+            let empty = [UInt8](repeating: 255, count: max(0, count))
+            return IntersectionMaskResult(mask: empty, areaL: count, areaR: count, areaInter: count, lrAreaRatio: 1.0, interAreaRatio: 1.0, usedFallback: false, warningMessage: nil)
+        }
+
+        var inter = [UInt8](repeating: 0, count: count)
+        var areaL = 0
+        var areaR = 0
+        var areaInter = 0
+        alphaL.withUnsafeBufferPointer { lPtr in
+            alphaR.withUnsafeBufferPointer { rPtr in
+                inter.withUnsafeMutableBufferPointer { oPtr in
+                    guard let lp = lPtr.baseAddress, let rp = rPtr.baseAddress, let op = oPtr.baseAddress else { return }
+                    for i in 0..<count {
+                        let aL = lp[i]
+                        let aR = rp[i]
+                        let aI = aL < aR ? aL : aR
+                        op[i] = aI
+                        if aL >= 128 { areaL += 1 }
+                        if aR >= 128 { areaR += 1 }
+                        if aI >= 128 { areaInter += 1 }
+                    }
+                }
+            }
+        }
+
+        let maxArea = max(1, max(areaL, areaR))
+        let minArea = min(areaL, areaR)
+        let lrAreaRatio = Double(minArea) / Double(maxArea)
+        let interAreaRatio = Double(areaInter) / Double(maxArea)
+
+        var warningMsg: String? = nil
+        var usedFallback = false
+        var finalMask = inter
+
+        if lrAreaRatio < 0.85 || interAreaRatio < 0.80 {
+            let smallSide = areaL <= areaR ? "L" : "R"
+            var msg = String(
+                format: "L/R mask area discrepancy (smaller=%@): L=%d R=%d Inter=%d (LR=%.1f%%, Inter=%.1f%%)",
+                smallSide, areaL, areaR, areaInter, lrAreaRatio * 100.0, interAreaRatio * 100.0
+            )
+            if lrAreaRatio < 0.72 || interAreaRatio < 0.65 {
+                usedFallback = true
+                finalMask = (areaL >= areaR) ? Array(alphaL.prefix(count)) : Array(alphaR.prefix(count))
+                msg += " -> Fallback to larger side mask to prevent collateral cropping."
+            }
+            warningMsg = msg
+            NSLog("[ViewStereo][MaskCheck] WARNING: %@", msg)
+        } else {
+            NSLog("[ViewStereo][MaskCheck] OK: L=%d R=%d Inter=%d (LR=%.1f%%, Inter=%.1f%%)",
+                  areaL, areaR, areaInter, lrAreaRatio * 100.0, interAreaRatio * 100.0)
+        }
+
+        return IntersectionMaskResult(
+            mask: finalMask,
+            areaL: areaL,
+            areaR: areaR,
+            areaInter: areaInter,
+            lrAreaRatio: lrAreaRatio,
+            interAreaRatio: interAreaRatio,
+            usedFallback: usedFallback,
+            warningMessage: warningMsg
+        )
+    }
+
     private struct AlignmentPipelineOutput: Sendable {
         let warpedL: [UInt8]
         let warpedR: [UInt8]
+        let warpedCardMask: [UInt8]?
         let cw: Int
         let ch: Int
         let prevWarpedL: [UInt8]
         let prevWarpedR: [UInt8]
+        let prevWarpedCardMask: [UInt8]?
         let prevCW: Int
         let prevCH: Int
         let rectPrevL: [UInt8]
         let rectPrevR: [UInt8]
+        let rectPrevAlphaL: [UInt8]?
+        let rectPrevAlphaR: [UInt8]?
         let rectPrevW: Int
         let rectPrevH: Int
         let matches: [StereoMatchPoint]
         let rectRes: RectificationResult
         let commonPoly: [SIMD2<Double>]
         let samples: [DisparitySample]
+        let denseEdgeSamples: [DisparitySample]
         let saliencyMap: NormalizedFloatMap?
         let windowDecision: StereoWindowDecision
         let elapsedMs: Double
@@ -2002,6 +2377,7 @@ final class ViewStereoViewModel: ObservableObject {
         let stereoQualityWarning: String?
         let stereoReportText: String
         let salvageAdvisory: StereoSalvageAdvisory
+        let maskDiscrepancyWarning: String?
     }
 
     private enum AlignmentPipelineError: Error {
@@ -2021,6 +2397,8 @@ final class ViewStereoViewModel: ObservableObject {
         let colorMode = autoColorMode
         let removeNoise = effectiveRemoveUnilateralNoise
         let preserveArch = hasPreservedArch
+        let mountCtx = currentMountContext
+        let isCardSource = preserveArch || (mountCtx != nil)
         let renderer = metalRenderer
 
         isProcessing = true
@@ -2039,6 +2417,8 @@ final class ViewStereoViewModel: ObservableObject {
                     colorMode: colorMode,
                     removeNoise: removeNoise,
                     preserveArch: preserveArch,
+                    isCardSource: isCardSource,
+                    mountContext: mountCtx,
                     renderer: renderer
                 )
             }.value
@@ -2072,14 +2452,18 @@ final class ViewStereoViewModel: ObservableObject {
     private func applyAlignmentOutput(_ out: AlignmentPipelineOutput) {
         alignedLeftRGB = out.warpedL
         alignedRightRGB = out.warpedR
+        alignedCardMask = out.warpedCardMask
         croppedWidth = out.cw
         croppedHeight = out.ch
         previewAlignedLeftRGB = out.prevWarpedL
         previewAlignedRightRGB = out.prevWarpedR
+        previewAlignedCardMask = out.prevWarpedCardMask
         previewCroppedWidth = out.prevCW
         previewCroppedHeight = out.prevCH
         rectifiedPreviewLeftRGB = out.rectPrevL
         rectifiedPreviewRightRGB = out.rectPrevR
+        rectifiedPreviewAlphaL = out.rectPrevAlphaL
+        rectifiedPreviewAlphaR = out.rectPrevAlphaR
         rectifiedPreviewWidth = out.rectPrevW
         rectifiedPreviewHeight = out.rectPrevH
         isAligned = true
@@ -2087,13 +2471,22 @@ final class ViewStereoViewModel: ObservableObject {
         lastRectResult = out.rectRes
         lastCommonPolygon = out.commonPoly
         lastDisparitySamples = out.samples
+        lastDenseEdgeSamples = out.denseEdgeSamples
         lastRawSaliencyMap = out.saliencyMap
         matchCount = out.matches.count
         inlierCount = out.rectRes.inlierCount
         verticalRMSE = out.rectRes.verticalRMSEPixels
         processingTimeMs = out.elapsedMs
         autoOptimalShiftX = out.windowDecision.optimalShiftX
-        windowShiftX = out.windowDecision.optimalShiftX
+        let didRestoreCustomShift: Bool
+        if let savedShift = pendingRestoredWindowShiftX {
+            windowShiftX = savedShift
+            pendingRestoredWindowShiftX = nil
+            didRestoreCustomShift = abs(savedShift - out.windowDecision.optimalShiftX) > 1e-4
+        } else {
+            windowShiftX = out.windowDecision.optimalShiftX
+            didRestoreCustomShift = false
+        }
         lastFullResShiftX = out.windowDecision.optimalShiftX
         lastFullResRemoveNoise = effectiveRemoveUnilateralNoise
         hasWindowViolationRisk = out.windowDecision.hasWindowViolationRisk
@@ -2107,7 +2500,10 @@ final class ViewStereoViewModel: ObservableObject {
         stereoReportText = out.stereoReportText
         salvageAdvisory = out.salvageAdvisory
         stereoReconstructionMode = .trueStereo
-        if out.isPseudoscopicSuspected && ViewStereoSettings.shared.autoSwapPseudoscopic {
+        if let savedSwapped = pendingRestoredIsSwapped {
+            isSwapped = savedSwapped
+            pendingRestoredIsSwapped = nil
+        } else if out.isPseudoscopicSuspected && ViewStereoSettings.shared.autoSwapPseudoscopic {
             isSwapped = true
         }
         isProcessing = false
@@ -2122,7 +2518,12 @@ final class ViewStereoViewModel: ObservableObject {
                 workspaceItemStatuses[activeID] = .completed
             }
         }
-        renderDisplayPreview()
+        currentItemBaselineSettings = snapshotCurrentItemSettings()
+        if didRestoreCustomShift {
+            applyManualWindowShift()
+        } else {
+            renderDisplayPreview()
+        }
     }
 
     nonisolated private static func executeAlignmentPipeline(
@@ -2136,6 +2537,8 @@ final class ViewStereoViewModel: ObservableObject {
         colorMode: StereoAutoColorMode,
         removeNoise: Bool,
         preserveArch: Bool,
+        isCardSource: Bool = false,
+        mountContext: StereoCardSegmenter.OriginalCardMountContext? = nil,
         renderer: MetalWarpRenderer?
     ) -> Result<AlignmentPipelineOutput, AlignmentPipelineError> {
         let startTime = CFAbsoluteTimeGetCurrent()
@@ -2258,9 +2661,19 @@ final class ViewStereoViewModel: ObservableObject {
         // 3. 7自由度対称ホモグラフィ最適化 (LAPACK dposv_ + IRLS) + 破綻防止サニティチェック
         func isSaneRectification(_ res: RectificationResult) -> Bool {
             let maxRMSE = max(18.0, Double(h) * 0.025)
-            return res.verticalRMSEPixels.isFinite
-                && res.verticalRMSEPixels <= maxRMSE
-                && abs(res.params.rollL) <= 0.18
+            guard res.verticalRMSEPixels.isFinite, res.verticalRMSEPixels <= maxRMSE else {
+                return false
+            }
+            if isCardSource {
+                // 歴史的ステレオカードは同一平面マウントのため過学習による台形歪みや拡大縮小を厳格抑制する
+                return abs(res.params.rollL) <= 0.055
+                    && abs(res.params.rollR) <= 0.055
+                    && abs(res.params.logScale) <= 0.030
+                    && abs(res.params.keystoneXL) <= 0.022
+                    && abs(res.params.keystoneXR) <= 0.022
+                    && abs(res.params.keystoneY) <= 0.022
+            }
+            return abs(res.params.rollL) <= 0.18
                 && abs(res.params.rollR) <= 0.18
                 && abs(res.params.logScale) <= 0.15
                 && abs(res.params.keystoneXL) <= 0.15
@@ -2268,9 +2681,22 @@ final class ViewStereoViewModel: ObservableObject {
                 && abs(res.params.keystoneY) <= 0.15
         }
 
-        var rectRes: RectificationResult? = StereoRectifier.solve(matches: matches, width: w, height: h, tikhonovGamma: 1e-2)
+        var rectRes: RectificationResult? = StereoRectifier.solve(
+            matches: matches,
+            width: w,
+            height: h,
+            tikhonovGamma: isCardSource ? 0.15 : 1e-2
+        )
         if let r = rectRes, !isSaneRectification(r) {
-            rectRes = StereoRectifier.solve(matches: matches, width: w, height: h, tikhonovGamma: 2.0)
+            rectRes = StereoRectifier.solve(
+                matches: matches,
+                width: w,
+                height: h,
+                tikhonovGamma: isCardSource ? 4.0 : 2.0
+            )
+        }
+        if isCardSource, let r = rectRes, !isSaneRectification(r) {
+            rectRes = StereoRectifier.solve(matches: matches, width: w, height: h, tikhonovGamma: 25.0)
         }
         if rectRes == nil || !isSaneRectification(rectRes!) {
             rectRes = RectificationResult(
@@ -2292,39 +2718,99 @@ final class ViewStereoViewModel: ObservableObject {
             matches[i].isInlier = (i < rectRes.weights.count && rectRes.weights[i] > 0)
         }
 
-        // 4. 平行化後の水平視差サンプルを構築し、インテリジェント・ウィンドウ最適化
-        var samples: [DisparitySample] = []
-        samples.reserveCapacity(rectRes.inlierCount)
+        // 4. 平行化後の軽量バッファ (tx = 0) を先に生成し、SIFT 視差 + 密エッジ視差補強でインテリジェント・ウィンドウ最適化
+        guard let renderer else {
+            return .failure(.metalWarpFailed)
+        }
+        let resolvedMountCtx = mountContext ?? StereoCardSegmenter.shared.currentMountContext
+        let hasAlphaPair = (resolvedMountCtx != nil &&
+            resolvedMountCtx!.unmaskedWidth == w &&
+            resolvedMountCtx!.unmaskedHeight == h &&
+            resolvedMountCtx!.unmaskedAlphaL.count == w * h &&
+            resolvedMountCtx!.unmaskedAlphaR.count == w * h)
+
+        let rw = vw, rh = vh
+        let rsx = Double(rw) / Double(max(1, w))
+        let rsy = Double(rh) / Double(max(1, h))
+        let rScale = simd_double3x3(columns: (SIMD3(rsx, 0, 0), SIMD3(0, rsy, 0), SIMD3(0, 0, 1)))
+        let rInvScale = simd_double3x3(columns: (SIMD3(1.0 / rsx, 0, 0), SIMD3(0, 1.0 / rsy, 0), SIMD3(0, 0, 1)))
+        let rHL = rScale * rectRes.homographyLeftPixel * rInvScale
+        let rHR = rScale * rectRes.homographyRightPixel * rInvScale
+        var rectPrevL = (try? renderer.warpRGB8(rgbData: vL, srcWidth: rw, srcHeight: rh, forwardHomography: rHL, cropOrigin: .zero, dstWidth: rw, dstHeight: rh)) ?? vL
+        var rectPrevR = (try? renderer.warpRGB8(rgbData: vR, srcWidth: rw, srcHeight: rh, forwardHomography: rHR, cropOrigin: .zero, dstWidth: rw, dstHeight: rh)) ?? vR
+        var rectPrevAlphaL: [UInt8]? = nil
+        var rectPrevAlphaR: [UInt8]? = nil
+        if hasAlphaPair, let mctx = resolvedMountCtx {
+            let mL = downsampleMaskForPreview(mctx.unmaskedAlphaL, srcW: w, srcH: h, dstW: rw, dstH: rh)
+            let mR = downsampleMaskForPreview(mctx.unmaskedAlphaR, srcW: w, srcH: h, dstW: rw, dstH: rh)
+            rectPrevAlphaL = try? renderer.warpMask8(maskData: mL, srcWidth: rw, srcHeight: rh, forwardHomography: rHL, cropOrigin: .zero, dstWidth: rw, dstHeight: rh)
+            rectPrevAlphaR = try? renderer.warpMask8(maskData: mR, srcWidth: rw, srcHeight: rh, forwardHomography: rHR, cropOrigin: .zero, dstWidth: rw, dstHeight: rh)
+        }
+
+        let rCount = rw * rh
+        switch colorMode {
+        case .off:
+            break
+        case .left:
+            rectPrevR = HistogramColorMatcher.matchHistogram(referenceRGB: rectPrevL, targetRGB: rectPrevR, pixelCount: rCount)
+        case .right:
+            rectPrevL = HistogramColorMatcher.matchHistogram(referenceRGB: rectPrevR, targetRGB: rectPrevL, pixelCount: rCount)
+        }
+
+        var siftSamples: [DisparitySample] = []
+        siftSamples.reserveCapacity(rectRes.inlierCount)
         for m in matches where m.isInlier {
             if let qL = HomographyGeometry.project(SIMD2(m.x1, m.y1), by: rectRes.homographyLeftPixel),
                let qR = HomographyGeometry.project(SIMD2(m.x2, m.y2), by: rectRes.homographyRightPixel) {
                 let parallax = qR.x - qL.x
                 let rawSal = saliencyMap?.sample(atPixelX: m.x1, pixelY: m.y1, imageWidth: Double(w), imageHeight: Double(h)) ?? 0.5
                 let sal = useSaliency ? max(0.05, rawSal) : 0.5
-                samples.append(DisparitySample(x: qL.x, y: qL.y, parallax: parallax, saliency: sal, foregroundWeight: 0.7))
+                siftSamples.append(DisparitySample(x: qL.x, y: qL.y, parallax: parallax, saliency: sal, foregroundWeight: 0.7))
             }
         }
 
-        if samples.count >= 8 {
-            let sortedP = samples.map { $0.parallax }.sorted()
-            let medP = sortedP[sortedP.count / 2]
-            let maxDev = Double(w) * (preserveArch ? 0.045 : 0.12)
-            let filtered = samples.filter { abs($0.parallax - medP) <= maxDev }
+        var medP = 0.0
+        if siftSamples.count >= 8 {
+            let sortedP = siftSamples.map { $0.parallax }.sorted()
+            medP = sortedP[sortedP.count / 2]
+            let maxDev = Double(w) * 0.12
+            let filtered = siftSamples.filter { abs($0.parallax - medP) <= maxDev }
             if filtered.count >= 6 {
-                samples = filtered
+                siftSamples = filtered
             }
+            siftSamples = Self.filterRobustDisparityOutliers(siftSamples, imageWidth: Double(w))
+        }
+        if !siftSamples.isEmpty {
+            let sortedP = siftSamples.map { $0.parallax }.sorted()
+            medP = sortedP[sortedP.count / 2]
         }
 
-        let isPseudoscopicSuspected = detectPseudoscopicParallax(samples: samples, height: Double(h))
+        let denseEdgeSamples: [DisparitySample] = siftSamples.count >= 4
+            ? probeDenseEdgeDisparitySamples(
+                rectLeftRGB: rectPrevL,
+                rectRightRGB: rectPrevR,
+                alphaL: rectPrevAlphaL,
+                alphaR: rectPrevAlphaR,
+                rectW: rw,
+                rectH: rh,
+                fullW: w,
+                fullH: h,
+                medianParallaxFull: medP,
+                isCardSource: isCardSource || preserveArch
+            )
+            : []
+        let samples = siftSamples + denseEdgeSamples
 
-        let winOpts = makeWindowOptimizationOptions(preserveArch: preserveArch)
+        let isPseudoscopicSuspected = isCardSource ? false : detectPseudoscopicParallax(samples: siftSamples, height: Double(h))
+
+        let winOpts = makeWindowOptimizationOptions(preserveArch: preserveArch || isCardSource)
         // 左右逆を自動スワップする場合、ユーザーが見る視差は符号反転 (-p) になるため、
         // 反転視差でウィンドウ最適化を行い、実ワープ座標系のシフトは符号を戻して適用する
         let willAutoSwap = isPseudoscopicSuspected && (UserDefaults.standard.object(forKey: "VS.autoSwapPseudoscopic") as? Bool ?? true)
         let solveSamples = willAutoSwap
             ? samples.map { DisparitySample(x: $0.x, y: $0.y, parallax: -$0.parallax, saliency: $0.saliency, foregroundWeight: $0.foregroundWeight) }
             : samples
-        let solved = Self.resolveWindowDecision(samples: solveSamples, width: Double(w), height: Double(h), preserveArch: preserveArch, options: winOpts)
+        let solved = Self.resolveWindowDecision(samples: solveSamples, width: Double(w), height: Double(h), preserveArch: preserveArch, isCardSource: isCardSource, options: winOpts)
         let windowDecision = willAutoSwap
             ? StereoWindowDecision(
                 optimalShiftX: -solved.optimalShiftX,
@@ -2382,21 +2868,19 @@ final class ViewStereoViewModel: ObservableObject {
             guard let maair = ConvexPolygonRect.largestAxisParallelInscribedRectangle(in: commonPoly, aspectRatio: aspect) else {
                 return .failure(.noValidInteriorRect)
             }
-            // Lanczos-3 境界誤差（3px）を避けるため、十分大きければ各辺 4px 内側へ安全インセット
-            let inset = (maair.maxX - maair.minX > 48 && maair.maxY - maair.minY > 48) ? 4.0 : 0.0
+            // Lanczos-3 境界誤差（3px）を避けるため、十分大きければ安全インセット（ステレオカード時は最小限 1.5px）
+            let insetVal = isCardSource ? 1.5 : 4.0
+            let inset = (maair.maxX - maair.minX > 48 && maair.maxY - maair.minY > 48) ? insetVal : 0.0
             cropOrigin = SIMD2<Double>(ceil(maair.minX + inset), ceil(maair.minY + inset))
             rawCW = max(16, Int(floor(maair.maxX - inset) - cropOrigin.x))
             rawCH = max(16, Int(floor(maair.maxY - inset) - cropOrigin.y))
         }
 
-        // 6. Metal 1パス Lanczos-3 ワープ実行（左右並列）
-        guard let renderer else {
-            return .failure(.metalWarpFailed)
-        }
+        // 6. Metal 1パス Lanczos-3 ワープ + 実輪郭マスク同時ワープ実行（左右並列）
         let warpSrcL: [UInt8]
         let warpSrcR: [UInt8]
         if preserveArch,
-           let mctx = StereoCardSegmenter.shared.currentMountContext,
+           let mctx = resolvedMountCtx,
            mctx.unmaskedWidth == w, mctx.unmaskedHeight == h,
            mctx.unmaskedLeftRGB.count == w * h * 3, mctx.unmaskedRightRGB.count == w * h * 3 {
             warpSrcL = mctx.unmaskedLeftRGB
@@ -2405,23 +2889,44 @@ final class ViewStereoViewModel: ObservableObject {
             warpSrcL = lRGB
             warpSrcR = rRGB
         }
+
         var rawWarpedL: [UInt8]? = nil
         var rawWarpedR: [UInt8]? = nil
-        DispatchQueue.concurrentPerform(iterations: 2) { side in
-            if side == 0 {
+        var rawAlphaL: [UInt8]? = nil
+        var rawAlphaR: [UInt8]? = nil
+        DispatchQueue.concurrentPerform(iterations: hasAlphaPair ? 4 : 2) { taskIdx in
+            switch taskIdx {
+            case 0:
                 rawWarpedL = try? renderer.warpRGB8(rgbData: warpSrcL, srcWidth: w, srcHeight: h, forwardHomography: shiftL, cropOrigin: cropOrigin, dstWidth: rawCW, dstHeight: rawCH)
-            } else {
+            case 1:
                 rawWarpedR = try? renderer.warpRGB8(rgbData: warpSrcR, srcWidth: w, srcHeight: h, forwardHomography: shiftR, cropOrigin: cropOrigin, dstWidth: rawCW, dstHeight: rawCH)
+            case 2:
+                if let mctx = resolvedMountCtx {
+                    rawAlphaL = try? renderer.warpMask8(maskData: mctx.unmaskedAlphaL, srcWidth: w, srcHeight: h, forwardHomography: shiftL, cropOrigin: cropOrigin, dstWidth: rawCW, dstHeight: rawCH)
+                }
+            default:
+                if let mctx = resolvedMountCtx {
+                    rawAlphaR = try? renderer.warpMask8(maskData: mctx.unmaskedAlphaR, srcWidth: w, srcHeight: h, forwardHomography: shiftR, cropOrigin: cropOrigin, dstWidth: rawCW, dstHeight: rawCH)
+                }
             }
         }
         guard let rawWarpedL, let rawWarpedR else {
             return .failure(.metalWarpFailed)
         }
 
-        // 6.5 縁の黒枠・片側欠損ラインを自動クロップ（アーチ黒枠保持時はスキップ）
+        // 6.5 縁の黒枠・片側欠損ラインを自動クロップ（アルファマスクも同一オフセットで同期トリム）
+        var warpedAlphaL = rawAlphaL
+        var warpedAlphaR = rawAlphaR
         var (warpedL, warpedR, cw, ch) = preserveArch
             ? (rawWarpedL, rawWarpedR, rawCW, rawCH)
-            : trimEdgeColorFringe(left: rawWarpedL, right: rawWarpedR, width: rawCW, height: rawCH)
+            : trimEdgeColorFringe(left: rawWarpedL, right: rawWarpedR, alphaL: &warpedAlphaL, alphaR: &warpedAlphaR, width: rawCW, height: rawCH)
+
+        // 6.6 左右交差マスク（AND）生成＋面積比乖離チェック
+        var intersectionResult: IntersectionMaskResult? = nil
+        if let aL = warpedAlphaL, let aR = warpedAlphaR {
+            intersectionResult = buildIntersectionMask(alphaL: aL, alphaR: aR, width: cw, height: ch)
+        }
+        let warpedCardMask = intersectionResult?.mask
 
         // 7. 自動カラーマッチング（基本設定）
         let pixelCount = cw * ch
@@ -2448,10 +2953,15 @@ final class ViewStereoViewModel: ObservableObject {
             warpedR = cleaned.right
         }
 
-        // 8.5 アーチ角丸保持時は、平行化・ノイズ除去後に左右共通の滑らかなパラメトリックアーチマスクで仕上げる
+        // 8.5 Keep Arch 時は左右交差マスク（またはフォールバックでパラメトリック角丸）で黒枠適用
         if preserveArch {
-            let archParams = StereoCardSegmenter.shared.currentArchParams
-            StereoCardSegmenter.applyArchMaskPair(&warpedL, &warpedR, width: cw, height: ch, params: archParams, extraInsetRatio: 0.008, cardLuma: StereoCardSegmenter.shared.currentCardLuma)
+            if let cardMask = warpedCardMask {
+                StereoCardSegmenter.applyAlphaMaskBlack(&warpedL, alpha: cardMask, width: cw, height: ch)
+                StereoCardSegmenter.applyAlphaMaskBlack(&warpedR, alpha: cardMask, width: cw, height: ch)
+            } else {
+                let archParams = StereoCardSegmenter.shared.currentArchParams
+                StereoCardSegmenter.applyArchMaskPair(&warpedL, &warpedR, width: cw, height: ch, params: archParams, extraInsetRatio: 0.008, cardLuma: StereoCardSegmenter.shared.currentCardLuma)
+            }
         }
 
         let elapsedMs = (CFAbsoluteTimeGetCurrent() - startTime) * 1000.0
@@ -2460,31 +2970,11 @@ final class ViewStereoViewModel: ObservableObject {
         let dispRangePct = cw > 0 ? ((windowDecision.farShiftedParallax - windowDecision.minShiftedParallax) / Double(cw) * 100.0) : 0.0
         let (prevL, prevCW, prevCH) = downsampleForPreview(warpedL, width: cw, height: ch, maxDim: previewMaxDimension)
         let (prevR, _, _) = downsampleForPreview(warpedR, width: cw, height: ch, maxDim: previewMaxDimension)
-
-        // スライダードラッグ中の 60fps 追従用（tx = 0 で平行化済み軽量バッファ）を1回だけ生成（vL, vR を再利用）
-        let rw = vw, rh = vh
-        let rsx = Double(rw) / Double(max(1, w))
-        let rsy = Double(rh) / Double(max(1, h))
-        let rScale = simd_double3x3(columns: (SIMD3(rsx, 0, 0), SIMD3(0, rsy, 0), SIMD3(0, 0, 1)))
-        let rInvScale = simd_double3x3(columns: (SIMD3(1.0 / rsx, 0, 0), SIMD3(0, 1.0 / rsy, 0), SIMD3(0, 0, 1)))
-        let rHL = rScale * rectRes.homographyLeftPixel * rInvScale
-        let rHR = rScale * rectRes.homographyRightPixel * rInvScale
-        var rectPrevL = (try? renderer.warpRGB8(rgbData: vL, srcWidth: rw, srcHeight: rh, forwardHomography: rHL, cropOrigin: .zero, dstWidth: rw, dstHeight: rh)) ?? vL
-        var rectPrevR = (try? renderer.warpRGB8(rgbData: vR, srcWidth: rw, srcHeight: rh, forwardHomography: rHR, cropOrigin: .zero, dstWidth: rw, dstHeight: rh)) ?? vR
-
-        let rCount = rw * rh
-        switch colorMode {
-        case .off:
-            break
-        case .left:
-            rectPrevR = HistogramColorMatcher.matchHistogram(referenceRGB: rectPrevL, targetRGB: rectPrevR, pixelCount: rCount)
-        case .right:
-            rectPrevL = HistogramColorMatcher.matchHistogram(referenceRGB: rectPrevR, targetRGB: rectPrevL, pixelCount: rCount)
-        }
+        let prevCardMask = warpedCardMask.map { downsampleMaskForPreview($0, srcW: cw, srcH: ch, dstW: prevCW, dstH: prevCH) }
 
         let stereoQuality = evaluateStereoQuality(
             matches: matches,
-            samples: samples,
+            samples: siftSamples,
             width: Double(w),
             height: Double(h),
             isPseudoscopic: isPseudoscopicSuspected,
@@ -2512,23 +3002,35 @@ final class ViewStereoViewModel: ObservableObject {
             disparityPercent: dispRangePct
         )
 
+        let reportTextFinal: String
+        if let maskWarn = intersectionResult?.warningMessage {
+            reportTextFinal = stereoQuality.reportText + " | " + maskWarn
+        } else {
+            reportTextFinal = stereoQuality.reportText
+        }
+
         return .success(AlignmentPipelineOutput(
             warpedL: warpedL,
             warpedR: warpedR,
+            warpedCardMask: warpedCardMask,
             cw: cw,
             ch: ch,
             prevWarpedL: prevL,
             prevWarpedR: prevR,
+            prevWarpedCardMask: prevCardMask,
             prevCW: prevCW,
             prevCH: prevCH,
             rectPrevL: rectPrevL,
             rectPrevR: rectPrevR,
+            rectPrevAlphaL: rectPrevAlphaL,
+            rectPrevAlphaR: rectPrevAlphaR,
             rectPrevW: rw,
             rectPrevH: rh,
             matches: matches,
             rectRes: rectRes,
             commonPoly: commonPoly,
             samples: samples,
+            denseEdgeSamples: denseEdgeSamples,
             saliencyMap: saliencyMap,
             windowDecision: windowDecision,
             elapsedMs: elapsedMs,
@@ -2538,8 +3040,9 @@ final class ViewStereoViewModel: ObservableObject {
             isPseudoscopicSuspected: isPseudoscopicSuspected,
             isStereoMismatchSuspected: stereoQuality.isMismatch,
             stereoQualityWarning: stereoQuality.warningText,
-            stereoReportText: stereoQuality.reportText,
-            salvageAdvisory: advisory
+            stereoReportText: reportTextFinal,
+            salvageAdvisory: advisory,
+            maskDiscrepancyWarning: intersectionResult?.warningMessage
         ))
     }
 
@@ -2778,13 +3281,14 @@ final class ViewStereoViewModel: ObservableObject {
                 updatedSamples.append(DisparitySample(x: qL.x, y: qL.y, parallax: parallax, saliency: sal, foregroundWeight: 0.7))
             }
         }
-        lastDisparitySamples = updatedSamples
-        let winOpts = Self.makeWindowOptimizationOptions(preserveArch: hasPreservedArch)
+        lastDisparitySamples = updatedSamples + lastDenseEdgeSamples
+        let isCardSource = hasPreservedArch || (currentMountContext != nil)
+        let winOpts = Self.makeWindowOptimizationOptions(preserveArch: hasPreservedArch || isCardSource)
         // スワップ中はユーザーが見る視差が符号反転 (-p) になるため、反転視差で最適化し、実シフトは符号を戻す
         let solveSamples = isSwapped
-            ? updatedSamples.map { DisparitySample(x: $0.x, y: $0.y, parallax: -$0.parallax, saliency: $0.saliency, foregroundWeight: $0.foregroundWeight) }
-            : updatedSamples
-        let solved = Self.resolveWindowDecision(samples: solveSamples, width: w, height: h, preserveArch: hasPreservedArch, options: winOpts)
+            ? lastDisparitySamples.map { DisparitySample(x: $0.x, y: $0.y, parallax: -$0.parallax, saliency: $0.saliency, foregroundWeight: $0.foregroundWeight) }
+            : lastDisparitySamples
+        let solved = Self.resolveWindowDecision(samples: solveSamples, width: w, height: h, preserveArch: hasPreservedArch, isCardSource: isCardSource, options: winOpts)
         let optTx = isSwapped ? -solved.optimalShiftX : solved.optimalShiftX
         hasWindowViolationRisk = solved.hasWindowViolationRisk
         requiresFloatingWindow = solved.requiresFloatingWindow
@@ -3053,9 +3557,22 @@ final class ViewStereoViewModel: ObservableObject {
 
                 self.isAligned = true
                 self.stereoReconstructionMode = .fullFrame2DDepth
-                self.isSwapped = false
+                if let savedSwapped = self.pendingRestoredIsSwapped {
+                    self.isSwapped = savedSwapped
+                    self.pendingRestoredIsSwapped = nil
+                } else {
+                    self.isSwapped = false
+                }
                 self.lastDisparitySamples = winSetup.samples
-                self.windowShiftX = 0.0
+                let didRestoreShift: Bool
+                if let savedShift = self.pendingRestoredWindowShiftX {
+                    self.windowShiftX = savedShift
+                    self.pendingRestoredWindowShiftX = nil
+                    didRestoreShift = abs(savedShift) > 1e-4
+                } else {
+                    self.windowShiftX = 0.0
+                    didRestoreShift = false
+                }
                 self.autoOptimalShiftX = 0.0
                 self.lastFullResShiftX = 0.0
                 self.hasWindowViolationRisk = winSetup.hasWindowViolationRisk
@@ -3071,7 +3588,12 @@ final class ViewStereoViewModel: ObservableObject {
                 if let activeID {
                     self.workspaceItemStatuses[activeID] = .aiConverted("2D→3D")
                 }
-                self.renderDisplayPreview()
+                self.currentItemBaselineSettings = self.snapshotCurrentItemSettings()
+                if didRestoreShift {
+                    self.applyManualWindowShift()
+                } else {
+                    self.renderDisplayPreview()
+                }
             }
         }
     }
@@ -3769,44 +4291,412 @@ final class ViewStereoViewModel: ObservableObject {
         videoExportTask = nil
     }
 
-    /// ウィンドウ最適シフトを解き、ステレオカード(preserveArch)用の上限クランプ後に
-    /// 端帯域のバイオレーションを再評価する。
-    /// 通常は ±2% に制限するが、制限後も端で飛び出しが残る場合は ±5% まで拡張して飛び出しを防ぐ。
+    /// 平行化済み低解像度ペアの左右端・上下端で NCC＋ピーク一意性に基づく密エッジ視差を計測し、
+    /// SIFT スパース特徴点が乗らない手前エッジ（ガラスケース・柵・床・額縁等）の視差を補強する
+    nonisolated private static func probeDenseEdgeDisparitySamples(
+        rectLeftRGB: [UInt8],
+        rectRightRGB: [UInt8],
+        alphaL: [UInt8]?,
+        alphaR: [UInt8]?,
+        rectW: Int,
+        rectH: Int,
+        fullW: Int,
+        fullH: Int,
+        medianParallaxFull: Double,
+        isCardSource: Bool
+    ) -> [DisparitySample] {
+        guard rectW >= 64, rectH >= 48, fullW >= 64, fullH >= 48,
+              rectLeftRGB.count >= rectW * rectH * 3,
+              rectRightRGB.count >= rectW * rectH * 3 else {
+            return []
+        }
+
+        let targetMax = 360
+        let scale = Double(targetMax) / Double(max(rectW, rectH))
+        let dw = (scale < 1.0) ? max(64, Int((Double(rectW) * scale).rounded())) : rectW
+        let dh = (scale < 1.0) ? max(48, Int((Double(rectH) * scale).rounded())) : rectH
+        let dCount = dw * dh
+
+        var gL = [Float](repeating: 0, count: dCount)
+        var gR = [Float](repeating: 0, count: dCount)
+        var validL = [Bool](repeating: false, count: dCount)
+        var validR = [Bool](repeating: false, count: dCount)
+        var isRedStampR = [Bool](repeating: false, count: dCount)
+
+        let hasAlphaL = (alphaL?.count ?? 0) >= rectW * rectH
+        let hasAlphaR = (alphaR?.count ?? 0) >= rectW * rectH
+
+        for dy in 0..<dh {
+            let sy = min(rectH - 1, (dy * rectH) / dh)
+            let sRow = sy * rectW
+            let dRow = dy * dw
+            for dx in 0..<dw {
+                let sx = min(rectW - 1, (dx * rectW) / dw)
+                let si = sRow + sx
+                let sp = si * 3
+                let di = dRow + dx
+
+                let rL = Float(rectLeftRGB[sp]), grL = Float(rectLeftRGB[sp + 1]), bL = Float(rectLeftRGB[sp + 2])
+                let lumaL = 0.299 * rL + 0.587 * grL + 0.114 * bL
+                gL[di] = lumaL
+                let aOKL = !hasAlphaL || alphaL![si] >= 220
+                validL[di] = aOKL && (lumaL >= 8.0)
+
+                let rR = Float(rectRightRGB[sp]), grR = Float(rectRightRGB[sp + 1]), bR = Float(rectRightRGB[sp + 2])
+                let lumaR = 0.299 * rR + 0.587 * grR + 0.114 * bR
+                gR[di] = lumaR
+                let aOKR = !hasAlphaR || alphaR![si] >= 220
+                validR[di] = aOKR && (lumaR >= 8.0)
+
+                if isCardSource && rR >= 125.0 && (rR - max(grR, bR)) >= 35.0 {
+                    isRedStampR[di] = true
+                }
+            }
+        }
+
+        let pw = max(24, Int((Double(dw) * 0.12).rounded()))
+        let ph = max(24, Int((Double(dh) * 0.14).rounded()))
+        guard dw > pw + 8, dh > ph + 8 else { return [] }
+
+        let centerS = Int((medianParallaxFull * Double(dw) / Double(fullW)).rounded())
+        let searchR = max(16, Int((Double(dw) * 0.10).rounded()))
+        let sMin = centerS - searchR
+        let sMax = centerS + searchR
+
+        var patchCoords: [(x0: Int, y0: Int)] = []
+        patchCoords.reserveCapacity(40)
+
+        // 左端帯 (xRatio in [0.02, 0.10] x y 6段)
+        for yr in [0.14, 0.27, 0.40, 0.53, 0.66, 0.79] {
+            let y0 = max(2, min(dh - ph - 2, Int((Double(dh) * yr).rounded())))
+            for xr in [0.02, 0.10] {
+                patchCoords.append((max(2, min(dw - pw - 2, Int((Double(dw) * xr).rounded()))), y0))
+            }
+        }
+        // 右端帯 (xRatio in [0.78, 0.86] x y 6段)
+        for yr in [0.14, 0.27, 0.40, 0.53, 0.66, 0.79] {
+            let y0 = max(2, min(dh - ph - 2, Int((Double(dh) * yr).rounded())))
+            for xr in [0.78, 0.86] {
+                patchCoords.append((max(2, min(dw - pw - 2, Int((Double(dw) * xr).rounded()))), y0))
+            }
+        }
+        // 下端帯 (yRatio = 0.83 x 7列)
+        let botY0 = max(2, min(dh - ph - 2, Int((Double(dh) * 0.83).rounded())))
+        for k in 0..<7 {
+            let xr = 0.04 + 0.80 * Double(k) / 6.0
+            patchCoords.append((max(2, min(dw - pw - 2, Int((Double(dw) * xr).rounded()))), botY0))
+        }
+        // 上端帯 (yRatio = 0.12 x 5列)
+        let topY0 = max(2, min(dh - ph - 2, Int((Double(dh) * 0.12).rounded())))
+        for k in 0..<5 {
+            let xr = 0.14 + 0.60 * Double(k) / 4.0
+            patchCoords.append((max(2, min(dw - pw - 2, Int((Double(dw) * xr).rounded()))), topY0))
+        }
+
+        let maxAllowedDev = Double(fullW) * 0.075
+        let scaleFullX = Double(fullW) / Double(dw)
+        let scaleFullY = Double(fullH) / Double(dh)
+        let nTotal = pw * ph
+        let minValidCount = Int(Double(nTotal) * 0.96)
+        var corrs = [Double](repeating: -1.0, count: max(1, sMax - sMin + 1))
+        var outSamples: [DisparitySample] = []
+        outSamples.reserveCapacity(patchCoords.count)
+
+        for (x0, y0) in patchCoords {
+            guard validL[y0 * dw + x0],
+                  validL[y0 * dw + (x0 + pw - 1)],
+                  validL[(y0 + ph - 1) * dw + x0],
+                  validL[(y0 + ph - 1) * dw + (x0 + pw - 1)] else { continue }
+
+            var sumA = 0.0, sumA2 = 0.0, validCntL = 0
+            for y in y0..<(y0 + ph) {
+                let row = y * dw
+                for x in x0..<(x0 + pw) {
+                    let idx = row + x
+                    if validL[idx] { validCntL += 1 }
+                    let v = Double(gL[idx])
+                    sumA += v
+                    sumA2 += v * v
+                }
+            }
+            guard validCntL >= minValidCount else { continue }
+            let meanA = sumA / Double(nTotal)
+            let varA = sumA2 - meanA * sumA
+            guard varA > 0 else { continue }
+            let stdA = sqrt(varA / Double(nTotal))
+            guard stdA >= 12.0 else { continue }
+            let normA = sqrt(varA)
+
+            let inBottomRightStampZone = isCardSource && (Double(x0 + pw) >= Double(dw) * 0.72) && (Double(y0 + ph) >= Double(dh) * 0.72)
+            var bestIdx = -1
+            var bestCorr = -1.0
+
+            for sIdx in 0..<(sMax - sMin + 1) {
+                let s = sMin + sIdx
+                let rx0 = x0 + s
+                if rx0 < 0 || rx0 + pw > dw {
+                    corrs[sIdx] = -1.0
+                    continue
+                }
+                guard validR[y0 * dw + rx0],
+                      validR[y0 * dw + (rx0 + pw - 1)],
+                      validR[(y0 + ph - 1) * dw + rx0],
+                      validR[(y0 + ph - 1) * dw + (rx0 + pw - 1)] else {
+                    corrs[sIdx] = -1.0
+                    continue
+                }
+                var sumB = 0.0, sumB2 = 0.0, sumAB = 0.0
+                var validCntR = 0, redCntR = 0
+                for y in y0..<(y0 + ph) {
+                    let row = y * dw
+                    for dx in 0..<pw {
+                        let li = row + (x0 + dx)
+                        let ri = row + (rx0 + dx)
+                        if validR[ri] { validCntR += 1 }
+                        if inBottomRightStampZone && isRedStampR[ri] { redCntR += 1 }
+                        let a = Double(gL[li])
+                        let b = Double(gR[ri])
+                        sumB += b
+                        sumB2 += b * b
+                        sumAB += a * b
+                    }
+                }
+                if validCntR < minValidCount || (inBottomRightStampZone && Double(redCntR) >= Double(nTotal) * 0.15) {
+                    corrs[sIdx] = -1.0
+                    continue
+                }
+                let meanB = sumB / Double(nTotal)
+                let varB = sumB2 - meanB * sumB
+                guard varB > 1e-3 else {
+                    corrs[sIdx] = -1.0
+                    continue
+                }
+                let num = sumAB - meanA * sumB
+                let c = num / (normA * sqrt(varB))
+                corrs[sIdx] = c
+                if c > bestCorr {
+                    bestCorr = c
+                    bestIdx = sIdx
+                }
+            }
+
+            guard bestIdx >= 0, bestCorr >= 0.82 else { continue }
+
+            // ピーク一意性チェック（|s - bestS| >= 5 の第2ピークとの差が >= 0.06）
+            var secondCorr = -1.0
+            for sIdx in 0..<(sMax - sMin + 1) where abs(sIdx - bestIdx) >= 5 {
+                if corrs[sIdx] > secondCorr {
+                    secondCorr = corrs[sIdx]
+                }
+            }
+            guard (bestCorr - secondCorr) >= 0.06 else { continue }
+
+            var subOffset = 0.0
+            if bestIdx > 0 && bestIdx + 1 < corrs.count {
+                let c0 = corrs[bestIdx - 1]
+                let c1 = corrs[bestIdx]
+                let c2 = corrs[bestIdx + 1]
+                if c0 > -0.5 && c2 > -0.5 {
+                    let denom = 2.0 * (c0 - 2.0 * c1 + c2)
+                    if abs(denom) > 1e-6 {
+                        subOffset = max(-0.5, min(0.5, (c0 - c2) / denom))
+                    }
+                }
+            }
+            let subS = Double(sMin + bestIdx) + subOffset
+            let fullP = subS * scaleFullX
+            guard abs(fullP - medianParallaxFull) <= maxAllowedDev else { continue }
+
+            let fullX = (Double(x0) + Double(pw) * 0.5) * scaleFullX
+            let fullY = (Double(y0) + Double(ph) * 0.5) * scaleFullY
+            outSamples.append(DisparitySample(x: fullX, y: fullY, parallax: fullP, saliency: 0.25, foregroundWeight: 1.0))
+        }
+
+        return outSamples
+    }
+
+    /// 視差サンプルからパーセンタイル基準フェンスと端の孤立スパイクを除去したロバスト集合を返す。
+    nonisolated private static func filterRobustDisparityOutliers(_ samples: [DisparitySample], imageWidth w: Double) -> [DisparitySample] {
+        guard samples.count >= 8, w > 1 else { return samples }
+        let sortedP = samples.map { $0.parallax }.sorted()
+        func q(_ r: Double) -> Double {
+            sortedP[min(sortedP.count - 1, max(0, Int(Double(sortedP.count - 1) * r)))]
+        }
+        let q05 = q(0.05), q10 = q(0.10), med = q(0.50), q90 = q(0.90), q95 = q(0.95)
+        let spreadLow = max(0.010 * w, med - q10, 0.70 * (med - q05))
+        let spreadHigh = max(0.010 * w, q90 - med, 0.70 * (q95 - med))
+        let lowFence = med - min(0.055 * w, max(0.025 * w, 2.2 * spreadLow))
+        let highFence = med + min(0.055 * w, max(0.025 * w, 2.2 * spreadHigh))
+
+        let fenceFiltered = samples.filter { $0.parallax >= lowFence && $0.parallax <= highFence }
+        let base = (fenceFiltered.count >= 6) ? fenceFiltered : samples
+        guard base.count >= 16 else { return base }
+
+        let baseP = base.map { $0.parallax }.sorted()
+        var minKeepP = baseP.first!
+        for i in 0..<2 where (i + 1) < baseP.count {
+            if (baseP[i + 1] - baseP[i]) > 0.012 * w {
+                minKeepP = baseP[i + 1]
+            }
+        }
+        var maxKeepP = baseP.last!
+        let lastIdx = baseP.count - 1
+        for k in 0..<2 where (lastIdx - k - 1) >= 0 {
+            let hiIdx = lastIdx - k
+            if (baseP[hiIdx] - baseP[hiIdx - 1]) > 0.015 * w {
+                maxKeepP = baseP[hiIdx - 1]
+            }
+        }
+        let spikeFiltered = base.filter { $0.parallax >= minKeepP && $0.parallax <= maxKeepP }
+        return spikeFiltered.count >= 6 ? spikeFiltered : base
+    }
+
+    /// ウィンドウ最適シフトを解き、ステレオカード向けロバストDC基準クランプ後に
+    /// シフト後フレーム座標での 2-pass 再評価と快適上限内の端バイオレーション仕上げ補正を実施する。
     nonisolated private static func resolveWindowDecision(
         samples: [DisparitySample],
         width w: Double,
         height h: Double,
         preserveArch: Bool,
+        isCardSource: Bool = false,
         options: WindowOptimizationOptions
     ) -> StereoWindowDecision {
-        let solved = IntelligentStereoWindow.solveOptimalHorizontalShift(samples: samples, imageWidth: w, imageHeight: h, options: options)
-        let leftEdge = w * options.edgeBandRatio
-        let rightEdge = w * (1.0 - options.edgeBandRatio)
-        let topEdge = h * options.edgeBandRatio
-        let bottomEdge = h * (1.0 - options.edgeBandRatio)
-        let edgeSamples = samples.filter { $0.x <= leftEdge || $0.x >= rightEdge || $0.y <= topEdge || $0.y >= bottomEdge }
-        func violates(_ tx: Double) -> Bool {
-            edgeSamples.contains { $0.parallax + tx < -0.5 }
+        guard !samples.isEmpty, w > 1 else {
+            return StereoWindowDecision(optimalShiftX: 0, minShiftedParallax: 0, farShiftedParallax: 0, hasWindowViolationRisk: false, requiresFloatingWindow: false)
         }
 
-        var tx = solved.optimalShiftX
-        if preserveArch {
-            func clamped(_ ratio: Double) -> Double {
-                let m = w * ratio
-                return min(m, max(-m, solved.optimalShiftX))
+        let cleanSamples = filterRobustDisparityOutliers(samples, imageWidth: w)
+        let sortedAll = cleanSamples.map { $0.parallax }.sorted()
+        let medP = sortedAll[sortedAll.count / 2]
+
+        let minAllowedTx: Double
+        let maxAllowedTx: Double
+        if preserveArch || isCardSource {
+            if cleanSamples.count >= 12 {
+                let q10 = sortedAll[min(sortedAll.count - 1, max(0, Int(Double(sortedAll.count - 1) * 0.10)))]
+                let q90 = sortedAll[min(sortedAll.count - 1, max(0, Int(Double(sortedAll.count - 1) * 0.90)))]
+                let absMax = (cleanSamples.count >= 20 && (q90 - q10) <= w * 0.08) ? (w * 0.28) : (w * 0.20)
+                let relLo = -medP - w * 0.12
+                let relHi = -medP + w * 0.12
+                let lo = max(-absMax, relLo)
+                let hi = min(absMax, relHi)
+                if lo <= hi {
+                    minAllowedTx = lo
+                    maxAllowedTx = hi
+                } else {
+                    let clampedEdge = max(-absMax, min(absMax, -medP))
+                    minAllowedTx = clampedEdge
+                    maxAllowedTx = clampedEdge
+                }
+            } else {
+                let absMax = w * 0.12
+                minAllowedTx = -absMax
+                maxAllowedTx = absMax
             }
-            tx = clamped(0.020)
-            // 2% 制限でも端で飛び出しが残る場合は、ウィンドウ適正化（立体窓の確保）を優先して上限を外す（安全上限 15%）
-            if violates(tx) { tx = clamped(0.150) }
+        } else {
+            let absMax = w * 0.25
+            minAllowedTx = -absMax
+            maxAllowedTx = absMax
         }
-        let delta = tx - solved.optimalShiftX
-        let violation = violates(tx)
-        let farShifted = solved.farShiftedParallax + delta
-        let exceedsComfort = farShifted > options.maxComfortRatio * w + 0.5
+
+        func clampSafe(_ tx: Double) -> Double {
+            min(maxAllowedTx, max(minAllowedTx, tx))
+        }
+
+        func mapVisibleSamples(txVal: Double) -> (mapped: [DisparitySample], effW: Double) {
+            let effMinX = 0.5 * abs(txVal)
+            let effMaxX = w - 0.5 * abs(txVal)
+            let effW = max(16.0, effMaxX - effMinX)
+            var out: [DisparitySample] = []
+            out.reserveCapacity(cleanSamples.count)
+            for s in cleanSamples {
+                let xLNew = (s.x - 0.5 * txVal) - effMinX
+                let xRNew = (s.x + s.parallax + 0.5 * txVal) - effMinX
+                if max(xLNew, xRNew) >= 0.0 && min(xLNew, xRNew) <= effW {
+                    let sx = min(effW, max(0.0, 0.5 * (xLNew + xRNew)))
+                    out.append(DisparitySample(x: sx, y: s.y, parallax: s.parallax + txVal, saliency: s.saliency, foregroundWeight: s.foregroundWeight))
+                }
+            }
+            return (out, effW)
+        }
+
+        func evalShiftedSet(txVal: Double) -> (set: [DisparitySample], evalW: Double) {
+            let (vis, effW) = mapVisibleSamples(txVal: txVal)
+            if !vis.isEmpty {
+                return (vis, effW)
+            }
+            return (cleanSamples.map { DisparitySample(x: $0.x, y: $0.y, parallax: $0.parallax + txVal, saliency: $0.saliency, foregroundWeight: $0.foregroundWeight) }, w)
+        }
+
+        // Pass 1
+        let solved1 = IntelligentStereoWindow.solveOptimalHorizontalShift(samples: cleanSamples, imageWidth: w, imageHeight: h, options: options)
+        var tx = clampSafe(solved1.optimalShiftX)
+
+        // Pass 2: シフト後の実有効フレーム座標へ写像して再最適化
+        let (vis1, effW1) = mapVisibleSamples(txVal: tx)
+        if vis1.count >= 6 {
+            let solved2 = IntelligentStereoWindow.solveOptimalHorizontalShift(samples: vis1, imageWidth: effW1, imageHeight: h, options: options)
+            tx = clampSafe(tx + solved2.optimalShiftX)
+        }
+
+        // 仕上げ: 遠景が快適上限 (maxComfortRatio) を超えない範囲で、シフト後端のバイオレーションをゼロ化
+        let (evalSet1, evalW1) = evalShiftedSet(txVal: tx)
+        let leftEdge = evalW1 * options.edgeBandRatio
+        let rightEdge = evalW1 * (1.0 - options.edgeBandRatio)
+        let topEdge = h * options.edgeBandRatio
+        let bottomEdge = h * (1.0 - options.edgeBandRatio)
+        let edgeP = evalSet1
+            .filter { $0.x <= leftEdge || $0.x >= rightEdge || $0.y <= topEdge || $0.y >= bottomEdge }
+            .map { $0.parallax }
+            .sorted()
+
+        let sortedVisP1 = evalSet1.map { $0.parallax }.sorted()
+        if !sortedVisP1.isEmpty && !edgeP.isEmpty {
+            let farIdx = min(sortedVisP1.count - 1, max(0, Int(Double(sortedVisP1.count - 1) * 0.98)))
+            let farShifted = sortedVisP1[farIdx]
+            let worstEdgeP = (edgeP.count >= 4 && (edgeP[1] - edgeP[0]) > 0.025 * evalW1) ? edgeP[1] : edgeP[0]
+            if worstEdgeP < -0.5 {
+                let needed = -worstEdgeP + 0.5
+                let farHeadroom = max(0.0, options.maxComfortRatio * evalW1 - farShifted)
+                let extra = min(needed, farHeadroom)
+                if extra > 0.0 {
+                    tx = clampSafe(tx + extra)
+                }
+            }
+        }
+
+        // 遠景ハード上限引き戻しガード（深い立体視画像や外れ値残存による過剰二重像の抑止）
+        let (evalSet2, evalW2) = evalShiftedSet(txVal: tx)
+        let sortedVisP2 = evalSet2.map { $0.parallax }.sorted()
+        if !sortedVisP2.isEmpty {
+            let farIdx2 = min(sortedVisP2.count - 1, max(0, Int(Double(sortedVisP2.count - 1) * 0.98)))
+            let farShifted2 = sortedVisP2[farIdx2]
+            let hardMaxFar = ((preserveArch || isCardSource) ? 0.045 : 0.050) * evalW2
+            if farShifted2 > hardMaxFar {
+                tx = clampSafe(tx - (farShifted2 - hardMaxFar))
+            }
+        }
+
+        // 最終座標での評価値算出
+        let (finalSet, finalEvalW) = evalShiftedSet(txVal: tx)
+        let finalSorted = finalSet.map { $0.parallax }.sorted()
+        let finalMin = finalSorted.first ?? 0.0
+        let finalFarIdx = min(finalSorted.count - 1, max(0, Int(Double(finalSorted.count - 1) * 0.98)))
+        let finalFar = finalSorted.isEmpty ? 0.0 : finalSorted[finalFarIdx]
+
+        let fLeftEdge = finalEvalW * options.edgeBandRatio
+        let fRightEdge = finalEvalW * (1.0 - options.edgeBandRatio)
+        let fTopEdge = h * options.edgeBandRatio
+        let fBotEdge = h * (1.0 - options.edgeBandRatio)
+        let violation = finalSet.contains {
+            ($0.x <= fLeftEdge || $0.x >= fRightEdge || $0.y <= fTopEdge || $0.y >= fBotEdge) && ($0.parallax < -0.5)
+        }
+        let exceedsComfort = finalFar > options.maxComfortRatio * finalEvalW + 0.5
+
         return StereoWindowDecision(
             optimalShiftX: tx,
-            minShiftedParallax: solved.minShiftedParallax + delta,
-            farShiftedParallax: farShifted,
+            minShiftedParallax: finalMin,
+            farShiftedParallax: finalFar,
             hasWindowViolationRisk: violation,
             requiresFloatingWindow: violation || exceedsComfort
         )
@@ -3814,11 +4704,12 @@ final class ViewStereoViewModel: ObservableObject {
 
     nonisolated private static func makeWindowOptimizationOptions(preserveArch: Bool) -> WindowOptimizationOptions {
         var opts = WindowOptimizationOptions()
-        opts.edgeBandRatio = preserveArch ? 0.14 : 0.10
-        opts.lambdaWindowViolation = 250.0
+        opts.edgeBandRatio = preserveArch ? 0.11 : 0.09
+        opts.lambdaWindowViolation = 180.0
         opts.lambdaSaliency = 0.5
-        opts.maxComfortRatio = 0.05
-        opts.lambdaNear = 150.0
+        opts.maxComfortRatio = preserveArch ? 0.040 : 0.045
+        opts.lambdaNear = 120.0
+        opts.lambdaFar = 120.0
         return opts
     }
 
@@ -3999,6 +4890,13 @@ final class ViewStereoViewModel: ObservableObject {
 
         var sl = Self.cropHorizontalSlice(rL, srcW: rw, height: rh, srcX: srcXL, cropW: cropW)
         var sr = Self.cropHorizontalSlice(rR, srcW: rw, height: rh, srcX: srcXR, cropW: cropW)
+        var dragMask: [UInt8]? = nil
+        if let aL = rectifiedPreviewAlphaL, let aR = rectifiedPreviewAlphaR,
+           aL.count >= rw * rh, aR.count >= rw * rh {
+            let slicedAL = Self.cropHorizontalSlice1Ch(aL, srcW: rw, height: rh, srcX: srcXL, cropW: cropW)
+            let slicedAR = Self.cropHorizontalSlice1Ch(aR, srcW: rw, height: rh, srcX: srcXR, cropW: cropW)
+            dragMask = Self.buildIntersectionMask(alphaL: slicedAL, alphaR: slicedAR, width: cropW, height: rh).mask
+        }
         if !restOpts.isIdentity {
             let restored = VintageToneRestorer.restorePair(leftRGB: sl, rightRGB: sr, width: cropW, height: rh, options: restOpts)
             sl = restored.left
@@ -4013,7 +4911,8 @@ final class ViewStereoViewModel: ObservableObject {
             isSwapped: swapped,
             transparentCorners: (style != .off),
             cardConfig: cardCfg,
-            mountContext: mountCtx
+            mountContext: mountCtx,
+            cardAlphaMask: dragMask
         )
         if let img {
             displayImage = img
@@ -4183,16 +5082,17 @@ final class ViewStereoViewModel: ObservableObject {
         let w = imageWidth, h = imageHeight
         let pw = previewWidth, ph = previewHeight
         let preserveArch = hasPreservedArch
+        let mountCtx = currentMountContext
+        let isCardSource = preserveArch || (mountCtx != nil)
         let rawTx = windowShiftX
-        let maxArchShift = Double(w) * 0.150
-        let tx = preserveArch ? min(maxArchShift, max(-maxArchShift, rawTx)) : rawTx
+        let maxArchShift = Double(w) * 0.28
+        let tx = (preserveArch || isCardSource) ? min(maxArchShift, max(-maxArchShift, rawTx)) : rawTx
         let keepAR = keepOriginalAspectRatio
         let samples = lastDisparitySamples
         let mode = displayMode
         let style = frameStyle
         let swapped = isSwapped
         let cardCfg = appliedCardMountConfig
-        let mountCtx = currentMountContext
         let restOpts = makeVintageRestorationOptions()
         let detailOpts = makeDetailRestorationOptions()
         let colorOpts = makeColorizationOptions()
@@ -4213,7 +5113,7 @@ final class ViewStereoViewModel: ObservableObject {
         }
 
         Task {
-            let output = await Task.detached(priority: .userInitiated) { () -> ([UInt8], [UInt8], Int, Int, Int, Int, Bool, Bool, Double, Double, Double, NSImage?)? in
+            let output = await Task.detached(priority: .userInitiated) { () -> ([UInt8], [UInt8], [UInt8]?, Int, Int, Int, Int, Bool, Bool, Double, Double, Double, NSImage?)? in
                 let shiftL = HomographyGeometry.translation(dx: -0.5 * tx, dy: 0) * rectRes.homographyLeftPixel
                 let shiftR = HomographyGeometry.translation(dx: +0.5 * tx, dy: 0) * rectRes.homographyRightPixel
                 let corners = [SIMD2(0.0, 0.0), SIMD2(Double(w), 0.0), SIMD2(Double(w), Double(h)), SIMD2(0.0, Double(h))]
@@ -4228,8 +5128,6 @@ final class ViewStereoViewModel: ObservableObject {
                 let sx = Double(pw) / Double(max(1, w))
                 let sy = Double(ph) / Double(max(1, h))
                 if preserveArch {
-                    // 左右の視差シフト (tx) や回転で生じる外周の黒い隙間（未定義領域）を除去するため、
-                    // quadL と quadR の共通有効矩形にフィットさせて余計な黒枠の発生を防ぐ
                     let minCommonX = max(quadL.map { $0.x }.min() ?? 0.0, quadR.map { $0.x }.min() ?? 0.0)
                     let maxCommonX = min(quadL.map { $0.x }.max() ?? Double(w), quadR.map { $0.x }.max() ?? Double(w))
                     let minCommonY = max(quadL.map { $0.y }.min() ?? 0.0, quadR.map { $0.y }.min() ?? 0.0)
@@ -4237,7 +5135,6 @@ final class ViewStereoViewModel: ObservableObject {
                     let originX = ceil(max(0.0, minCommonX))
                     let originY = ceil(max(0.0, minCommonY))
                     let endX = floor(min(Double(w), maxCommonX))
-                    // 下端（endY）は足先や車輪底の被写体を切断しないよう下端フルハイト（Double(h)）を最大限確保
                     let endY = floor(Double(h))
 
                     fullCW = max(16, Int(endX - originX))
@@ -4251,7 +5148,8 @@ final class ViewStereoViewModel: ObservableObject {
                     guard let maair = ConvexPolygonRect.largestAxisParallelInscribedRectangle(in: poly, aspectRatio: aspect) else {
                         return nil
                     }
-                    let inset = (maair.maxX - maair.minX > 48 && maair.maxY - maair.minY > 48) ? 4.0 : 0.0
+                    let insetVal = isCardSource ? 1.5 : 4.0
+                    let inset = (maair.maxX - maair.minX > 48 && maair.maxY - maair.minY > 48) ? insetVal : 0.0
                     fullCW = max(16, Int(floor(maair.maxX - inset) - ceil(maair.minX + inset)))
                     fullCH = max(16, Int(floor(maair.maxY - inset) - ceil(maair.minY + inset)))
                     prevOrigin = SIMD2<Double>(ceil((maair.minX + inset) * sx), ceil((maair.minY + inset) * sy))
@@ -4259,7 +5157,6 @@ final class ViewStereoViewModel: ObservableObject {
                     rawPrevCH = max(16, Int(floor((maair.maxY - inset) * sy) - prevOrigin.y))
                 }
 
-                // プレビュー座標系へホモグラフィをスケール変換: H_prev = S * H_full * S^-1
                 let scaleMat = simd_double3x3(columns: (
                     SIMD3<Double>(sx, 0, 0),
                     SIMD3<Double>(0, sy, 0),
@@ -4294,14 +5191,33 @@ final class ViewStereoViewModel: ObservableObject {
                     prevSrcH = ph
                 }
 
+                let hasAlphaPair = (mountCtx != nil &&
+                    mountCtx!.unmaskedWidth == w &&
+                    mountCtx!.unmaskedHeight == h &&
+                    mountCtx!.unmaskedAlphaL.count == w * h &&
+                    mountCtx!.unmaskedAlphaR.count == w * h)
+
                 guard let rawWarpedPL = try? renderer.warpRGB8(rgbData: prevSrcL, srcWidth: prevSrcW, srcHeight: prevSrcH, forwardHomography: prevShiftL, cropOrigin: prevOrigin, dstWidth: rawPrevCW, dstHeight: rawPrevCH),
                       let rawWarpedPR = try? renderer.warpRGB8(rgbData: prevSrcR, srcWidth: prevSrcW, srcHeight: prevSrcH, forwardHomography: prevShiftR, cropOrigin: prevOrigin, dstWidth: rawPrevCW, dstHeight: rawPrevCH) else {
                     return nil
                 }
+                var prevAlphaL: [UInt8]? = nil
+                var prevAlphaR: [UInt8]? = nil
+                if hasAlphaPair, let mctx = mountCtx {
+                    let mL = Self.downsampleMaskForPreview(mctx.unmaskedAlphaL, srcW: w, srcH: h, dstW: prevSrcW, dstH: prevSrcH)
+                    let mR = Self.downsampleMaskForPreview(mctx.unmaskedAlphaR, srcW: w, srcH: h, dstW: prevSrcW, dstH: prevSrcH)
+                    prevAlphaL = try? renderer.warpMask8(maskData: mL, srcWidth: prevSrcW, srcHeight: prevSrcH, forwardHomography: prevShiftL, cropOrigin: prevOrigin, dstWidth: rawPrevCW, dstHeight: rawPrevCH)
+                    prevAlphaR = try? renderer.warpMask8(maskData: mR, srcWidth: prevSrcW, srcHeight: prevSrcH, forwardHomography: prevShiftR, cropOrigin: prevOrigin, dstWidth: rawPrevCW, dstHeight: rawPrevCH)
+                }
 
                 var (warpedPL, warpedPR, prevCW, prevCH) = preserveArch
                     ? (rawWarpedPL, rawWarpedPR, rawPrevCW, rawPrevCH)
-                    : Self.trimEdgeColorFringe(left: rawWarpedPL, right: rawWarpedPR, width: rawPrevCW, height: rawPrevCH)
+                    : Self.trimEdgeColorFringe(left: rawWarpedPL, right: rawWarpedPR, alphaL: &prevAlphaL, alphaR: &prevAlphaR, width: rawPrevCW, height: rawPrevCH)
+
+                let prevCardMask: [UInt8]? = {
+                    guard let aL = prevAlphaL, let aR = prevAlphaR else { return nil }
+                    return Self.buildIntersectionMask(alphaL: aL, alphaR: aR, width: prevCW, height: prevCH).mask
+                }()
 
                 let prevPixelCount = prevCW * prevCH
                 switch colorMode {
@@ -4335,8 +5251,13 @@ final class ViewStereoViewModel: ObservableObject {
                 }
 
                 if preserveArch {
-                    let archParams = StereoCardSegmenter.shared.currentArchParams
-                    StereoCardSegmenter.applyArchMaskPair(&warpedPL, &warpedPR, width: prevCW, height: prevCH, params: archParams, extraInsetRatio: 0.008, cardLuma: StereoCardSegmenter.shared.currentCardLuma)
+                    if let cardMask = prevCardMask {
+                        StereoCardSegmenter.applyAlphaMaskBlack(&warpedPL, alpha: cardMask, width: prevCW, height: prevCH)
+                        StereoCardSegmenter.applyAlphaMaskBlack(&warpedPR, alpha: cardMask, width: prevCW, height: prevCH)
+                    } else {
+                        let archParams = StereoCardSegmenter.shared.currentArchParams
+                        StereoCardSegmenter.applyArchMaskPair(&warpedPL, &warpedPR, width: prevCW, height: prevCH, params: archParams, extraInsetRatio: 0.008, cardLuma: StereoCardSegmenter.shared.currentCardLuma)
+                    }
                 }
 
                 var dispL = warpedPL
@@ -4379,21 +5300,27 @@ final class ViewStereoViewModel: ObservableObject {
                 if mode != .stereoviewCard {
                     Self.applyFrameStyleIfNeeded(left: &dispL, right: &dispR, width: prevCW, height: prevCH, style: style)
                 }
-                let trimmed = Self.trimToTightBoundingBox(left: dispL, right: dispR, width: prevCW, height: prevCH)
-                let tl = trimmed.left, tr = trimmed.right, tw = trimmed.width, th = trimmed.height
+                let trimmed = Self.trimToTightBoundingBox(
+                    left: dispL, right: dispR,
+                    mask: (mode == .stereoviewCard || preserveArch) ? prevCardMask : nil,
+                    width: prevCW, height: prevCH
+                )
+                let tl = trimmed.left, tr = trimmed.right, tMask = trimmed.mask, tw = trimmed.width, th = trimmed.height
 
                 let previewImg = Self.renderPreviewNSImage(
                     left: tl, right: tr, width: tw, height: th,
                     mode: mode, isSwapped: swapped, transparentCorners: true,
-                    cardConfig: cardCfg, mountContext: mountCtx
+                    cardConfig: cardCfg, mountContext: mountCtx,
+                    cardAlphaMask: tMask
                 )
-                return (warpedPL, warpedPR, prevCW, prevCH, fullCW, fullCH, erg.hasWindowViolationRisk, erg.requiresFloatingWindow, erg.dispRangePct, erg.nearPct, erg.farPct, previewImg)
+                return (warpedPL, warpedPR, prevCardMask, prevCW, prevCH, fullCW, fullCH, erg.hasWindowViolationRisk, erg.requiresFloatingWindow, erg.dispRangePct, erg.nearPct, erg.farPct, previewImg)
             }.value
 
             isPreviewWarping = false
-            if let (warpedPL, warpedPR, prevCW, prevCH, fullCW, fullCH, wvRisk, fwReq, dispPct, nearPct, farPct, previewImg) = output {
+            if let (warpedPL, warpedPR, prevCardMask, prevCW, prevCH, fullCW, fullCH, wvRisk, fwReq, dispPct, nearPct, farPct, previewImg) = output {
                 previewAlignedLeftRGB = warpedPL
                 previewAlignedRightRGB = warpedPR
+                previewAlignedCardMask = prevCardMask
                 previewCroppedWidth = prevCW
                 previewCroppedHeight = prevCH
                 croppedWidth = fullCW
@@ -4489,13 +5416,14 @@ final class ViewStereoViewModel: ObservableObject {
         }
         let w = imageWidth, h = imageHeight
         let preserveArch = hasPreservedArch
-        let rawTx = windowShiftX
-        let maxArchShift = Double(w) * 0.150
-        let tx = preserveArch ? min(maxArchShift, max(-maxArchShift, rawTx)) : rawTx
-        let keepAR = keepOriginalAspectRatio
         let mountCtxForWarp = currentMountContext
+        let isCardSource = preserveArch || (mountCtxForWarp != nil)
+        let rawTx = windowShiftX
+        let maxArchShift = Double(w) * 0.28
+        let tx = (preserveArch || isCardSource) ? min(maxArchShift, max(-maxArchShift, rawTx)) : rawTx
+        let keepAR = keepOriginalAspectRatio
 
-        let res = await Task.detached(priority: .userInitiated) { () -> ([UInt8], [UInt8], Int, Int)? in
+        let res = await Task.detached(priority: .userInitiated) { () -> ([UInt8], [UInt8], [UInt8]?, Int, Int)? in
             let shiftL = HomographyGeometry.translation(dx: -0.5 * tx, dy: 0) * rectRes.homographyLeftPixel
             let shiftR = HomographyGeometry.translation(dx: +0.5 * tx, dy: 0) * rectRes.homographyRightPixel
             let corners = [SIMD2(0.0, 0.0), SIMD2(Double(w), 0.0), SIMD2(Double(w), Double(h)), SIMD2(0.0, Double(h))]
@@ -4506,8 +5434,6 @@ final class ViewStereoViewModel: ObservableObject {
             let rawCW: Int
             let rawCH: Int
             if preserveArch {
-                // 左右の視差シフト (tx) や回転で生じる外周の黒い隙間（未定義領域）を除去するため、
-                // quadL と quadR の共通有効矩形にフィットさせて余計な黒枠の発生を防ぐ
                 let minCommonX = max(quadL.map { $0.x }.min() ?? 0.0, quadR.map { $0.x }.min() ?? 0.0)
                 let maxCommonX = min(quadL.map { $0.x }.max() ?? Double(w), quadR.map { $0.x }.max() ?? Double(w))
                 let minCommonY = max(quadL.map { $0.y }.min() ?? 0.0, quadR.map { $0.y }.min() ?? 0.0)
@@ -4515,7 +5441,6 @@ final class ViewStereoViewModel: ObservableObject {
                 let originX = ceil(max(0.0, minCommonX))
                 let originY = ceil(max(0.0, minCommonY))
                 let endX = floor(min(Double(w), maxCommonX))
-                // 下端（endY）は足先や車輪底の被写体を切断しないよう下端フルハイト（Double(h)）を最大限確保
                 let endY = floor(Double(h))
 
                 cropOrigin = SIMD2<Double>(originX, originY)
@@ -4527,7 +5452,8 @@ final class ViewStereoViewModel: ObservableObject {
                 guard let maair = ConvexPolygonRect.largestAxisParallelInscribedRectangle(in: poly, aspectRatio: aspect) else {
                     return nil
                 }
-                let inset = (maair.maxX - maair.minX > 48 && maair.maxY - maair.minY > 48) ? 4.0 : 0.0
+                let insetVal = isCardSource ? 1.5 : 4.0
+                let inset = (maair.maxX - maair.minX > 48 && maair.maxY - maair.minY > 48) ? insetVal : 0.0
                 cropOrigin = SIMD2<Double>(ceil(maair.minX + inset), ceil(maair.minY + inset))
                 rawCW = max(16, Int(floor(maair.maxX - inset) - cropOrigin.x))
                 rawCH = max(16, Int(floor(maair.maxY - inset) - cropOrigin.y))
@@ -4549,9 +5475,21 @@ final class ViewStereoViewModel: ObservableObject {
                   let rawWarpedR = try? renderer.warpRGB8(rgbData: warpSrcR, srcWidth: w, srcHeight: h, forwardHomography: shiftR, cropOrigin: cropOrigin, dstWidth: rawCW, dstHeight: rawCH) else {
                 return nil
             }
+            var rawAlphaL: [UInt8]? = nil
+            var rawAlphaR: [UInt8]? = nil
+            if let mctx = mountCtxForWarp,
+               mctx.unmaskedWidth == w, mctx.unmaskedHeight == h,
+               mctx.unmaskedAlphaL.count == w * h, mctx.unmaskedAlphaR.count == w * h {
+                rawAlphaL = try? renderer.warpMask8(maskData: mctx.unmaskedAlphaL, srcWidth: w, srcHeight: h, forwardHomography: shiftL, cropOrigin: cropOrigin, dstWidth: rawCW, dstHeight: rawCH)
+                rawAlphaR = try? renderer.warpMask8(maskData: mctx.unmaskedAlphaR, srcWidth: w, srcHeight: h, forwardHomography: shiftR, cropOrigin: cropOrigin, dstWidth: rawCW, dstHeight: rawCH)
+            }
             var (warpedL, warpedR, cw, ch) = preserveArch
                 ? (rawWarpedL, rawWarpedR, rawCW, rawCH)
-                : Self.trimEdgeColorFringe(left: rawWarpedL, right: rawWarpedR, width: rawCW, height: rawCH)
+                : Self.trimEdgeColorFringe(left: rawWarpedL, right: rawWarpedR, alphaL: &rawAlphaL, alphaR: &rawAlphaR, width: rawCW, height: rawCH)
+            let syncedMask: [UInt8]? = {
+                guard let aL = rawAlphaL, let aR = rawAlphaR else { return nil }
+                return Self.buildIntersectionMask(alphaL: aL, alphaR: aR, width: cw, height: ch).mask
+            }()
             let pixelCount = cw * ch
             switch colorMode {
             case .off:
@@ -4567,15 +5505,21 @@ final class ViewStereoViewModel: ObservableObject {
                 warpedR = cleaned.right
             }
             if preserveArch {
-                let archParams = StereoCardSegmenter.shared.currentArchParams
-                StereoCardSegmenter.applyArchMaskPair(&warpedL, &warpedR, width: cw, height: ch, params: archParams, extraInsetRatio: 0.008, cardLuma: StereoCardSegmenter.shared.currentCardLuma)
+                if let cardMask = syncedMask {
+                    StereoCardSegmenter.applyAlphaMaskBlack(&warpedL, alpha: cardMask, width: cw, height: ch)
+                    StereoCardSegmenter.applyAlphaMaskBlack(&warpedR, alpha: cardMask, width: cw, height: ch)
+                } else {
+                    let archParams = StereoCardSegmenter.shared.currentArchParams
+                    StereoCardSegmenter.applyArchMaskPair(&warpedL, &warpedR, width: cw, height: ch, params: archParams, extraInsetRatio: 0.008, cardLuma: StereoCardSegmenter.shared.currentCardLuma)
+                }
             }
-            return (warpedL, warpedR, cw, ch)
+            return (warpedL, warpedR, syncedMask, cw, ch)
         }.value
 
-        guard let (warpedL, warpedR, cw, ch) = res else { return false }
+        guard let (warpedL, warpedR, syncedMask, cw, ch) = res else { return false }
         alignedLeftRGB = warpedL
         alignedRightRGB = warpedR
+        alignedCardMask = syncedMask
         croppedWidth = cw
         croppedHeight = ch
         lastFullResShiftX = tx
@@ -4700,6 +5644,8 @@ final class ViewStereoViewModel: ObservableObject {
         let swapped = isSwapped
         let cardCfg = appliedCardMountConfig
         let mountCtx = currentMountContext
+        let prevMask = activePreviewCardMask
+        let preserveArch = hasPreservedArch
         let restOpts = makeVintageRestorationOptions()
         let detailOpts = makeDetailRestorationOptions()
         let colorOpts = makeColorizationOptions()
@@ -4741,13 +5687,18 @@ final class ViewStereoViewModel: ObservableObject {
                 if mode != .stereoviewCard {
                     Self.applyFrameStyleIfNeeded(left: &dispL, right: &dispR, width: w, height: h, style: style)
                 }
-                let trimmed = Self.trimToTightBoundingBox(left: dispL, right: dispR, width: w, height: h)
-                let tl = trimmed.left, tr = trimmed.right, tw = trimmed.width, th = trimmed.height
+                let trimmed = Self.trimToTightBoundingBox(
+                    left: dispL, right: dispR,
+                    mask: (mode == .stereoviewCard || preserveArch) ? prevMask : nil,
+                    width: w, height: h
+                )
+                let tl = trimmed.left, tr = trimmed.right, tMask = trimmed.mask, tw = trimmed.width, th = trimmed.height
 
                 return Self.renderPreviewNSImage(
                     left: tl, right: tr, width: tw, height: th,
                     mode: mode, isSwapped: swapped, transparentCorners: true,
-                    cardConfig: cardCfg, mountContext: mountCtx
+                    cardConfig: cardCfg, mountContext: mountCtx,
+                    cardAlphaMask: tMask
                 )
             }.value
             guard gen == self.previewRenderGeneration else { return }
@@ -4759,7 +5710,7 @@ final class ViewStereoViewModel: ObservableObject {
         }
     }
 
-    // MARK: - .vstereo ハイブリッド・サイドカー非破壊保存
+    // MARK: - .vstereo ハイブリッド・サイドカー非破壊保存 & ViewStereo_Settings.json 統合
 
     struct ViewStereoSidecarPayload: Codable {
         let version: Int
@@ -4777,35 +5728,55 @@ final class ViewStereoViewModel: ObservableObject {
         let exportImageFormatRaw: String
     }
 
-    func saveSidecarForCurrentImage(silent: Bool = false) {
-        guard hasLoadedImages, !isVideoLoaded, let url = leftURL else { return }
-        let payload = ViewStereoSidecarPayload(
-            version: 1,
-            updatedAt: Date(),
-            sourceFilename: url.lastPathComponent,
-            isSwapped: isSwapped,
-            windowShiftX: windowShiftX,
-            stereoCardModeRaw: stereoCardMode.rawValue,
-            frameStyleRaw: frameStyle.rawValue,
-            autoColorModeRaw: autoColorMode.rawValue,
-            keepOriginalAspectRatio: keepOriginalAspectRatio,
-            virtualDepthBasePercent: virtualDepthBasePercent,
-            depthGamma: depthGamma,
-            exportLayoutRaw: exportLayout.rawValue,
-            exportImageFormatRaw: exportImageFormat.rawValue
+    /// レガシーな .vstereo サイドカーから FolderItemSettings を復元・変換する
+    static func folderItemSettings(from sidecar: ViewStereoSidecarPayload, baseline: FolderItemSettings? = nil) -> FolderItemSettings {
+        FolderItemSettings(
+            updatedAt: sidecar.updatedAt,
+            stereoCardModeRaw: sidecar.stereoCardModeRaw,
+            useCoreMLCardSegmentation: baseline?.useCoreMLCardSegmentation ?? true,
+            frameStyleRaw: sidecar.frameStyleRaw,
+            autoAlignOnLoad: baseline?.autoAlignOnLoad ?? true,
+            autoColorModeRaw: sidecar.autoColorModeRaw,
+            keepOriginalAspectRatio: sidecar.keepOriginalAspectRatio,
+            usePersonMotionMask: baseline?.usePersonMotionMask ?? true,
+            useAttentionSaliency: baseline?.useAttentionSaliency ?? true,
+            removeUnilateralNoise: baseline?.removeUnilateralNoise ?? true,
+            isSwapped: sidecar.isSwapped,
+            windowShiftX: sidecar.windowShiftX,
+            maskGuideOverride: baseline?.maskGuideOverride,
+            autoOptimalShiftX: baseline?.autoOptimalShiftX,
+            autoMaskGuide: baseline?.autoMaskGuide,
+            cardMountPresetRaw: baseline?.cardMountPresetRaw ?? StereoCardMountPreset.autoSampleColor.rawValue,
+            cardSizeSpecRaw: baseline?.cardSizeSpecRaw ?? StereoCardSizeSpec.standard.rawValue,
+            cardPrintCutStyleRaw: baseline?.cardPrintCutStyleRaw ?? StereoCardPrintCutStyle.autoFromPreset.rawValue,
+            cardCenterGapStyleRaw: baseline?.cardCenterGapStyleRaw ?? StereoCardCenterGapStyle.autoFromPreset.rawValue,
+            cardTextModeRaw: baseline?.cardTextModeRaw ?? StereoCardTextMode.ocrAuto.rawValue,
+            cardBottomCaption: baseline?.cardBottomCaption ?? "",
+            cardTopCenterText: baseline?.cardTopCenterText ?? "",
+            cardLeftMarginText: baseline?.cardLeftMarginText ?? "",
+            cardRightMarginText: baseline?.cardRightMarginText ?? "",
+            cardUseFilenameAsCaption: baseline?.cardUseFilenameAsCaption ?? false,
+            isRestorationEnabled: baseline?.isRestorationEnabled ?? false,
+            restorationPrintToneRaw: baseline?.restorationPrintToneRaw ?? VintagePrintTone.original.rawValue,
+            restorationAutoLevel: baseline?.restorationAutoLevel ?? 0.0,
+            restorationLocalContrast: baseline?.restorationLocalContrast ?? 0.0,
+            restorationDeblurStrength: baseline?.restorationDeblurStrength ?? 0.0,
+            restorationTextureProtection: baseline?.restorationTextureProtection ?? 0.7,
+            restorationColorizationModeRaw: baseline?.restorationColorizationModeRaw ?? StereoColorizationMode.off.rawValue,
+            restorationColorStrength: baseline?.restorationColorStrength ?? 0.6,
+            restorationPaperWarmth: baseline?.restorationPaperWarmth ?? 0.0,
+            virtualDepthBasePercent: sidecar.virtualDepthBasePercent,
+            depthGamma: sidecar.depthGamma,
+            exportLayoutRaw: sidecar.exportLayoutRaw,
+            exportImageFormatRaw: sidecar.exportImageFormatRaw
         )
-        do {
-            let result = try StudioSidecarStore.save(payload, for: url)
-            if !silent {
-                statusMessage = result.usedFallbackCache
-                    ? String(format: String(localized: "Saved adjustments to sidecar cache (%@)"), result.savedURL.lastPathComponent)
-                    : String(format: String(localized: "Saved non-destructive sidecar: %@"), result.savedURL.lastPathComponent)
-            }
-        } catch {
-            if !silent {
-                statusMessage = String(format: String(localized: "Failed to save sidecar: %@"), error.localizedDescription)
-            }
-        }
+    }
+
+    /// 現在開いている画像の調整内容をフォルダ統合設定（ViewStereo_Settings.json）に保存する
+    func saveSidecarForCurrentImage(silent: Bool = false) {
+        guard hasLoadedImages, !isVideoLoaded else { return }
+        captureActiveItemSettingsToFolderMap(force: true)
+        saveWorkspaceFolderSettings()
     }
 
     func applySidecarIfPresent(for url: URL) {
@@ -4823,6 +5794,370 @@ final class ViewStereoViewModel: ObservableObject {
         depthGamma = s.depthGamma
         if let layout = StereoExportLayout(rawValue: s.exportLayoutRaw) { exportLayout = layout }
         if let fmt = StereoExportImageFormat(rawValue: s.exportImageFormatRaw) { exportImageFormat = fmt }
+    }
+
+    /// 選択された .vstereo ファイル群を直接デコードし、現在の ViewStereo_Settings.json にマージ統合する
+    @discardableResult
+    func importAndMergeSidecarFiles(urls: [URL]) -> Int {
+        guard let folder = currentFolderRootURL() else { return 0 }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let fm = FileManager.default
+
+        var importedCount = 0
+        for fileURL in urls {
+            guard fileURL.pathExtension.lowercased() == "vstereo",
+                  let data = try? Data(contentsOf: fileURL),
+                  let payload = try? decoder.decode(ViewStereoSidecarPayload.self, from: data) else {
+                continue
+            }
+
+            let targetImageName = payload.sourceFilename.isEmpty
+                ? fileURL.deletingPathExtension().lastPathComponent
+                : payload.sourceFilename
+
+            let parentDir = fileURL.deletingLastPathComponent()
+            let candidateImageURL = parentDir.appendingPathComponent(targetImageName)
+            let resolvedImageURL: URL
+            if fm.fileExists(atPath: candidateImageURL.path) {
+                resolvedImageURL = candidateImageURL
+            } else if fm.fileExists(atPath: fileURL.deletingPathExtension().path) {
+                resolvedImageURL = fileURL.deletingPathExtension()
+            } else {
+                resolvedImageURL = candidateImageURL
+            }
+
+            let key: String
+            if let rel = WorkspaceFolderSettingsStore.relativeKey(for: resolvedImageURL, in: folder) {
+                key = rel
+            } else {
+                key = targetImageName
+            }
+
+            if var existing = folderSettingsMap[key] {
+                existing.applySidecarValues(
+                    updatedAt: payload.updatedAt,
+                    isSwapped: payload.isSwapped,
+                    windowShiftX: payload.windowShiftX,
+                    stereoCardModeRaw: payload.stereoCardModeRaw,
+                    frameStyleRaw: payload.frameStyleRaw,
+                    autoColorModeRaw: payload.autoColorModeRaw,
+                    keepOriginalAspectRatio: payload.keepOriginalAspectRatio,
+                    virtualDepthBasePercent: payload.virtualDepthBasePercent,
+                    depthGamma: payload.depthGamma,
+                    exportLayoutRaw: payload.exportLayoutRaw,
+                    exportImageFormatRaw: payload.exportImageFormatRaw
+                )
+                folderSettingsMap[key] = existing
+            } else {
+                folderSettingsMap[key] = Self.folderItemSettings(from: payload)
+            }
+            browserStore.adjustedItemKeys.insert(key)
+            importedCount += 1
+        }
+
+        if importedCount > 0 {
+            saveWorkspaceFolderSettings()
+            statusMessage = String(
+                format: String(localized: "Merged %lld .vstereo sidecar(s) into ViewStereo_Settings.json"),
+                Int64(importedCount)
+            )
+            if let url = leftURL {
+                if let rURL = rightURL, url != rURL {
+                    loadSeparateImages(left: url, right: rURL)
+                } else {
+                    loadSingleSBSImage(url: url)
+                }
+            }
+        }
+        return importedCount
+    }
+
+    /// フォルダ内のレガシーな .vstereo サイドカーファイルを検出し、ViewStereo_Settings.json へ自動統合移行する
+    func migrateLegacySidecarsIntoFolderSettings(folder: URL) {
+        let fm = FileManager.default
+        guard let enumerator = fm.enumerator(
+            at: folder,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else { return }
+
+        var sidecarURLs: [URL] = []
+        for case let fileURL as URL in enumerator {
+            if fileURL.pathExtension.lowercased() == "vstereo" {
+                sidecarURLs.append(fileURL)
+            }
+        }
+
+        if !sidecarURLs.isEmpty {
+            let count = importAndMergeSidecarFiles(urls: sidecarURLs)
+            if count > 0 {
+                NSLog("[ViewStereo] Successfully migrated %d legacy .vstereo file(s) into ViewStereo_Settings.json", count)
+            }
+        }
+    }
+
+    /// OpenPanel を表示して、外部または既存の .vstereo ファイルやフォルダを選択して一括統合する
+    func openImportSidecarPanel(in window: NSWindow? = nil) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = true
+        panel.prompt = String(localized: "Import and Merge")
+        panel.message = String(localized: "Select .vstereo files or folders to merge into ViewStereo_Settings.json.")
+        if let root = currentFolderRootURL() {
+            panel.directoryURL = root
+        }
+
+        let handler: (NSApplication.ModalResponse) -> Void = { [weak self] response in
+            guard let self, response == .OK else { return }
+            var targetSidecarURLs: [URL] = []
+            for url in panel.urls {
+                var isDir: ObjCBool = false
+                if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue {
+                    if let enumerator = FileManager.default.enumerator(
+                        at: url,
+                        includingPropertiesForKeys: [.isRegularFileKey],
+                        options: [.skipsHiddenFiles, .skipsPackageDescendants]
+                    ) {
+                        for case let sub as URL in enumerator where sub.pathExtension.lowercased() == "vstereo" {
+                            targetSidecarURLs.append(sub)
+                        }
+                    }
+                } else if url.pathExtension.lowercased() == "vstereo" {
+                    targetSidecarURLs.append(url)
+                }
+            }
+
+            let count = self.importAndMergeSidecarFiles(urls: targetSidecarURLs)
+            if count == 0 {
+                self.statusMessage = String(localized: "No valid .vstereo files were found to import.")
+            }
+        }
+
+        if let win = window ?? NSApp.keyWindow {
+            panel.beginSheetModal(for: win, completionHandler: handler)
+        } else {
+            let res = panel.runModal()
+            handler(res)
+        }
+    }
+
+    // MARK: - フォルダ単位の個別設定ファイル（ViewStereo_Settings.json）
+
+    func currentFolderRootURL() -> URL? {
+        if let folder = batchInputFolder {
+            return folder.standardizedFileURL
+        }
+        if !browserStore.isVirtualSelection, let root = browserStore.rootFolder {
+            return root.standardizedFileURL
+        }
+        if let url = leftURL {
+            return url.deletingLastPathComponent().standardizedFileURL
+        }
+        return nil
+    }
+
+    func currentFolderItemKey(for url: URL? = nil) -> String? {
+        guard let root = currentFolderRootURL(),
+              let target = url ?? leftURL else {
+            return nil
+        }
+        return WorkspaceFolderSettingsStore.relativeKey(for: target, in: root)
+    }
+
+    func autoMaskGuideSnapshot() -> FolderMaskGuideOverride? {
+        guard let ctx = currentMountContext, ctx.cardWidth > 0, ctx.cardHeight > 0 else { return nil }
+        let w = Double(ctx.cardWidth)
+        let h = Double(ctx.cardHeight)
+        let boxL = InteractivePromptBox(
+            normMinX: Double(ctx.leftBox.x0) / w,
+            normMinY: Double(ctx.leftBox.y0) / h,
+            normMaxX: Double(ctx.leftBox.x1) / w,
+            normMaxY: Double(ctx.leftBox.y1) / h
+        )
+        let boxR = InteractivePromptBox(
+            normMinX: Double(ctx.rightBox.x0) / w,
+            normMinY: Double(ctx.rightBox.y0) / h,
+            normMaxX: Double(ctx.rightBox.x1) / w,
+            normMaxY: Double(ctx.rightBox.y1) / h
+        )
+        return FolderMaskGuideOverride(
+            boxL: boxL,
+            boxR: boxR,
+            topArchRatio: ctx.archParams.topRyRatio,
+            botRoundRatio: ctx.archParams.botRyRatio
+        )
+    }
+
+    func snapshotCurrentItemSettings() -> FolderItemSettings {
+        FolderItemSettings(
+            updatedAt: Date(),
+            stereoCardModeRaw: stereoCardMode.rawValue,
+            useCoreMLCardSegmentation: useCoreMLCardSegmentation,
+            frameStyleRaw: frameStyle.rawValue,
+            autoAlignOnLoad: autoAlignOnLoad,
+            autoColorModeRaw: autoColorMode.rawValue,
+            keepOriginalAspectRatio: keepOriginalAspectRatio,
+            usePersonMotionMask: usePersonMotionMask,
+            useAttentionSaliency: useAttentionSaliency,
+            removeUnilateralNoise: removeUnilateralNoise,
+            isSwapped: isSwapped,
+            windowShiftX: windowShiftX,
+            maskGuideOverride: currentMaskGuideOverride,
+            autoOptimalShiftX: autoOptimalShiftX,
+            autoMaskGuide: autoMaskGuideSnapshot(),
+            cardMountPresetRaw: cardMountPreset.rawValue,
+            cardSizeSpecRaw: cardSizeSpec.rawValue,
+            cardPrintCutStyleRaw: cardPrintCutStyle.rawValue,
+            cardCenterGapStyleRaw: cardCenterGapStyle.rawValue,
+            cardTextModeRaw: cardTextMode.rawValue,
+            cardBottomCaption: cardBottomCaption,
+            cardTopCenterText: cardTopCenterText,
+            cardLeftMarginText: cardLeftMarginText,
+            cardRightMarginText: cardRightMarginText,
+            cardUseFilenameAsCaption: cardUseFilenameAsCaption,
+            isRestorationEnabled: isRestorationEnabled,
+            restorationPrintToneRaw: restorationPrintTone.rawValue,
+            restorationAutoLevel: restorationAutoLevel,
+            restorationLocalContrast: restorationLocalContrast,
+            restorationDeblurStrength: restorationDeblurStrength,
+            restorationTextureProtection: restorationTextureProtection,
+            restorationColorizationModeRaw: restorationColorizationMode.rawValue,
+            restorationColorStrength: restorationColorStrength,
+            restorationPaperWarmth: restorationPaperWarmth,
+            virtualDepthBasePercent: virtualDepthBasePercent,
+            depthGamma: depthGamma,
+            exportLayoutRaw: exportLayout.rawValue,
+            exportImageFormatRaw: exportImageFormat.rawValue
+        )
+    }
+
+    func captureActiveItemSettingsToFolderMap(force: Bool = false) {
+        guard hasLoadedImages, !isVideoLoaded,
+              let key = currentFolderItemKey() else {
+            return
+        }
+        let snap = snapshotCurrentItemSettings()
+        let existing = folderSettingsMap[key]
+        let modifiedSinceBaseline = currentItemBaselineSettings.map { !$0.isSameValues(as: snap) } ?? false
+        guard force || existing != nil || modifiedSinceBaseline else { return }
+
+        if let existing, existing.isSameValues(as: snap) {
+            return
+        }
+        folderSettingsMap[key] = snap
+        browserStore.adjustedItemKeys.insert(key)
+        hasUnsavedFolderSettings = true
+    }
+
+    @discardableResult
+    func applyFolderItemSettingsBeforeLoad(for url: URL) -> FolderItemSettings? {
+        // もし folderSettingsMap が空で、親フォルダに ViewStereo_Settings.json があれば自動ロード
+        if folderSettingsMap.isEmpty, let root = currentFolderRootURL() {
+            if let doc = WorkspaceFolderSettingsStore.load(from: root) {
+                folderSettingsMap = doc.items
+                browserStore.adjustedItemKeys = Set(folderSettingsMap.keys)
+            }
+        }
+
+        guard let key = currentFolderItemKey(for: url) else {
+            pendingRestoredWindowShiftX = nil
+            pendingRestoredIsSwapped = nil
+            pendingRestoredMaskGuideOverride = nil
+            return nil
+        }
+
+        // もし folderSettingsMap にまだ入っていないが、レガシーな .vstereo が存在する場合は自動統合
+        if folderSettingsMap[key] == nil, let loaded = StudioSidecarStore.load(ViewStereoSidecarPayload.self, for: url) {
+            let converted = Self.folderItemSettings(from: loaded.payload)
+            folderSettingsMap[key] = converted
+            browserStore.adjustedItemKeys.insert(key)
+            hasUnsavedFolderSettings = true
+        }
+
+        guard let s = folderSettingsMap[key] else {
+            pendingRestoredWindowShiftX = nil
+            pendingRestoredIsSwapped = nil
+            pendingRestoredMaskGuideOverride = nil
+            return nil
+        }
+
+        if let mode = StereoCardMode(rawValue: s.stereoCardModeRaw) { stereoCardMode = mode }
+        useCoreMLCardSegmentation = s.useCoreMLCardSegmentation
+        if let frame = StereoFrameStyle(rawValue: s.frameStyleRaw) { frameStyle = frame }
+        autoAlignOnLoad = s.autoAlignOnLoad
+        if let color = StereoAutoColorMode(rawValue: s.autoColorModeRaw) { autoColorMode = color }
+        keepOriginalAspectRatio = s.keepOriginalAspectRatio
+        usePersonMotionMask = s.usePersonMotionMask
+        useAttentionSaliency = s.useAttentionSaliency
+        removeUnilateralNoise = s.removeUnilateralNoise
+
+        if let preset = StereoCardMountPreset(rawValue: s.cardMountPresetRaw) { cardMountPreset = preset }
+        if let sizeSpec = StereoCardSizeSpec(rawValue: s.cardSizeSpecRaw) { cardSizeSpec = sizeSpec }
+        if let cutStyle = StereoCardPrintCutStyle(rawValue: s.cardPrintCutStyleRaw) { cardPrintCutStyle = cutStyle }
+        if let gapStyle = StereoCardCenterGapStyle(rawValue: s.cardCenterGapStyleRaw) { cardCenterGapStyle = gapStyle }
+        if let textMode = StereoCardTextMode(rawValue: s.cardTextModeRaw) { cardTextMode = textMode }
+        cardBottomCaption = s.cardBottomCaption
+        cardTopCenterText = s.cardTopCenterText
+        cardLeftMarginText = s.cardLeftMarginText
+        cardRightMarginText = s.cardRightMarginText
+        cardUseFilenameAsCaption = s.cardUseFilenameAsCaption
+
+        isApplyingRestorationBatch = true
+        isRestorationEnabled = s.isRestorationEnabled
+        if let tone = VintagePrintTone(rawValue: s.restorationPrintToneRaw) { restorationPrintTone = tone }
+        restorationAutoLevel = s.restorationAutoLevel
+        restorationLocalContrast = s.restorationLocalContrast
+        restorationDeblurStrength = s.restorationDeblurStrength
+        restorationTextureProtection = s.restorationTextureProtection
+        if let colMode = StereoColorizationMode(rawValue: s.restorationColorizationModeRaw) { restorationColorizationMode = colMode }
+        restorationColorStrength = s.restorationColorStrength
+        restorationPaperWarmth = s.restorationPaperWarmth
+        appliedRestorationOptions = buildPendingVintageRestorationOptions()
+        appliedDetailOptions = buildPendingDetailRestorationOptions()
+        appliedColorizationOptions = buildPendingColorizationOptions()
+        isApplyingRestorationBatch = false
+
+        virtualDepthBasePercent = s.virtualDepthBasePercent
+        depthGamma = s.depthGamma
+        if let layout = StereoExportLayout(rawValue: s.exportLayoutRaw) { exportLayout = layout }
+        if let fmt = StereoExportImageFormat(rawValue: s.exportImageFormatRaw) { exportImageFormat = fmt }
+
+        pendingRestoredWindowShiftX = s.windowShiftX
+        pendingRestoredIsSwapped = s.isSwapped
+        pendingRestoredMaskGuideOverride = s.maskGuideOverride
+        return s
+    }
+
+    func saveWorkspaceFolderSettings() {
+        guard let folder = currentFolderRootURL() else { return }
+        if hasLoadedImages && !isVideoLoaded {
+            captureActiveItemSettingsToFolderMap(force: true)
+        }
+        let doc = FolderSettingsDocument(
+            version: 1,
+            updatedAt: Date(),
+            items: folderSettingsMap
+        )
+        do {
+            let savedURL = try WorkspaceFolderSettingsStore.save(doc, to: folder)
+            hasUnsavedFolderSettings = false
+            browserStore.adjustedItemKeys = Set(folderSettingsMap.keys)
+            if hasLoadedImages && !isVideoLoaded {
+                currentItemBaselineSettings = snapshotCurrentItemSettings()
+            }
+            statusMessage = String(
+                format: String(localized: "Saved folder settings (%lld items): %@"),
+                Int64(folderSettingsMap.count),
+                savedURL.lastPathComponent
+            )
+        } catch {
+            statusMessage = String(
+                format: String(localized: "Failed to save folder settings: %@"),
+                error.localizedDescription
+            )
+        }
     }
 
     /// 現在の修復・整準済み画像を共有ステージング経由で他の StereoStudio アプリへハンドオフする
@@ -5021,11 +6356,13 @@ final class ViewStereoViewModel: ObservableObject {
                     return
                 }
                 let w = activeWidth, h = activeHeight
+                let maskForSave = (layout == .stereoviewCard) ? self.activeCardMask : nil
                 let ok = await Task.detached(priority: .userInitiated) {
                     Self.renderAndSaveSingleFile(
                         left: lRaw, right: rRaw, width: w, height: h,
                         style: style, layout: layout, imageFormat: imgFormat, isSwapped: swapped,
                         cardConfig: cardCfg, mountContext: mountCtx,
+                        cardAlphaMask: maskForSave,
                         restorationOptions: restOpts,
                         detailOptions: detailOpts,
                         colorOptions: colorOpts,
@@ -5160,11 +6497,13 @@ final class ViewStereoViewModel: ObservableObject {
                 case .separateLR: suffix = ""; targetExt = ext
                 }
                 let outURL = baseDir.appendingPathComponent("\(base)\(suffix).\(targetExt)")
+                let maskForSave = (layout == .stereoviewCard) ? self.activeCardMask : nil
                 ok = await Task.detached(priority: .userInitiated) {
                     Self.renderAndSaveSingleFile(
                         left: lRaw, right: rRaw, width: w, height: h,
                         style: style, layout: layout, imageFormat: imgFormat, isSwapped: swapped,
                         cardConfig: cardCfg, mountContext: mountCtx,
+                        cardAlphaMask: maskForSave,
                         restorationOptions: restOpts,
                         detailOptions: detailOpts,
                         colorOptions: colorOpts,
@@ -5301,11 +6640,13 @@ final class ViewStereoViewModel: ObservableObject {
         }
 
         let tempURL = try SpatialDeliveryService.makeTemporaryDeliveryURL(filename: "\(base)\(suffix)", ext: targetExt)
+        let maskForSave = (layout == .stereoviewCard) ? self.activeCardMask : nil
         let ok = await Task.detached(priority: .userInitiated) {
             Self.renderAndSaveSingleFile(
                 left: lRaw, right: rRaw, width: w, height: h,
                 style: style, layout: layout, imageFormat: imgFormat, isSwapped: swapped,
                 cardConfig: cardCfg, mountContext: mountCtx,
+                cardAlphaMask: maskForSave,
                 restorationOptions: restOpts,
                 detailOptions: detailOpts,
                 colorOptions: colorOpts,
@@ -5386,6 +6727,18 @@ final class ViewStereoViewModel: ObservableObject {
         let outDir = stdFolder.appendingPathComponent("ViewStereo_Output", isDirectory: true)
         batchInputFolder = stdFolder
         batchOutputFolder = outDir
+        folderSettingsMap.removeAll()
+        hasUnsavedFolderSettings = false
+        currentItemBaselineSettings = nil
+        currentMaskGuideOverride = nil
+        pendingRestoredWindowShiftX = nil
+        pendingRestoredIsSwapped = nil
+        pendingRestoredMaskGuideOverride = nil
+        if let doc = WorkspaceFolderSettingsStore.load(from: stdFolder) {
+            folderSettingsMap = doc.items
+        }
+        migrateLegacySidecarsIntoFolderSettings(folder: stdFolder)
+        browserStore.adjustedItemKeys = Set(folderSettingsMap.keys)
         ViewStereoSettings.shared.recordWorkspaceFolder(stdFolder)
         browserStore.setRootFolder(
             stdFolder,
@@ -5393,7 +6746,15 @@ final class ViewStereoViewModel: ObservableObject {
             outputFolder: outDir,
             includeSubfolders: batchIncludeSubfolders
         )
-        statusMessage = "Workspace: \(stdFolder.lastPathComponent)"
+        if !folderSettingsMap.isEmpty {
+            statusMessage = String(
+                format: String(localized: "Loaded folder settings (%lld items): %@"),
+                Int64(folderSettingsMap.count),
+                WorkspaceFolderSettingsStore.filename
+            )
+        } else {
+            statusMessage = "Workspace: \(stdFolder.lastPathComponent)"
+        }
     }
 
     func refreshWorkspaceBrowser() {
@@ -5713,7 +7074,10 @@ final class ViewStereoViewModel: ObservableObject {
                     let res = Self.executeAlignmentPipeline(
                         lRGB: lRGB, rRGB: rRGB, width: w, height: h,
                         useMask: useMask, useSaliency: useSaliency, keepAR: keepAR,
-                        colorMode: colorMode, removeNoise: removeNoise, preserveArch: preservedArch,
+                        colorMode: colorMode, removeNoise: removeNoise,
+                        preserveArch: preservedArch,
+                        isCardSource: preservedArch || (mountCtx != nil),
+                        mountContext: mountCtx,
                         renderer: renderer
                     )
 
@@ -5980,6 +7344,25 @@ final class ViewStereoViewModel: ObservableObject {
         WorkspaceScanner.scanDirectory(dir, pairingMode: mode, customOutputFolder: nil).compactMap(\.item)
     }
 
+    nonisolated private static func extractCardPhotoPair(
+        from rgb: [UInt8],
+        width fw: Int,
+        height fh: Int,
+        mode: StereoCardCropper.ExtractionMode,
+        useCoreML: Bool
+    ) -> StereoCardCropper.CropResult? {
+        StereoCardSegmenter.shared.clearCurrentContext()
+        if useCoreML,
+           let res = StereoCardSegmenter.shared.extractPhotoPair(from: rgb, width: fw, height: fh, mode: mode) {
+            return res
+        }
+        if let res = StereoCardSegmenter.shared.extractPhotoPairHeuristic(from: rgb, width: fw, height: fh, mode: mode) {
+            return res
+        }
+        StereoCardSegmenter.shared.clearCurrentContext()
+        return StereoCardCropper.extractPhotoPair(from: rgb, width: fw, height: fh, mode: mode)
+    }
+
     nonisolated private static func loadBatchPair(
         item: StereoBatchItem,
         cardMode: StereoCardMode,
@@ -6005,8 +7388,7 @@ final class ViewStereoViewModel: ObservableObject {
             }
             let extMode: StereoCardCropper.ExtractionMode = (cardMode == .keepArchBlack) ? .keepArchBlack : .cropInner
             if cardMode != .off,
-               let card = (useCoreML ? StereoCardSegmenter.shared.extractPhotoPair(from: rgb, width: fw, height: fh, mode: extMode) : nil)
-                       ?? StereoCardCropper.extractPhotoPair(from: rgb, width: fw, height: fh, mode: extMode) {
+               let card = extractCardPhotoPair(from: rgb, width: fw, height: fh, mode: extMode, useCoreML: useCoreML) {
                 let mountCtx = StereoCardSegmenter.shared.currentMountContext
                 return (card.leftRGB, card.rightRGB, card.width, card.height, card.preservedArch, mountCtx, false)
             }
@@ -6072,6 +7454,7 @@ final class ViewStereoViewModel: ObservableObject {
         isSwapped: Bool,
         cardConfig: StereoCardMountConfig = StereoCardMountConfig(),
         mountContext: StereoCardSegmenter.OriginalCardMountContext? = nil,
+        cardAlphaMask: [UInt8]? = nil,
         restorationOptions: VintageRestorationOptions = VintageRestorationOptions(),
         detailOptions: StereoDetailRestorationOptions = StereoDetailRestorationOptions(),
         colorOptions: StereoColorizationOptions = StereoColorizationOptions(),
@@ -6087,9 +7470,14 @@ final class ViewStereoViewModel: ObservableObject {
         if layout != .stereoviewCard {
             applyFrameStyleIfNeeded(left: &l, right: &r, width: width, height: height, style: style)
         }
-        let trimmed = trimToTightBoundingBox(left: l, right: r, width: width, height: height)
+        let trimmed = trimToTightBoundingBox(
+            left: l, right: r,
+            mask: (layout == .stereoviewCard) ? cardAlphaMask : nil,
+            width: width, height: height
+        )
         let tl = isSwapped ? trimmed.right : trimmed.left
         let tr = isSwapped ? trimmed.left : trimmed.right
+        let tMask = trimmed.mask
         let tw = trimmed.width, th = trimmed.height
 
         switch layout {
@@ -6149,13 +7537,15 @@ final class ViewStereoViewModel: ObservableObject {
             case .jpeg:
                 let card = StereoCardMountRenderer.renderCardRGB(
                     leftRGB: tl, rightRGB: tr, printWidth: tw, printHeight: th,
-                    config: cardConfig, mountContext: mountContext
+                    config: cardConfig, mountContext: mountContext,
+                    printAlphaMask: tMask
                 )
                 return saveRGB(card.rgb, width: card.width, height: card.height, to: url, type: .jpeg)
             case .png:
                 let cardRGBA = StereoCardMountRenderer.renderCardRGBA(
                     leftRGB: tl, rightRGB: tr, printWidth: tw, printHeight: th,
-                    config: cardConfig, mountContext: mountContext, transparentOuterCorners: true
+                    config: cardConfig, mountContext: mountContext, transparentOuterCorners: true,
+                    printAlphaMask: tMask
                 )
                 return saveRGBABuffer(cardRGBA.rgba, width: cardRGBA.width, height: cardRGBA.height, to: url, hasAlpha: true)
             }
@@ -6287,6 +7677,7 @@ final class ViewStereoViewModel: ObservableObject {
                 left: wL, right: wR, width: w, height: h,
                 style: frameStyle, layout: .stereoviewCard, imageFormat: imageFormat, isSwapped: isSwapped,
                 cardConfig: cardConfig, mountContext: mountContext,
+                cardAlphaMask: out?.warpedCardMask,
                 to: outDir.appendingPathComponent("\(base)_Card.\(ext)")
             )
         case .spatialPhoto:
@@ -6476,10 +7867,23 @@ final class ViewStereoViewModel: ObservableObject {
         return (rgb, w, h)
     }
 
-    /// 上下左右の端にある黒縁・片側欠損ライン（アナグリフのシアン/赤ライン）を検出して自動クロップ
+    /// 上下左右の端にある黒縁・片側欠損ライン（アナグリフのシアン/赤ライン）を検出して自動クロップ（同時にアルファマスクもトリム）
     nonisolated private static func trimEdgeColorFringe(
         left: [UInt8],
         right: [UInt8],
+        width: Int,
+        height: Int
+    ) -> ([UInt8], [UInt8], Int, Int) {
+        var nilA: [UInt8]? = nil
+        var nilB: [UInt8]? = nil
+        return trimEdgeColorFringe(left: left, right: right, alphaL: &nilA, alphaR: &nilB, width: width, height: height)
+    }
+
+    nonisolated private static func trimEdgeColorFringe(
+        left: [UInt8],
+        right: [UInt8],
+        alphaL: inout [UInt8]?,
+        alphaR: inout [UInt8]?,
         width: Int,
         height: Int
     ) -> ([UInt8], [UInt8], Int, Int) {
@@ -6575,6 +7979,18 @@ final class ViewStereoViewModel: ObservableObject {
             outL[dstOff..<(dstOff + rowBytes)] = left[srcOff..<(srcOff + rowBytes)]
             outR[dstOff..<(dstOff + rowBytes)] = right[srcOff..<(srcOff + rowBytes)]
         }
+        func cropMask(_ src: [UInt8]?) -> [UInt8]? {
+            guard let src, src.count >= width * height else { return nil }
+            var outM = [UInt8](repeating: 0, count: newW * newH)
+            for y in 0..<newH {
+                let srcOff = (y + top) * width + leftTrim
+                let dstOff = y * newW
+                outM[dstOff..<(dstOff + newW)] = src[srcOff..<(srcOff + newW)]
+            }
+            return outM
+        }
+        alphaL = cropMask(alphaL)
+        alphaR = cropMask(alphaR)
         return (outL, outR, newW, newH)
     }
 
@@ -6593,11 +8009,10 @@ final class ViewStereoViewModel: ObservableObject {
             StereoCardCropper.applyRoundedArchMask(&left, width: width, height: height, topRX: r, topRY: r, botRX: r, botRY: r)
             StereoCardCropper.applyRoundedArchMask(&right, width: width, height: height, topRX: r, topRY: r, botRX: r, botRY: r)
         case .arch:
-            let topRX = Double(width) * 0.28
-            let topRY = Double(height) * 0.24
-            let botR = Double(min(width, height)) * 0.09
-            StereoCardCropper.applyRoundedArchMask(&left, width: width, height: height, topRX: topRX, topRY: topRY, botRX: botR, botRY: botR)
-            StereoCardCropper.applyRoundedArchMask(&right, width: width, height: height, topRX: topRX, topRY: topRY, botRX: botR, botRY: botR)
+            let topRX = Double(width) * 0.26
+            let topRY = Double(height) * 0.14
+            StereoCardCropper.applyRoundedArchMask(&left, width: width, height: height, topRX: topRX, topRY: topRY, botRX: 0.0, botRY: 0.0)
+            StereoCardCropper.applyRoundedArchMask(&right, width: width, height: height, topRX: topRX, topRY: topRY, botRX: 0.0, botRY: 0.0)
         }
     }
 
@@ -6618,7 +8033,55 @@ final class ViewStereoViewModel: ObservableObject {
         return out
     }
 
-    nonisolated private static func downsampleForPreview(_ src: [UInt8], width: Int, height: Int, maxDim: Int) -> ([UInt8], Int, Int) {
+    nonisolated private static func cropHorizontalSlice1Ch(
+        _ src: [UInt8],
+        srcW: Int,
+        height: Int,
+        srcX: Int,
+        cropW: Int
+    ) -> [UInt8] {
+        var out = [UInt8](repeating: 0, count: cropW * height)
+        for y in 0..<height {
+            let sOff = y * srcW + srcX
+            let dOff = y * cropW
+            out[dOff..<(dOff + cropW)] = src[sOff..<(sOff + cropW)]
+        }
+        return out
+    }
+
+    nonisolated private static func downsampleMaskForPreview(_ src: [UInt8], srcW: Int, srcH: Int, dstW: Int, dstH: Int) -> [UInt8] {
+        guard dstW > 0, dstH > 0, srcW > 0, srcH > 0, src.count >= srcW * srcH else { return [] }
+        if srcW == dstW && srcH == dstH { return Array(src.prefix(dstW * dstH)) }
+        var dst = [UInt8](repeating: 0, count: dstW * dstH)
+        let scaleX = Float(srcW) / Float(dstW), scaleY = Float(srcH) / Float(dstH)
+        src.withUnsafeBufferPointer { sPtr in
+            dst.withUnsafeMutableBufferPointer { dPtr in
+                guard let s = sPtr.baseAddress, let d = dPtr.baseAddress else { return }
+                for y in 0..<dstH {
+                    let fy = max(0.0, min(Float(srcH - 1), (Float(y) + 0.5) * scaleY - 0.5))
+                    let y0 = Int(fy), y1 = min(y0 + 1, srcH - 1)
+                    let ay = fy - Float(y0)
+                    let row0 = y0 * srcW
+                    let row1 = y1 * srcW
+                    let dRow = y * dstW
+                    for x in 0..<dstW {
+                        let fx = max(0.0, min(Float(srcW - 1), (Float(x) + 0.5) * scaleX - 0.5))
+                        let x0 = Int(fx), x1 = min(x0 + 1, srcW - 1)
+                        let ax = fx - Float(x0)
+                        let v00 = Float(s[row0 + x0])
+                        let v10 = Float(s[row0 + x1])
+                        let v01 = Float(s[row1 + x0])
+                        let v11 = Float(s[row1 + x1])
+                        let val = (v00 * (1 - ax) + v10 * ax) * (1 - ay) + (v01 * (1 - ax) + v11 * ax) * ay
+                        d[dRow + x] = UInt8(min(255, max(0, Int(val + 0.5))))
+                    }
+                }
+            }
+        }
+        return dst
+    }
+
+    nonisolated static func downsampleForPreview(_ src: [UInt8], width: Int, height: Int, maxDim: Int) -> ([UInt8], Int, Int) {
         let longEdge = max(width, height)
         guard longEdge > maxDim, width > 0, height > 0 else {
             return (src, width, height)
@@ -6859,10 +8322,15 @@ final class ViewStereoViewModel: ObservableObject {
         isSwapped: Bool,
         transparentCorners: Bool,
         cardConfig: StereoCardMountConfig = StereoCardMountConfig(),
-        mountContext: StereoCardSegmenter.OriginalCardMountContext? = nil
+        mountContext: StereoCardSegmenter.OriginalCardMountContext? = nil,
+        cardAlphaMask: [UInt8]? = nil
     ) -> NSImage? {
-        let tl = isSwapped ? right : left
-        let tr = isSwapped ? left : right
+        var tl = isSwapped ? right : left
+        var tr = isSwapped ? left : right
+        if let mask = cardAlphaMask, mask.count >= width * height {
+            StereoCardSegmenter.applyAlphaMaskBlack(&tl, alpha: mask, width: width, height: height)
+            StereoCardSegmenter.applyAlphaMaskBlack(&tr, alpha: mask, width: width, height: height)
+        }
 
         switch mode {
         case .twoD:
@@ -6914,7 +8382,8 @@ final class ViewStereoViewModel: ObservableObject {
                 printHeight: height,
                 config: cardConfig,
                 mountContext: mountContext,
-                transparentOuterCorners: true
+                transparentOuterCorners: true,
+                printAlphaMask: cardAlphaMask
             )
             return makeNSImageFromRGBA(card.rgba, width: card.width, height: card.height, hasAlpha: true)
         }
@@ -7162,9 +8631,46 @@ final class ViewStereoViewModel: ObservableObject {
     nonisolated private static func trimToTightBoundingBox(
         left: [UInt8],
         right: [UInt8],
+        mask: [UInt8]? = nil,
         width: Int,
         height: Int
-    ) -> (left: [UInt8], right: [UInt8], width: Int, height: Int) {
+    ) -> (left: [UInt8], right: [UInt8], mask: [UInt8]?, width: Int, height: Int) {
+        if let mask, mask.count >= width * height {
+            var minX = width, maxX = -1, minY = height, maxY = -1
+            for y in 0..<height {
+                let row = y * width
+                for x in 0..<width where mask[row + x] >= 16 {
+                    if x < minX { minX = x }
+                    if x > maxX { maxX = x }
+                    if y < minY { minY = y }
+                    if y > maxY { maxY = y }
+                }
+            }
+            if maxX > minX + 16, maxY > minY + 16 {
+                let tw = maxX - minX + 1
+                let th = maxY - minY + 1
+                if tw >= width && th >= height {
+                    return (left, right, mask, width, height)
+                }
+                var croppedL = [UInt8](repeating: 0, count: tw * th * 3)
+                var croppedR = [UInt8](repeating: 0, count: tw * th * 3)
+                var croppedM = [UInt8](repeating: 0, count: tw * th)
+                let rowBytes = tw * 3
+                for dy in 0..<th {
+                    let sy = minY + dy
+                    let sRGB = (sy * width + minX) * 3
+                    let dRGB = dy * rowBytes
+                    croppedL[dRGB..<(dRGB + rowBytes)] = left[sRGB..<(sRGB + rowBytes)]
+                    croppedR[dRGB..<(dRGB + rowBytes)] = right[sRGB..<(sRGB + rowBytes)]
+                    let sM = sy * width + minX
+                    let dM = dy * tw
+                    croppedM[dM..<(dM + tw)] = mask[sM..<(sM + tw)]
+                }
+                return (croppedL, croppedR, croppedM, tw, th)
+            }
+            return (left, right, mask, width, height)
+        }
+
         let threshold: UInt8 = 24
 
         func findBBox(img: [UInt8]) -> (minX: Int, maxX: Int, minY: Int, maxY: Int)? {
@@ -7183,8 +8689,28 @@ final class ViewStereoViewModel: ObservableObject {
             }
             if minX > maxX || minY > maxY { return nil }
 
-            // 端の1pxがリサンプリングで暗くなったフリンジ（黒ライン）や台紙漏れを除去するため、左右および上下端をインセット
-            if minX + 2 < maxX && minY + 2 < maxY {
+            // 端の1pxがリサンプリングで暗くなったフリンジ（黒ライン）を除去するためインセットするが、
+            // 既に全4辺が黒フリンジのないクリーンな矩形であれば不要な1px削りを行わない
+            let touchesAllSides = (minX == 0 && maxX == width - 1 && minY == 0 && maxY == height - 1)
+            let hasCleanEdges: Bool = {
+                guard touchesAllSides else { return false }
+                func edgeAvgLuma(isRow: Bool, pos: Int) -> Int {
+                    let limit = isRow ? width : height
+                    let step = max(1, limit / 48)
+                    var sum = 0, cnt = 0
+                    var k = 0
+                    while k < limit {
+                        let i = isRow ? (pos * width + k) * 3 : (k * width + pos) * 3
+                        sum += (Int(img[i]) + Int(img[i + 1]) + Int(img[i + 2])) / 3
+                        cnt += 1
+                        k += step
+                    }
+                    return cnt > 0 ? sum / cnt : 0
+                }
+                return min(min(edgeAvgLuma(isRow: true, pos: 0), edgeAvgLuma(isRow: true, pos: height - 1)),
+                           min(edgeAvgLuma(isRow: false, pos: 0), edgeAvgLuma(isRow: false, pos: width - 1))) >= 32
+            }()
+            if !hasCleanEdges && minX + 2 < maxX && minY + 2 < maxY {
                 minX += 1
                 maxX -= 1
                 minY += 1
@@ -7197,7 +8723,7 @@ final class ViewStereoViewModel: ObservableObject {
         let bboxR = findBBox(img: right)
 
         guard let bL = bboxL, let bR = bboxR else {
-            return (left, right, width, height)
+            return (left, right, mask, width, height)
         }
 
         // アナグリフ等で片側チャンネルだけが光って横線になるのを防ぐため、両眼共通の有効範囲を採用
@@ -7211,7 +8737,7 @@ final class ViewStereoViewModel: ObservableObject {
 
         // If practically full frame, keep original
         if targetW >= width && targetH >= height {
-            return (left, right, width, height)
+            return (left, right, mask, width, height)
         }
 
         let startX_L = max(0, min(width - targetW, bL.minX - (targetW - wL) / 2))
@@ -7247,7 +8773,7 @@ final class ViewStereoViewModel: ObservableObject {
             }
         }
 
-        return (croppedL, croppedR, targetW, targetH)
+        return (croppedL, croppedR, nil, targetW, targetH)
     }
 
     @discardableResult
@@ -7360,5 +8886,99 @@ final class ViewStereoViewModel: ObservableObject {
         } catch {
             return false
         }
+    }
+
+    // MARK: - CLI Window Evaluation Runner (--eval-window-dir)
+
+    nonisolated static func runWindowEvalFromCLI(arguments: [String]) -> Int32 {
+        guard let idx = arguments.firstIndex(of: "--eval-window-dir"), idx + 2 < arguments.count else {
+            fputs("Usage: ViewStereo --eval-window-dir <inputDir> <outputDir>\n", stderr)
+            return 1
+        }
+        let inputDir = URL(fileURLWithPath: arguments[idx + 1], isDirectory: true)
+        let outputDir = URL(fileURLWithPath: arguments[idx + 2], isDirectory: true)
+        try? FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
+
+        var items = WorkspaceScanner.collectBatchItems(
+            from: [],
+            rootFolder: inputDir,
+            pairingMode: .auto,
+            includeSubfolders: false,
+            customOutputFolder: outputDir
+        ).filter { !$0.isVideo }
+        if let sIdx = arguments.firstIndex(of: "--stems"), sIdx + 1 < arguments.count {
+            let filters = arguments[sIdx + 1].split(separator: ",").map { String($0) }
+            items = items.filter { item in filters.contains(where: { item.baseName.contains($0) }) }
+        }
+
+        guard let renderer = try? MetalWarpRenderer() else {
+            fputs("[WindowEval] ERROR: MetalWarpRenderer unavailable\n", stderr)
+            return 1
+        }
+
+        print("[WindowEval] Processing \(items.count) items -> \(outputDir.path)...")
+        fflush(stdout)
+
+        var okCnt = 0, wvRiskCnt = 0, fwReqCnt = 0, failCnt = 0
+        var sumMs = 0.0
+        for (i, item) in items.enumerated() {
+            autoreleasepool {
+                guard let loaded = loadBatchPair(item: item, cardMode: .keepArchBlack, useCoreML: true, interpretation: .auto) else {
+                    failCnt += 1
+                    return
+                }
+                if loaded.is2DPhoto {
+                    failCnt += 1
+                    return
+                }
+                let res = executeAlignmentPipeline(
+                    lRGB: loaded.left,
+                    rRGB: loaded.right,
+                    width: loaded.width,
+                    height: loaded.height,
+                    useMask: true,
+                    useSaliency: true,
+                    keepAR: true,
+                    colorMode: .left,
+                    removeNoise: true,
+                    preserveArch: loaded.preservedArch,
+                    isCardSource: loaded.preservedArch || (loaded.mountContext != nil),
+                    mountContext: loaded.mountContext,
+                    renderer: renderer
+                )
+                switch res {
+                case .failure:
+                    failCnt += 1
+                case .success(let out):
+                    sumMs += out.elapsedMs
+                    if out.windowDecision.hasWindowViolationRisk { wvRiskCnt += 1 }
+                    if out.windowDecision.requiresFloatingWindow { fwReqCnt += 1 }
+                    let saved = saveBatchOutput(
+                        out: out,
+                        item: item,
+                        srcWidth: loaded.width,
+                        srcHeight: loaded.height,
+                        outDir: outputDir,
+                        layout: .grayAnaglyph,
+                        imageFormat: .jpeg,
+                        isSwapped: false,
+                        frameStyle: .off,
+                        cardConfig: StereoCardMountConfig(),
+                        mountContext: loaded.mountContext,
+                        restorationOptions: VintageRestorationOptions(),
+                        detailOptions: StereoDetailRestorationOptions(deblurStrength: 0.0, textureProtection: 0.60),
+                        colorOptions: StereoColorizationOptions(),
+                        saveReport: false
+                    )
+                    if saved { okCnt += 1 } else { failCnt += 1 }
+                    if (i + 1) % 30 == 0 || i + 1 == items.count {
+                        print(String(format: "[WindowEval] %d/%d done (ok=%d fail=%d wvRisk=%d fwReq=%d avgAlign=%.1fms)",
+                                     i + 1, items.count, okCnt, failCnt, wvRiskCnt, fwReqCnt, sumMs / Double(max(1, okCnt))))
+                        fflush(stdout)
+                    }
+                }
+            }
+        }
+        return 0
     }
 }

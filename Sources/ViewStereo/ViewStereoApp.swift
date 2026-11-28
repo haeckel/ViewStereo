@@ -9,7 +9,7 @@ extension AboutBrandInfo {
         badgeLetter: "V",
         subtitleKey: nil,
         engineTagline: "19th Century Stereoview Restoration & Intelligent Stereo Window Studio",
-        fallbackVersion: "0.2.7",
+        fallbackVersion: "0.2.8",
         fallbackBuild: "1",
         websiteURL: URL(string: "https://viewstereo.p-media.jp/"),
         websiteLabel: "viewstereo.p-media.jp",
@@ -34,6 +34,18 @@ struct ViewStereoApp: App {
     @Environment(\.openWindow) private var openWindow
 
     init() {
+        if CommandLine.arguments.contains("--export-draft-dataset") {
+            let code = StereoCardBatchDatasetBuilder.runFromCLI(arguments: CommandLine.arguments)
+            exit(code)
+        }
+        if CommandLine.arguments.contains("--eval-v3-gates") {
+            let code = StereoCardSegV3Benchmark.runFromCLI(arguments: CommandLine.arguments)
+            exit(code)
+        }
+        if CommandLine.arguments.contains("--eval-window-dir") {
+            let code = ViewStereoViewModel.runWindowEvalFromCLI(arguments: CommandLine.arguments)
+            exit(code)
+        }
         StudioUpdateManager.shared.configure(brand: .viewStereo)
     }
 
@@ -122,11 +134,23 @@ struct ViewStereoApp: App {
                 .keyboardShortcut("e", modifiers: .command)
                 .disabled(!vm.hasLoadedImages || vm.isProcessing || vm.isBatchRunning)
 
-                Button("Save Adjustments (.vstereo)") {
-                    vm.saveSidecarForCurrentImage()
+                Button("Save Adjustments") {
+                    vm.saveWorkspaceFolderSettings()
                 }
                 .keyboardShortcut("s", modifiers: .command)
-                .disabled(!vm.hasLoadedImages || vm.isVideoLoaded || vm.isProcessing || vm.isBatchRunning)
+                .disabled((!vm.hasLoadedImages && vm.batchInputFolder == nil) || vm.isBatchRunning)
+
+                Button("Import and Merge .vstereo...") {
+                    vm.openImportSidecarPanel()
+                }
+
+                Button("Open Stereo Workbench...") {
+                    openWindow(id: "workbench")
+                }
+                .keyboardShortcut("m", modifiers: [.command, .option])
+                .disabled(!vm.hasLoadedImages || vm.isProcessing)
+                .keyboardShortcut("i", modifiers: [.command, .shift])
+                .disabled(vm.isBatchRunning)
 
                 Divider()
 
@@ -257,6 +281,12 @@ struct ViewStereoApp: App {
         Settings {
             AppSettingsView()
         }
+
+        // 5. 統合編集ワークベンチウィンドウ
+        Window("Stereo Workbench", id: "workbench") {
+            StereoCardWorkbenchView(vm: vm)
+        }
+        .defaultSize(width: 1440, height: 900)
     }
 }
 

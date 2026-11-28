@@ -31,6 +31,16 @@
 		SW0100240000000000000001 /* ViewStereoVideoProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = SW0200240000000000000001 /* ViewStereoVideoProcessor.swift */; };
 		SW0100250000000000000001 /* ViewStereoMetalDIBR.swift in Sources */ = {isa = PBXBuildFile; fileRef = SW0200250000000000000001 /* ViewStereoMetalDIBR.swift */; };
 		SW0100260000000000000001 /* StereoCardMountAnalyzer.swift in Sources */ = {isa = PBXBuildFile; fileRef = SW0200260000000000000001 /* StereoCardMountAnalyzer.swift */; };
+		SW0100310000000000000001 /* StereoCardBatchDatasetBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = SW0200310000000000000001 /* StereoCardBatchDatasetBuilder.swift */; };
+		SW0100320000000000000001 /* StereoCardDatasetExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = SW0200320000000000000001 /* StereoCardDatasetExporter.swift */; };
+		SW0100330000000000000001 /* StereoCardInteractiveSAM.swift in Sources */ = {isa = PBXBuildFile; fileRef = SW0200330000000000000001 /* StereoCardInteractiveSAM.swift */; };
+		SW0100340000000000000001 /* StereoCardMaskRefiner.swift in Sources */ = {isa = PBXBuildFile; fileRef = SW0200340000000000000001 /* StereoCardMaskRefiner.swift */; };
+		SW0100350000000000000001 /* StereoCardSegV3Gate.swift in Sources */ = {isa = PBXBuildFile; fileRef = SW0200350000000000000001 /* StereoCardSegV3Gate.swift */; };
+		SW0100360000000000000001 /* StereoWorkbenchSaveQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = SW0200360000000000000001 /* StereoWorkbenchSaveQueue.swift */; };
+		SW0100370000000000000001 /* StereoWorkbenchSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = SW0200370000000000000001 /* StereoWorkbenchSession.swift */; };
+		SW0100380000000000000001 /* WorkspaceFolderSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = SW0200380000000000000001 /* WorkspaceFolderSettings.swift */; };
+		SW0100410000000000000001 /* StereoCardMaskEditorSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = SW0200410000000000000001 /* StereoCardMaskEditorSheet.swift */; };
+		SW0100420000000000000001 /* StereoCardWorkbenchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SW0200420000000000000001 /* StereoCardWorkbenchView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -58,6 +68,16 @@
 		SW0200240000000000000001 /* ViewStereoVideoProcessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewStereoVideoProcessor.swift; sourceTree = "<group>"; };
 		SW0200250000000000000001 /* ViewStereoMetalDIBR.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewStereoMetalDIBR.swift; sourceTree = "<group>"; };
 		SW0200260000000000000001 /* StereoCardMountAnalyzer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StereoCardMountAnalyzer.swift; sourceTree = "<group>"; };
+		SW0200310000000000000001 /* StereoCardBatchDatasetBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StereoCardBatchDatasetBuilder.swift; sourceTree = "<group>"; };
+		SW0200320000000000000001 /* StereoCardDatasetExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StereoCardDatasetExporter.swift; sourceTree = "<group>"; };
+		SW0200330000000000000001 /* StereoCardInteractiveSAM.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StereoCardInteractiveSAM.swift; sourceTree = "<group>"; };
+		SW0200340000000000000001 /* StereoCardMaskRefiner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StereoCardMaskRefiner.swift; sourceTree = "<group>"; };
+		SW0200350000000000000001 /* StereoCardSegV3Gate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StereoCardSegV3Gate.swift; sourceTree = "<group>"; };
+		SW0200360000000000000001 /* StereoWorkbenchSaveQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StereoWorkbenchSaveQueue.swift; sourceTree = "<group>"; };
+		SW0200370000000000000001 /* StereoWorkbenchSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StereoWorkbenchSession.swift; sourceTree = "<group>"; };
+		SW0200380000000000000001 /* WorkspaceFolderSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceFolderSettings.swift; sourceTree = "<group>"; };
+		SW0200410000000000000001 /* StereoCardMaskEditorSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StereoCardMaskEditorSheet.swift; sourceTree = "<group>"; };
+		SW0200420000000000000001 /* StereoCardWorkbenchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StereoCardWorkbenchView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -118,6 +138,14 @@
 				SW0200240000000000000001 /* ViewStereoVideoProcessor.swift */,
 				SW0200250000000000000001 /* ViewStereoMetalDIBR.swift */,
 				SW0200260000000000000001 /* StereoCardMountAnalyzer.swift */,
+				SW0200310000000000000001 /* StereoCardBatchDatasetBuilder.swift */,
+				SW0200320000000000000001 /* StereoCardDatasetExporter.swift */,
+				SW0200330000000000000001 /* StereoCardInteractiveSAM.swift */,
+				SW0200340000000000000001 /* StereoCardMaskRefiner.swift */,
+				SW0200350000000000000001 /* StereoCardSegV3Gate.swift */,
+				SW0200360000000000000001 /* StereoWorkbenchSaveQueue.swift */,
+				SW0200370000000000000001 /* StereoWorkbenchSession.swift */,
+				SW0200380000000000000001 /* WorkspaceFolderSettings.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -128,6 +156,8 @@
 				SW0200030000000000000001 /* ContentView.swift */,
 				SW0200220000000000000001 /* WorkspaceFileBrowserView.swift */,
 				SW0200230000000000000001 /* WorkspaceOutlineView.swift */,
+				SW0200410000000000000001 /* StereoCardMaskEditorSheet.swift */,
+				SW0200420000000000000001 /* StereoCardWorkbenchView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -256,6 +286,16 @@
 				SW0100240000000000000001 /* ViewStereoVideoProcessor.swift in Sources */,
 				SW0100250000000000000001 /* ViewStereoMetalDIBR.swift in Sources */,
 				SW0100260000000000000001 /* StereoCardMountAnalyzer.swift in Sources */,
+				SW0100310000000000000001 /* StereoCardBatchDatasetBuilder.swift in Sources */,
+				SW0100320000000000000001 /* StereoCardDatasetExporter.swift in Sources */,
+				SW0100330000000000000001 /* StereoCardInteractiveSAM.swift in Sources */,
+				SW0100340000000000000001 /* StereoCardMaskRefiner.swift in Sources */,
+				SW0100350000000000000001 /* StereoCardSegV3Gate.swift in Sources */,
+				SW0100360000000000000001 /* StereoWorkbenchSaveQueue.swift in Sources */,
+				SW0100370000000000000001 /* StereoWorkbenchSession.swift in Sources */,
+				SW0100380000000000000001 /* WorkspaceFolderSettings.swift in Sources */,
+				SW0100410000000000000001 /* StereoCardMaskEditorSheet.swift in Sources */,
+				SW0100420000000000000001 /* StereoCardWorkbenchView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -317,7 +357,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.2.7;
+				MARKETING_VERSION = 0.2.8;
 				PRODUCT_BUNDLE_IDENTIFIER = jp.p-media.ViewStereo;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -341,7 +381,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.2.7;
+				MARKETING_VERSION = 0.2.8;
 				PRODUCT_BUNDLE_IDENTIFIER = jp.p-media.ViewStereo;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

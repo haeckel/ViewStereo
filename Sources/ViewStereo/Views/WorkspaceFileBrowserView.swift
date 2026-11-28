@@ -103,6 +103,28 @@ private struct BrowserHeaderView: View {
                 .customTooltip(String(localized: "Open Workspace Folder...") + " (⇧⌘O)")
 
                 Button {
+                    vm.saveWorkspaceFolderSettings()
+                } label: {
+                    Image(systemName: vm.hasUnsavedFolderSettings ? "square.and.arrow.down.fill" : "square.and.arrow.down")
+                        .font(.system(size: 12))
+                }
+                .buttonStyle(.borderless)
+                .foregroundColor(vm.hasUnsavedFolderSettings ? .brightAmber : .secondary)
+                .disabled(store.rootFolder == nil || store.isVirtualSelection || vm.isBatchRunning)
+                .customTooltip(String(localized: "Save Adjustments") + " (⌘S) · \(vm.folderSettingsMap.count)")
+
+                Button {
+                    vm.openImportSidecarPanel()
+                } label: {
+                    Image(systemName: "square.and.arrow.down.on.square")
+                        .font(.system(size: 11.5))
+                }
+                .buttonStyle(.borderless)
+                .foregroundColor(.secondary)
+                .disabled(store.rootFolder == nil || vm.isBatchRunning)
+                .customTooltip(String(localized: "Import and Merge .vstereo...") + " (⇧⌘I)")
+
+                Button {
                     WorkspaceThumbnailCache.shared.invalidateAll()
                     vm.refreshWorkspaceBrowser()
                 } label: {
@@ -296,6 +318,7 @@ private struct BrowserTreeContainerView: View {
                 isBatchRunning: { vm.isBatchRunning },
                 onOpenItem: { item in
                     vm.openBrowserItem(item)
+                    vm.onOpenWorkbenchRequested?()
                 },
                 onOpenForce2D: { url in
                     vm.loadSingleSBSImage(url: url, interpretationOverride: .force2D)

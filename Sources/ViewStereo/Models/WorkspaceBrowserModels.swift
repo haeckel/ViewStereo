@@ -506,6 +506,8 @@ final class WorkspaceBrowserStore: ObservableObject {
             }
         }
     }
+    /// 手動調整済みの相対キー一覧（ViewStereo_Settings.json に保存されているアイテム）
+    @Published var adjustedItemKeys: Set<String> = []
     /// 展開中フォルダ ID
     @Published var expandedFolderIDs: Set<String> = []
 
@@ -728,6 +730,13 @@ final class WorkspaceBrowserStore: ObservableObject {
         return childrenCache[path] ?? []
     }
 
+    /// ノードが手動調整済み（ViewStereo_Settings.json に設定が存在する）かどうかを判定する
+    func isNodeAdjusted(_ node: WorkspaceBrowserNode) -> Bool {
+        guard !node.isDirectory, let root = rootFolder else { return false }
+        guard let key = WorkspaceFolderSettingsStore.relativeKey(for: node.url, in: root) else { return false }
+        return adjustedItemKeys.contains(key)
+    }
+
     private func filterNodes(_ nodes: [WorkspaceBrowserNode], query: String, warnOnly: Bool) -> [WorkspaceBrowserNode] {
         if query.isEmpty && !warnOnly {
             return nodes
@@ -862,5 +871,24 @@ final class WorkspaceBrowserStore: ObservableObject {
             includeSubfolders: includeSubfolders,
             customOutputFolder: currentOutputFolder
         )
+    }
+
+    /// ツリー全体からバッチ／編集対象の全アイテムをフラットに抽出する
+    func allFlattenedItems() -> [StereoBatchItem] {
+        var items: [StereoBatchItem] = []
+        var seenIDs = Set<String>()
+        func walk(_ nodes: [WorkspaceBrowserNode]) {
+            for n in nodes {
+                if let it = n.item, !seenIDs.contains(it.id) {
+                    seenIDs.insert(it.id)
+                    items.append(it)
+                }
+                if n.isDirectory {
+                    walk(childrenCache[n.id] ?? [])
+                }
+            }
+        }
+        walk(rootNodes())
+        return items
     }
 }

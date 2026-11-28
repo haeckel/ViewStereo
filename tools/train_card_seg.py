@@ -1,37 +1,317 @@
 #!/usr/bin/env python3
 """
-StereoCardSeg (v2): 19世紀ステレオカードの台紙 vs 写真窓 (2クラス) を
-セグメンテーションする軽量 CoordConv U-Net の合成データ学習 & Core ML (.mlpackage) 変換スクリプト。
+StereoCardSeg (v3): Phase 2-4
+事前学習済み timm バックボーン + CoordConv U-Net++ による 3クラスセグメンテーション
+(0: 台紙/背景, 1: 左写真, 2: 右写真) 学習 & Core ML (.mlpackage, FP16) 変換スクリプト。
+
+特徴:
+- バックボーンの default_cfg["mean"] / ["std"] をラッパー forward() 内に内蔵し、
+  Core ML 入力は ImageType(scale=1/255.0, bias=[0,0,0]) のみ
+- 知覚ハッシュ (16x8 dHash) + ベース名正規化によるリーク完全防止 Group Split (split_manifest.json)
+- 水平反転 (HorizontalFlip) 時のクラス 1 <-> 2 厳密スワップ
+- 赤スタンプ合成拡張 (正解マスクはクラス 1/2 を維持)
+- PyTorch vs Core ML FP16 一致検証 + 4 ComputeUnits レイテンシ計測 (--smoke-test 対応)
 """
 
 import argparse
 import glob
+import json
 import os
 import random
+import re
 import time
 import warnings
+from collections import defaultdict
 
 import coremltools as ct
 import numpy as np
+import timm
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from PIL import Image, ImageDraw, ImageFilter
-from torch.utils.data import DataLoader, TensorDataset
+from PIL import Image, ImageDraw, ImageEnhance, ImageFilter
+from torch.utils.data import DataLoader, Dataset
 
 warnings.filterwarnings("ignore")
 
 IMG_W = 512
 IMG_H = 256
+NUM_CLASSES = 3
 
 
 # ==============================================================================
-# 1. 軽量 CoordConv U-Net モデル (2クラス: 0=台紙/背景, 1=写真窓)
+# 1. 知覚ハッシュ + ベース名正規化によるリーク防止 Group Split
 # ==============================================================================
-class ConvBlock(nn.Module):
+def compute_dhash_16x8(img_path: str) -> np.ndarray:
+    with Image.open(img_path) as im:
+        gray = im.convert("L").resize((17, 8), Image.Resampling.BILINEAR)
+        arr = np.asarray(gray, dtype=np.int16)
+        return (arr[:, 1:] > arr[:, :-1]).reshape(-1)
+
+
+def normalize_base_name(stem: str) -> str:
+    s = stem.strip()
+    m_flickr = re.match(r"^(\d{9,12})_[0-9a-f]{8,}_[obh](?:_Card)?$", s, flags=re.IGNORECASE)
+    if m_flickr:
+        return f"flickr_{m_flickr.group(1)}"
+    prev = None
+    while prev != s:
+        prev = s
+        s = re.sub(r"\s*\(\d+\)$", "", s)
+        s = re.sub(r"_Card$", "", s, flags=re.IGNORECASE)
+        s = re.sub(r"=color$", "", s, flags=re.IGNORECASE)
+        s = re.sub(r"(-scaled|-\d+x\d+|_\d+x\d+)$", "", s, flags=re.IGNORECASE)
+        s = re.sub(r"_[obh]$", "", s, flags=re.IGNORECASE)
+    return s.lower()
+
+
+def collect_dataset_records(dataset_root: str):
+    """
+    dataset_root 直下の images/*.png と masks/*.png のみを対象にする
+    (_excluded_duplicates, _review_top40 等の _ 始まりディレクトリは無視)
+    """
+    images_dir = os.path.join(dataset_root, "images")
+    masks_dir = os.path.join(dataset_root, "masks")
+    meta_dir = os.path.join(dataset_root, "metadata")
+
+    img_paths = sorted(
+        p for p in glob.glob(os.path.join(images_dir, "*.png"))
+        if not os.path.basename(p).startswith(".")
+    )
+    records = []
+    for ip in img_paths:
+        stem = os.path.splitext(os.path.basename(ip))[0]
+        mp = os.path.join(masks_dir, f"{stem}.png")
+        if not os.path.exists(mp):
+            continue
+        meta_path = os.path.join(meta_dir, f"{stem}.json")
+        was_manual = False
+        if os.path.exists(meta_path):
+            try:
+                with open(meta_path, "r", encoding="utf-8") as f:
+                    was_manual = bool(json.load(f).get("wasManuallyEdited", False))
+            except Exception:
+                pass
+        records.append({
+            "stem": stem,
+            "image_path": ip,
+            "mask_path": mp,
+            "dhash": compute_dhash_16x8(ip),
+            "norm_base": normalize_base_name(stem),
+            "was_manual": was_manual,
+        })
+    return records
+
+
+def build_leak_free_split(records, val_ratio: float = 0.15, seed: int = 42, manifest_out: str = None):
+    n = len(records)
+    parent = list(range(n))
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[rb] = ra
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            dist = int(np.sum(records[i]["dhash"] != records[j]["dhash"]))
+            same_base = (records[i]["norm_base"] == records[j]["norm_base"])
+            if dist <= 16 or (same_base and dist <= 45):
+                union(i, j)
+
+    groups_map = defaultdict(list)
+    for i in range(n):
+        groups_map[find(i)].append(i)
+
+    group_list = list(groups_map.values())
+    rng = random.Random(seed)
+    rng.shuffle(group_list)
+
+    target_val = max(1, int(round(n * val_ratio))) if n >= 5 else 0
+    val_indices = []
+    train_indices = []
+
+    for grp in group_list:
+        if len(val_indices) < target_val:
+            val_indices.extend(grp)
+        else:
+            train_indices.extend(grp)
+
+    train_groups = {find(i) for i in train_indices}
+    val_groups = {find(i) for i in val_indices}
+    assert train_groups.isdisjoint(val_groups), "Data leak detected between train and val groups!"
+
+    train_records = [records[i] for i in sorted(train_indices)]
+    val_records = [records[i] for i in sorted(val_indices)]
+
+    if manifest_out:
+        multi_groups = [
+            [records[idx]["stem"] for idx in grp]
+            for grp in group_list if len(grp) > 1
+        ]
+        manifest = {
+            "seed": seed,
+            "val_ratio": val_ratio,
+            "total_samples": n,
+            "total_groups": len(group_list),
+            "train_count": len(train_records),
+            "val_count": len(val_records),
+            "multi_member_groups": multi_groups,
+            "train_stems": [r["stem"] for r in train_records],
+            "val_stems": [r["stem"] for r in val_records],
+        }
+        os.makedirs(os.path.dirname(os.path.abspath(manifest_out)), exist_ok=True)
+        with open(manifest_out, "w", encoding="utf-8") as f:
+            json.dump(manifest, f, ensure_ascii=False, indent=2)
+
+    return train_records, val_records
+
+
+# ==============================================================================
+# 2. 実戦的データ拡張（水平反転 1<->2 スワップ + 赤スタンプ合成 + 劣化）
+# ==============================================================================
+def horizontal_flip_with_lr_swap(img_np: np.ndarray, mask_np: np.ndarray):
+    """画像を左右反転し、マスクのクラス 1 (左写真) <-> クラス 2 (右写真) を厳密にスワップする"""
+    flipped_img = np.ascontiguousarray(img_np[:, ::-1, :])
+    flipped_mask = mask_np[:, ::-1]
+    swapped_mask = np.where(
+        flipped_mask == 1, 2,
+        np.where(flipped_mask == 2, 1, 0)
+    ).astype(np.uint8)
+    return flipped_img, swapped_mask
+
+
+def synthesize_red_watermark(img_pil: Image.Image, mask_np: np.ndarray, rng: random.Random) -> Image.Image:
+    """写真領域（クラス1または2）上に回転付き赤スタンプを合成する（正解マスクはクラス1/2を維持）"""
+    w, h = img_pil.size
+    overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+
+    target_cls = 2 if rng.random() < 0.7 else 1
+    ys, xs = np.where(mask_np == target_cls)
+    if len(xs) < 20:
+        return img_pil
+
+    cx = int(np.percentile(xs, rng.uniform(55, 92)))
+    cy = int(np.percentile(ys, rng.uniform(60, 92)))
+    rad = rng.randint(max(12, w // 28), max(18, w // 14))
+    alpha = rng.randint(95, 175)
+    red_col = (rng.randint(165, 225), rng.randint(25, 65), rng.randint(25, 65), alpha)
+
+    stamp_sz = max(48, rad * 3)
+    sc = stamp_sz // 2
+    stamp = Image.new("RGBA", (stamp_sz, stamp_sz), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(stamp)
+
+    draw.ellipse([sc - rad, sc - rad, sc + rad, sc + rad], outline=red_col, width=max(2, rad // 10))
+    inner_r = int(rad * 0.74)
+    draw.ellipse([sc - inner_r, sc - inner_r, sc + inner_r, sc + inner_r], outline=red_col, width=max(1, rad // 14))
+
+    band_h = max(8, rad // 3)
+    draw.rectangle([sc - rad - 4, sc - band_h // 2, sc + rad + 4, sc + band_h // 2], fill=(220, 45, 45, min(200, alpha + 20)))
+    draw.text((sc - rad + 4, sc - band_h // 2 + 1), "PROTECTED", fill=(255, 235, 235, min(230, alpha + 35)))
+
+    angle = rng.uniform(-35.0, 35.0)
+    stamp = stamp.rotate(angle, resample=Image.Resampling.BILINEAR, expand=True)
+    overlay.paste(stamp, (cx - stamp.width // 2, cy - stamp.height // 2), stamp)
+
+    if rng.random() < 0.5:
+        overlay = overlay.filter(ImageFilter.GaussianBlur(radius=rng.uniform(0.3, 0.8)))
+
+    base = img_pil.convert("RGBA")
+    comp = Image.alpha_composite(base, overlay)
+    return comp.convert("RGB")
+
+
+class StereoCard3ClassDataset(Dataset):
+    def __init__(self, records, augment: bool = True, seed: int = 42):
+        self.records = records
+        self.augment = augment
+        self.rng = random.Random(seed)
+
+    def __len__(self):
+        return len(self.records)
+
+    def __getitem__(self, idx):
+        rec = self.records[idx]
+        with Image.open(rec["image_path"]) as im_raw, Image.open(rec["mask_path"]) as mk_raw:
+            im = im_raw.convert("RGB")
+            mk = mk_raw.convert("L")
+
+            if self.augment:
+                # 1. 極薄余白クロップ（外縁 0..3% トリム）
+                if self.rng.random() < 0.45:
+                    w0, h0 = im.size
+                    c_l = int(w0 * self.rng.uniform(0.0, 0.025))
+                    c_r = int(w0 * self.rng.uniform(0.0, 0.025))
+                    c_t = int(h0 * self.rng.uniform(0.0, 0.025))
+                    c_b = int(h0 * self.rng.uniform(0.0, 0.025))
+                    if w0 - c_l - c_r >= 64 and h0 - c_t - c_b >= 32:
+                        im = im.crop((c_l, c_t, w0 - c_r, h0 - c_b))
+                        mk = mk.crop((c_l, c_t, w0 - c_r, h0 - c_b))
+
+                # 2. 微少回転 (±2.5度)
+                if self.rng.random() < 0.40:
+                    ang = self.rng.uniform(-2.5, 2.5)
+                    bg_sample = tuple(int(v) for v in np.asarray(im)[0, 0])
+                    im = im.rotate(ang, resample=Image.Resampling.BILINEAR, fillcolor=bg_sample)
+                    mk = mk.rotate(ang, resample=Image.Resampling.NEAREST, fillcolor=0)
+
+            im_resized = im.resize((IMG_W, IMG_H), Image.Resampling.BILINEAR)
+            mk_resized = mk.resize((IMG_W, IMG_H), Image.Resampling.NEAREST)
+
+            img_np = np.asarray(im_resized, dtype=np.uint8)
+            mask_np = np.asarray(mk_resized, dtype=np.uint8)
+            mask_np = np.clip(mask_np, 0, NUM_CLASSES - 1)
+
+            if self.augment:
+                # 3. 水平反転 (クラス 1 <-> 2 スワップ)
+                if self.rng.random() < 0.50:
+                    img_np, mask_np = horizontal_flip_with_lr_swap(img_np, mask_np)
+
+                # 4. 赤スタンプ合成 (正解マスクは維持)
+                if self.rng.random() < 0.35:
+                    im_aug = synthesize_red_watermark(Image.fromarray(img_np), mask_np, self.rng)
+                    img_np = np.asarray(im_aug, dtype=np.uint8)
+
+                # 5. 経年劣化・低コントラスト・黄ばみ・ブラー
+                im_aug = Image.fromarray(img_np)
+                if self.rng.random() < 0.70:
+                    im_aug = ImageEnhance.Brightness(im_aug).enhance(self.rng.uniform(0.80, 1.20))
+                    im_aug = ImageEnhance.Contrast(im_aug).enhance(self.rng.uniform(0.75, 1.25))
+                    im_aug = ImageEnhance.Color(im_aug).enhance(self.rng.uniform(0.65, 1.30))
+                if self.rng.random() < 0.25:
+                    im_aug = im_aug.filter(ImageFilter.GaussianBlur(radius=self.rng.uniform(0.3, 0.9)))
+                img_np = np.asarray(im_aug, dtype=np.uint8)
+
+                # 6. 黄ばみ・ガウスノイズ
+                if self.rng.random() < 0.45:
+                    f_arr = img_np.astype(np.float32)
+                    tint = np.array([
+                        self.rng.uniform(0.95, 1.08),
+                        self.rng.uniform(0.94, 1.04),
+                        self.rng.uniform(0.84, 1.02),
+                    ], dtype=np.float32)
+                    f_arr = f_arr * tint + np.random.normal(0.0, self.rng.uniform(1.0, 5.0), size=f_arr.shape).astype(np.float32)
+                    img_np = np.clip(f_arr, 0, 255).astype(np.uint8)
+
+        img_t = torch.from_numpy(np.ascontiguousarray(img_np.transpose(2, 0, 1))).float() / 255.0
+        mask_t = torch.from_numpy(np.ascontiguousarray(mask_np)).long()
+        return img_t, mask_t
+
+
+# ==============================================================================
+# 3. timm バックボーン + mean/std内蔵 + CoordConv U-Net++ (3クラス)
+# ==============================================================================
+class UNetPPBlock(nn.Module):
     def __init__(self, in_ch: int, out_ch: int):
         super().__init__()
-        self.net = nn.Sequential(
+        self.conv = nn.Sequential(
             nn.Conv2d(in_ch, out_ch, kernel_size=3, padding=1, bias=False),
             nn.BatchNorm2d(out_ch),
             nn.ReLU(inplace=True),
@@ -41,365 +321,515 @@ class ConvBlock(nn.Module):
         )
 
     def forward(self, x):
-        return self.net(x)
+        return self.conv(x)
 
 
-class StereoCardUNet(nn.Module):
-    def __init__(self, base_ch: int = 20, num_classes: int = 2):
+class StereoCardUNetPP(nn.Module):
+    def __init__(self, backbone_name: str = "efficientnet_b0", pretrained: bool = True, num_classes: int = NUM_CLASSES):
         super().__init__()
-        # 絶対座標 (x, y in [-1, 1]) をモデル内部で連結する CoordConv
+        self.encoder = timm.create_model(
+            backbone_name,
+            pretrained=pretrained,
+            features_only=True,
+            out_indices=(0, 1, 2, 3, 4),
+            exportable=True,
+        )
+        cfg = getattr(self.encoder, "default_cfg", {}) or {}
+        mean = cfg.get("mean", (0.485, 0.456, 0.406))
+        std = cfg.get("std", (0.229, 0.224, 0.225))
+        self.register_buffer("img_mean", torch.tensor(mean, dtype=torch.float32).view(1, 3, 1, 1))
+        self.register_buffer("img_std", torch.tensor(std, dtype=torch.float32).view(1, 3, 1, 1))
+
+        # CoordConv 用正規化座標 [-1, 1] バッファ (256x512)
         xs = torch.linspace(-1.0, 1.0, IMG_W).view(1, 1, 1, IMG_W).expand(1, 1, IMG_H, IMG_W)
         ys = torch.linspace(-1.0, 1.0, IMG_H).view(1, 1, IMG_H, 1).expand(1, 1, IMG_H, IMG_W)
         self.register_buffer("coords", torch.cat([xs, ys], dim=1))
 
-        self.enc1 = ConvBlock(5, base_ch)
-        self.enc2 = ConvBlock(base_ch, base_ch * 2)
-        self.enc3 = ConvBlock(base_ch * 2, base_ch * 4)
-        self.enc4 = ConvBlock(base_ch * 4, base_ch * 8)
+        enc_chs = self.encoder.feature_info.channels()  # [c0, c1, c2, c3, c4] (strides 2, 4, 8, 16, 32)
+        nb = [24, 40, 64, 96, 128]
 
-        self.pool = nn.MaxPool2d(2)
+        self.proj0 = nn.Conv2d(enc_chs[0], nb[0], kernel_size=1, bias=False)
+        self.proj1 = nn.Conv2d(enc_chs[1], nb[1], kernel_size=1, bias=False)
+        self.proj2 = nn.Conv2d(enc_chs[2], nb[2], kernel_size=1, bias=False)
+        self.proj3 = nn.Conv2d(enc_chs[3], nb[3], kernel_size=1, bias=False)
+        self.proj4 = nn.Conv2d(enc_chs[4], nb[4], kernel_size=1, bias=False)
 
-        self.dec3 = ConvBlock(base_ch * 8 + base_ch * 4, base_ch * 4)
-        self.dec2 = ConvBlock(base_ch * 4 + base_ch * 2, base_ch * 2)
-        self.dec1 = ConvBlock(base_ch * 2 + base_ch, base_ch)
+        # U-Net++ Nested Dense Skip Pathways
+        self.conv0_1 = UNetPPBlock(nb[0] + nb[1], nb[0])
+        self.conv1_1 = UNetPPBlock(nb[1] + nb[2], nb[1])
+        self.conv2_1 = UNetPPBlock(nb[2] + nb[3], nb[2])
+        self.conv3_1 = UNetPPBlock(nb[3] + nb[4], nb[3])
 
-        self.head = nn.Conv2d(base_ch, num_classes, kernel_size=1)
+        self.conv0_2 = UNetPPBlock(nb[0] * 2 + nb[1], nb[0])
+        self.conv1_2 = UNetPPBlock(nb[1] * 2 + nb[2], nb[1])
+        self.conv2_2 = UNetPPBlock(nb[2] * 2 + nb[3], nb[2])
 
-    def forward(self, x):
+        self.conv0_3 = UNetPPBlock(nb[0] * 3 + nb[1], nb[0])
+        self.conv1_3 = UNetPPBlock(nb[1] * 3 + nb[2], nb[1])
+
+        self.conv0_4 = UNetPPBlock(nb[0] * 4 + nb[1], nb[0])
+
+        # フル解像度 (256x512) に戻してから CoordConv を結合して最終予測
+        self.final_refine = UNetPPBlock(nb[0] + 2, nb[0])
+        self.head = nn.Conv2d(nb[0], num_classes, kernel_size=1)
+
+    @staticmethod
+    def _up2(t: torch.Tensor) -> torch.Tensor:
+        return F.interpolate(t, scale_factor=2.0, mode="bilinear", align_corners=False)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # 入力 x は [0, 1] の RGB (Core ML scale=1/255.0, bias=[0,0,0])
+        x_norm = (x - self.img_mean) / self.img_std
+        feats = self.encoder(x_norm)
+
+        x0_0 = self.proj0(feats[0])  # 1/2
+        x1_0 = self.proj1(feats[1])  # 1/4
+        x2_0 = self.proj2(feats[2])  # 1/8
+        x3_0 = self.proj3(feats[3])  # 1/16
+        x4_0 = self.proj4(feats[4])  # 1/32
+
+        x0_1 = self.conv0_1(torch.cat([x0_0, self._up2(x1_0)], dim=1))
+        x1_1 = self.conv1_1(torch.cat([x1_0, self._up2(x2_0)], dim=1))
+        x2_1 = self.conv2_1(torch.cat([x2_0, self._up2(x3_0)], dim=1))
+        x3_1 = self.conv3_1(torch.cat([x3_0, self._up2(x4_0)], dim=1))
+
+        x0_2 = self.conv0_2(torch.cat([x0_0, x0_1, self._up2(x1_1)], dim=1))
+        x1_2 = self.conv1_2(torch.cat([x1_0, x1_1, self._up2(x2_1)], dim=1))
+        x2_2 = self.conv2_2(torch.cat([x2_0, x2_1, self._up2(x3_1)], dim=1))
+
+        x0_3 = self.conv0_3(torch.cat([x0_0, x0_1, x0_2, self._up2(x1_2)], dim=1))
+        x1_3 = self.conv1_3(torch.cat([x1_0, x1_1, x1_2, self._up2(x2_2)], dim=1))
+
+        x0_4 = self.conv0_4(torch.cat([x0_0, x0_1, x0_2, x0_3, self._up2(x1_3)], dim=1))
+
+        up_full = self._up2(x0_4)
         coords = x[:, :2, :, :] * 0.0 + self.coords
-        x_in = torch.cat([x, coords], dim=1)
-
-        e1 = self.enc1(x_in)
-        e2 = self.enc2(self.pool(e1))
-        e3 = self.enc3(self.pool(e2))
-        b = self.enc4(self.pool(e3))
-
-        d3 = F.interpolate(b, scale_factor=2.0, mode="bilinear", align_corners=False)
-        d3 = self.dec3(torch.cat([d3, e3], dim=1))
-
-        d2 = F.interpolate(d3, scale_factor=2.0, mode="bilinear", align_corners=False)
-        d2 = self.dec2(torch.cat([d2, e2], dim=1))
-
-        d1 = F.interpolate(d2, scale_factor=2.0, mode="bilinear", align_corners=False)
-        d1 = self.dec1(torch.cat([d1, e1], dim=1))
-
-        return self.head(d1)
+        out = self.final_refine(torch.cat([up_full, coords], dim=1))
+        return self.head(out)
 
 
 # ==============================================================================
-# 2. 実カード画像からのテクスチャ & 台紙色サンプラー + 事前生成合成データセット
+# 4. 損失関数・評価指標・Core ML 変換 & ベンチマーク
 # ==============================================================================
-def load_source_patches_and_card_colors(data_dir: str):
-    exts = ("*.jpg", "*.jpeg", "*.png", "*.tif", "*.tiff", "*.webp")
-    paths = []
-    for ext in exts:
-        paths.extend(glob.glob(os.path.join(data_dir, ext)))
-    paths = sorted(paths)
-    if not paths:
-        raise RuntimeError(f"学習用画像が見つかりません: {data_dir}")
+def multiclass_soft_dice_loss(logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+    probs = F.softmax(logits, dim=1)
+    loss_sum = 0.0
+    weights = [0.2, 0.4, 0.4]  # 左・右写真クラスを重視
+    for c in range(NUM_CLASSES):
+        p = probs[:, c]
+        t = (targets == c).float()
+        inter = (p * t).sum(dim=(1, 2))
+        union = p.sum(dim=(1, 2)) + t.sum(dim=(1, 2))
+        dice = (2.0 * inter + 1e-4) / (union + 1e-4)
+        loss_sum += weights[c] * (1.0 - dice.mean())
+    return loss_sum
 
-    photo_patches = []
-    card_colors = [
-        (235, 205, 145),
-        (220, 185, 125),
-        (242, 238, 225),
-        (25, 25, 23),
-        (75, 72, 68),
-        (170, 85, 60),
+
+def compute_boundary_weight_map(targets: torch.Tensor) -> torch.Tensor:
+    t_f = targets.unsqueeze(1).float()
+    max_p = F.max_pool2d(t_f, kernel_size=5, stride=1, padding=2)
+    min_p = -F.max_pool2d(-t_f, kernel_size=5, stride=1, padding=2)
+    is_edge = (max_p != min_p).squeeze(1).float()
+    return 1.0 + is_edge * 1.5
+
+
+def compute_class_ious(pred: np.ndarray, target: np.ndarray):
+    ious = []
+    for c in range(NUM_CLASSES):
+        p_c = (pred == c)
+        t_c = (target == c)
+        inter = np.logical_and(p_c, t_c).sum()
+        union = np.logical_or(p_c, t_c).sum()
+        ious.append(float(inter) / float(union) if union > 0 else 1.0)
+    return ious
+
+
+def compute_boundary_iou(pred: np.ndarray, target: np.ndarray, band_px: int = 5) -> float:
+    """正解マスクの境界 band_px バンド上における 3クラス平均 IoU (Boundary mIoU) を計算する"""
+    t_f = torch.from_numpy(target.astype(np.float32)).unsqueeze(0).unsqueeze(0)
+    k = band_px if band_px % 2 == 1 else band_px + 1
+    pad = k // 2
+    max_p = F.max_pool2d(t_f, kernel_size=k, stride=1, padding=pad)
+    min_p = -F.max_pool2d(-t_f, kernel_size=k, stride=1, padding=pad)
+    band = (max_p != min_p).squeeze().numpy()
+    if not np.any(band):
+        return 1.0
+    b_ious = []
+    for c in range(NUM_CLASSES):
+        p_c = np.logical_and(pred == c, band)
+        t_c = np.logical_and(target == c, band)
+        union = np.logical_or(p_c, t_c).sum()
+        if union > 0:
+            inter = np.logical_and(p_c, t_c).sum()
+            b_ious.append(float(inter) / float(union))
+    return float(np.mean(b_ious)) if b_ious else 1.0
+
+
+def _overlay_class_mask(rgb_np: np.ndarray, mask_np: np.ndarray, err_mask: np.ndarray = None) -> np.ndarray:
+    out = rgb_np.astype(np.float32).copy()
+    # 0=Mount(暗転), 1=Left(シアン), 2=Right(グリーン)
+    m0 = (mask_np == 0)
+    m1 = (mask_np == 1)
+    m2 = (mask_np == 2)
+    out[m0] *= 0.45
+    out[m1] = out[m1] * 0.62 + np.array([30.0, 200.0, 240.0], dtype=np.float32) * 0.38
+    out[m2] = out[m2] * 0.62 + np.array([50.0, 225.0, 120.0], dtype=np.float32) * 0.38
+    if err_mask is not None:
+        out[err_mask] = out[err_mask] * 0.25 + np.array([255.0, 45.0, 45.0], dtype=np.float32) * 0.75
+    return np.clip(out, 0, 255).astype(np.uint8)
+
+
+def export_val_previews(model_cpu: nn.Module, val_records, out_dir: str, max_samples: int = 8):
+    """Val 全件を推論・採点し、代表的なサンプルの 3パネル比較画像（元画像 / 正解 / 予測+誤差強調）を出力する"""
+    if not val_records or not out_dir:
+        return
+    os.makedirs(out_dir, exist_ok=True)
+    model_cpu.eval()
+    eval_items = []
+
+    for rec in val_records:
+        with Image.open(rec["image_path"]) as im_raw, Image.open(rec["mask_path"]) as mk_raw:
+            im_rgb = im_raw.convert("RGB").resize((IMG_W, IMG_H), Image.Resampling.BILINEAR)
+            mk_gt = mk_raw.convert("L").resize((IMG_W, IMG_H), Image.Resampling.NEAREST)
+            img_np = np.asarray(im_rgb, dtype=np.uint8)
+            gt_np = np.clip(np.asarray(mk_gt, dtype=np.uint8), 0, NUM_CLASSES - 1)
+
+        t_in = torch.from_numpy(np.ascontiguousarray(img_np.transpose(2, 0, 1))).float().unsqueeze(0) / 255.0
+        with torch.no_grad():
+            logits = model_cpu(t_in)[0].numpy()
+        pred_np = logits.argmax(axis=0).astype(np.uint8)
+        c_ious = compute_class_ious(pred_np, gt_np)
+        miou = float(np.mean(c_ious))
+        b_miou = compute_boundary_iou(pred_np, gt_np, band_px=5)
+        eval_items.append({
+            "stem": rec["stem"],
+            "was_manual": bool(rec.get("was_manual", False)),
+            "miou": miou,
+            "boundary_miou": b_miou,
+            "bg_iou": float(c_ious[0]),
+            "l_iou": float(c_ious[1]),
+            "r_iou": float(c_ious[2]),
+            "img_np": img_np,
+            "gt_np": gt_np,
+            "pred_np": pred_np,
+        })
+
+    # サマリー JSON 書き出し
+    summary_rows = [
+        {
+            "stem": x["stem"],
+            "was_manual": x["was_manual"],
+            "miou_pct": round(x["miou"] * 100.0, 2),
+            "boundary_miou_pct": round(x["boundary_miou"] * 100.0, 2),
+            "bg_iou_pct": round(x["bg_iou"] * 100.0, 2),
+            "l_iou_pct": round(x["l_iou"] * 100.0, 2),
+            "r_iou_pct": round(x["r_iou"] * 100.0, 2),
+        }
+        for x in sorted(eval_items, key=lambda r: r["boundary_miou"])
     ]
+    summary_path = os.path.join(out_dir, "val_metrics_summary.json")
+    with open(summary_path, "w", encoding="utf-8") as f:
+        json.dump(summary_rows, f, ensure_ascii=False, indent=2)
 
-    for p in paths:
-        try:
-            with Image.open(p) as im:
-                im = im.convert("RGB")
-                w, h = im.size
-                # 通常パッチ (中央)
-                left_crop = im.crop((int(w * 0.12), int(h * 0.15), int(w * 0.45), int(h * 0.85)))
-                right_crop = im.crop((int(w * 0.55), int(h * 0.15), int(w * 0.88), int(h * 0.85)))
-                photo_patches.append(left_crop.resize((256, 256), Image.Resampling.BILINEAR))
-                photo_patches.append(right_crop.resize((256, 256), Image.Resampling.BILINEAR))
+    # 手動補正済み優先 + Boundary mIoU ワースト〜ベストからバランス良く最大 max_samples 枚選出
+    by_b = sorted(eval_items, key=lambda r: r["boundary_miou"])
+    selected = []
+    seen = set()
+    # 1. 手動補正済みを最大 4 枚（ワースト側優先）
+    for item in by_b:
+        if item["was_manual"] and len(selected) < min(4, max_samples):
+            selected.append(item)
+            seen.add(item["stem"])
+    # 2. Boundary mIoU ワースト側とベスト側を追加
+    for item in by_b:
+        if item["stem"] not in seen and len(selected) < max_samples - 2:
+            selected.append(item)
+            seen.add(item["stem"])
+    for item in reversed(by_b):
+        if item["stem"] not in seen and len(selected) < max_samples:
+            selected.append(item)
+            seen.add(item["stem"])
 
-                # 上部・下部を含むフルウィンドウパッチ (月・天体カードの宇宙空間やアーチ頂点を含む)
-                left_full = im.crop((int(w * 0.08), int(h * 0.03), int(w * 0.48), int(h * 0.95)))
-                right_full = im.crop((int(w * 0.52), int(h * 0.03), int(w * 0.92), int(h * 0.95)))
-                photo_patches.append(left_full.resize((256, 256), Image.Resampling.BILINEAR))
-                photo_patches.append(right_full.resize((256, 256), Image.Resampling.BILINEAR))
-
-                arr = np.asarray(im.resize((128, 64), Image.Resampling.BILINEAR))
-                border = np.concatenate([arr[:3].reshape(-1, 3), arr[-3:].reshape(-1, 3)], axis=0)
-                med = np.median(border, axis=0).astype(int)
-                card_colors.append((int(med[0]), int(med[1]), int(med[2])))
-        except Exception as e:
-            print(f"[Warn] スキップ {os.path.basename(p)}: {e}")
-
-    # 暗い宇宙・夜空パッチ（月カード等の天体写真用）を明示的に追加
-    for _ in range(8):
-        space_arr = np.random.normal(32, 4, (256, 256, 3)).clip(18, 55).astype(np.uint8)
-        # ランダムな月球体（直径 100〜180px）を配置
-        sp_img = Image.fromarray(space_arr)
-        sp_draw = ImageDraw.Draw(sp_img)
-        cx, cy = random.randint(100, 156), random.randint(100, 156)
-        cr = random.randint(55, 95)
-        moon_luma = random.randint(110, 190)
-        sp_draw.ellipse([cx - cr, cy - cr, cx + cr, cy + cr], fill=(moon_luma, moon_luma, int(moon_luma * 0.92)))
-        photo_patches.append(sp_img)
-
-    print(f"[Data] {len(paths)} 枚のカードから {len(photo_patches)} パッチ・{len(card_colors)} 台紙色を抽出")
-    return photo_patches, card_colors
-
-
-def make_arch_window_mask(w: int, h: int, shape_type: str, rx_ratio: float, ry_ratio: float) -> Image.Image:
-    mask = Image.new("L", (w, h), 0)
-    draw = ImageDraw.Draw(mask)
-    if shape_type == "rect":
-        draw.rectangle([0, 0, w - 1, h - 1], fill=255)
-    elif shape_type == "rounded":
-        r = max(2, int(min(w, h) * rx_ratio))
-        draw.rounded_rectangle([0, 0, w - 1, h - 1], radius=r, fill=255)
-    else:
-        r_bot = max(2, int(min(w, h) * 0.08))
-        arch_h = max(6, int(h * ry_ratio))
-        draw.rounded_rectangle([0, arch_h // 2, w - 1, h - 1], radius=r_bot, fill=255)
-        draw.pieslice([0, 0, w - 1, arch_h * 2], start=180, end=360, fill=255)
-    return mask
+    for idx, item in enumerate(selected, start=1):
+        img_np = item["img_np"]
+        gt_vis = _overlay_class_mask(img_np, item["gt_np"])
+        err = (item["pred_np"] != item["gt_np"])
+        pred_vis = _overlay_class_mask(img_np, item["pred_np"], err_mask=err)
+        canvas = np.concatenate([img_np, gt_vis, pred_vis], axis=1)
+        pil_out = Image.fromarray(canvas)
+        draw = ImageDraw.Draw(pil_out)
+        tag = "[MAN]" if item["was_manual"] else "[AUTO]"
+        label = (
+            f"{tag} {item['stem']} | mIoU={item['miou']*100:.1f}% "
+            f"(L={item['l_iou']*100:.1f}%, R={item['r_iou']*100:.1f}%) | "
+            f"B-mIoU={item['boundary_miou']*100:.1f}% | Panels: Orig / GT / Pred(Red=Err)"
+        )
+        draw.rectangle([0, 0, pil_out.width, 18], fill=(12, 12, 16))
+        draw.text((6, 3), label, fill=(245, 245, 250))
+        safe_stem = item["stem"].replace("/", "_")
+        out_png = os.path.join(out_dir, f"{idx:02d}_{safe_stem}_cmp.png")
+        pil_out.save(out_png)
+    print(f"[ValPreview] Exported {len(selected)} comparison images & summary -> {out_dir}")
 
 
-def generate_synthetic_tensors(patches, card_colors, count: int):
-    t0 = time.time()
-    imgs = np.empty((count, 3, IMG_H, IMG_W), dtype=np.uint8)
-    lbls = np.empty((count, IMG_H, IMG_W), dtype=np.uint8)
-
-    for idx in range(count):
-        rng = random.Random(idx * 9973 + 42)
-        base_col = rng.choice(card_colors)
-        card_arr = np.zeros((IMG_H, IMG_W, 3), dtype=np.float32)
-        card_arr[:, :, 0] = np.clip(base_col[0] + rng.uniform(-12, 12), 0, 255)
-        card_arr[:, :, 1] = np.clip(base_col[1] + rng.uniform(-12, 12), 0, 255)
-        card_arr[:, :, 2] = np.clip(base_col[2] + rng.uniform(-12, 12), 0, 255)
-
-        noise = np.random.normal(0, rng.uniform(1.5, 6.0), (IMG_H, IMG_W, 3)).astype(np.float32)
-        card_arr = np.clip(card_arr + noise, 0, 255).astype(np.uint8)
-        canvas = Image.fromarray(card_arr)
-        draw_c = ImageDraw.Draw(canvas)
-
-        # スキャン外周余白（白 or 黒 + 枠線）を 50% の確率で付与
-        if rng.random() < 0.50:
-            bg_col = (242, 242, 242) if rng.random() < 0.80 else (16, 16, 16)
-            mx = rng.randint(4, 20)
-            my = rng.randint(4, 14)
-            outer = Image.new("RGB", (IMG_W, IMG_H), bg_col)
-            inner_card = canvas.resize((IMG_W - mx * 2, IMG_H - my * 2), Image.Resampling.BILINEAR)
-            outer.paste(inner_card, (mx, my))
-            draw_o = ImageDraw.Draw(outer)
-            draw_o.rectangle([mx, my, IMG_W - mx - 1, IMG_H - my - 1], outline=(90, 82, 70), width=1)
-            canvas = outer
-        else:
-            mx, my = 0, 0
-
-        for _ in range(rng.randint(0, 5)):
-            sx = rng.randint(0, IMG_W - 1)
-            sy = rng.randint(0, IMG_H - 1)
-            sr = rng.randint(1, 3)
-            scol = tuple(int(np.clip(c + rng.uniform(-45, 25), 0, 255)) for c in base_col)
-            draw_c.ellipse([sx - sr, sy - sr, sx + sr, sy + sr], fill=scol)
-
-        avail_w = IMG_W - mx * 2
-        avail_h = IMG_H - my * 2
-        margin_x = rng.randint(int(avail_w * 0.015), int(avail_w * 0.11))
-        # 実カードでは中央の隙間が 1px〜数px の極細のものが多い
-        gap_x = rng.randint(1, 18) if rng.random() < 0.75 else rng.randint(18, 36)
-        win_w = max(80, (avail_w - margin_x * 2 - gap_x) // 2)
-        margin_y = rng.randint(int(avail_h * 0.03), int(avail_h * 0.16))
-        win_h = max(80, avail_h - margin_y * 2)
-
-        lx0 = mx + margin_x + rng.randint(-3, 3)
-        rx0 = lx0 + win_w + gap_x
-        ly0 = my + margin_y + rng.randint(-3, 3)
-        ry0 = ly0 + rng.randint(-2, 2)
-
-        shape_type = rng.choice(["arch", "arch", "rounded", "rect"])
-        rx_ratio = rng.uniform(0.06, 0.18)
-        ry_ratio = rng.uniform(0.14, 0.30)
-
-        patch = rng.choice(patches)
-        if rng.random() < 0.5:
-            patch = patch.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
-        p_arr = np.asarray(patch.resize((win_w, win_h), Image.Resampling.BILINEAR), dtype=np.float32)
-
-        # 天体・夜空写真の再現（25%）: 暗い宇宙（Luma 25..45）の中に月球体を配置
-        if rng.random() < 0.25:
-            space_col = np.array([rng.randint(22, 38), rng.randint(24, 40), rng.randint(26, 42)], dtype=np.float32)
-            p_arr = np.full((win_h, win_w, 3), space_col, dtype=np.float32) + np.random.normal(0, 3, (win_h, win_w, 3))
-            mr = rng.randint(int(min(win_w, win_h) * 0.30), int(min(win_w, win_h) * 0.46))
-            mcx = rng.randint(int(win_w * 0.38), int(win_w * 0.62))
-            mcy = rng.randint(int(win_h * 0.38), int(win_h * 0.62))
-            yy, xx = np.ogrid[:win_h, :win_w]
-            dist_sq = (xx - mcx) ** 2 + (yy - mcy) ** 2
-            moon_mask = dist_sq <= (mr ** 2)
-            moon_luma = rng.uniform(105, 175)
-            p_arr[moon_mask] = np.clip(p_arr[moon_mask] * 0.1 + moon_luma + np.random.normal(0, 15, p_arr[moon_mask].shape), 0, 255)
-        # 上部白飛び / 台紙同系色空の再現
-        elif rng.random() < 0.40:
-            sky_h = int(win_h * rng.uniform(0.22, 0.48))
-            sky_col = np.array(base_col, dtype=np.float32) + np.random.uniform(-15, 22, 3)
-            sky_col = np.clip(sky_col, 165, 252)
-            for yy in range(sky_h):
-                alpha = 1.0 - (yy / max(1, sky_h)) ** 1.5
-                p_arr[yy, :, :] = p_arr[yy, :, :] * (1.0 - alpha) + sky_col * alpha
-
-        p_arr = np.clip(p_arr * rng.uniform(0.78, 1.22) + rng.uniform(-12, 12), 0, 255).astype(np.uint8)
-        photo_l = Image.fromarray(p_arr)
-        shift = rng.randint(2, 9)
-        photo_r_arr = np.roll(p_arr, -shift, axis=1)
-        photo_r_arr = np.clip(photo_r_arr.astype(np.float32) * rng.uniform(0.93, 1.07), 0, 255).astype(np.uint8)
-        photo_r = Image.fromarray(photo_r_arr)
-
-        win_mask = make_arch_window_mask(win_w, win_h, shape_type, rx_ratio, ry_ratio)
-
-        # 2クラスラベル (0=台紙, 1=写真窓)
-        label = Image.new("L", (IMG_W, IMG_H), 0)
-        canvas.paste(photo_l, (lx0, ly0), win_mask)
-        canvas.paste(photo_r, (rx0, ry0), win_mask)
-
-        # 中央セパレータを明瞭に保つため、左右が近接する境界の視認性を再現
-        if rng.random() < 0.20:
-            gold = (165, 145, 85)
-            d_c = ImageDraw.Draw(canvas)
-            d_c.rounded_rectangle([lx0 - 1, ly0 - 1, lx0 + win_w, ly0 + win_h], radius=10, outline=gold, width=2)
-            d_c.rounded_rectangle([rx0 - 1, ry0 - 1, rx0 + win_w, ry0 + win_h], radius=10, outline=gold, width=2)
-
-        m_photo = win_mask.point(lambda v: 1 if v > 127 else 0)
-        label.paste(m_photo, (lx0, ly0), win_mask)
-        label.paste(m_photo, (rx0, ry0), win_mask)
-
-        if rng.random() < 0.45:
-            angle = rng.uniform(-1.5, 1.5)
-            canvas = canvas.rotate(angle, resample=Image.Resampling.BILINEAR, fillcolor=base_col)
-            label = label.rotate(angle, resample=Image.Resampling.NEAREST, fillcolor=0)
-
-        if rng.random() < 0.20:
-            canvas = canvas.filter(ImageFilter.GaussianBlur(radius=rng.uniform(0.3, 0.7)))
-
-        imgs[idx] = np.asarray(canvas, dtype=np.uint8).transpose(2, 0, 1)
-        lbls[idx] = np.asarray(label, dtype=np.uint8)
-
-    print(f"[Data] {count} 枚の合成データを事前生成完了 ({time.time() - t0:.1f}s)")
-    return torch.from_numpy(imgs), torch.from_numpy(lbls)
-
-
-def soft_dice_loss(logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
-    probs = F.softmax(logits, dim=1)[:, 1]  # 写真クラスの確率
-    t = (targets == 1).float()
-    inter = (probs * t).sum(dim=(1, 2))
-    union = probs.sum(dim=(1, 2)) + t.sum(dim=(1, 2))
-    dice = (2.0 * inter + 1e-4) / (union + 1e-4)
-    return 1.0 - dice.mean()
-
-
-# ==============================================================================
-# 3. 学習 & Core ML (.mlpackage) エクスポート & 実カード検証
-# ==============================================================================
-def train_and_export(data_dir: str, out_path: str, epochs: int = 25, samples: int = 1600):
-    patches, card_colors = load_source_patches_and_card_colors(data_dir)
-    imgs_u8, lbls_u8 = generate_synthetic_tensors(patches, card_colors, samples)
-
-    dataset = TensorDataset(imgs_u8, lbls_u8)
-    loader = DataLoader(dataset, batch_size=32, shuffle=True)
-
-    device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
-    print(f"[Train] Device: {device}, Epochs: {epochs}, Samples: {samples}")
-
-    model = StereoCardUNet(base_ch=20, num_classes=2).to(device)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=2.5e-3, weight_decay=1e-4)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
-    ce_loss = nn.CrossEntropyLoss()
-
-    t0 = time.time()
-    for ep in range(1, epochs + 1):
-        model.train()
-        total_loss = 0.0
-        correct = 0
-        total_px = 0
-        for b_imgs, b_lbls in loader:
-            b_imgs = b_imgs.to(device=device, dtype=torch.float32) / 255.0
-            b_lbls = b_lbls.to(device=device, dtype=torch.long)
-
-            optimizer.zero_grad()
-            logits = model(b_imgs)
-            loss = ce_loss(logits, b_lbls) + 0.5 * soft_dice_loss(logits, b_lbls)
-            loss.backward()
-            optimizer.step()
-
-            total_loss += loss.item() * b_imgs.size(0)
-            preds = logits.argmax(dim=1)
-            correct += (preds == b_lbls).sum().item()
-            total_px += b_lbls.numel()
-
-        scheduler.step()
-        acc = correct / total_px * 100.0
-        print(f"  Epoch {ep:02d}/{epochs} | Loss: {total_loss / samples:.4f} | Pixel Acc: {acc:.2f}%")
-
-    print(f"[Train] 学習完了 ({time.time() - t0:.1f}s)")
-
-    model_cpu = model.to("cpu").eval()
-    os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
-    torch.save(model_cpu.state_dict(), os.path.join(os.path.dirname(os.path.abspath(out_path)), "stereo_card_seg.pt"))
+def export_to_coreml_fp16(model_cpu: nn.Module, out_path: str):
+    model_cpu.eval()
     example_input = torch.rand(1, 3, IMG_H, IMG_W)
-    traced = torch.jit.trace(model_cpu, example_input)
+    with torch.no_grad():
+        traced = torch.jit.trace(model_cpu, example_input)
 
     mlmodel = ct.convert(
         traced,
-        inputs=[ct.ImageType(name="image", shape=(1, 3, IMG_H, IMG_W), scale=1.0 / 255.0, color_layout=ct.colorlayout.RGB)],
+        inputs=[
+            ct.ImageType(
+                name="image",
+                shape=(1, 3, IMG_H, IMG_W),
+                scale=1.0 / 255.0,
+                bias=[0.0, 0.0, 0.0],
+                color_layout=ct.colorlayout.RGB,
+            )
+        ],
         outputs=[ct.TensorType(name="logits", dtype=np.float32)],
+        convert_to="mlprogram",
         compute_precision=ct.precision.FLOAT16,
         minimum_deployment_target=ct.target.macOS14,
     )
-    mlmodel.author = "StereoWindow Project"
-    mlmodel.short_description = "19th-century Stereo Card 2-class CoordConv segmentation (0=Card, 1=Photo)"
+    mlmodel.author = "ViewStereo Project"
+    mlmodel.short_description = "19th-century Stereo Card 3-class CoordConv U-Net++ (0=Mount, 1=Left, 2=Right)"
+    os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
     mlmodel.save(out_path)
-    print(f"[Export] Core ML モデル保存完了: {out_path}")
+    return mlmodel
 
-    # 実カード検証（2クラスマスク + 中央セパレータ分割確認）
-    exts = ("*.jpg", "*.jpeg", "*.png", "*.tif", "*.tiff", "*.webp")
-    real_paths = []
-    for ext in exts:
-        real_paths.extend(glob.glob(os.path.join(data_dir, ext)))
-    real_paths = sorted(real_paths)
 
-    ok_cnt = 0
-    for rp in real_paths:
-        with Image.open(rp) as im:
+def verify_pytorch_vs_coreml(model_cpu: nn.Module, mlmodel_path: str, test_image_paths):
+    mlmodel = ct.models.MLModel(mlmodel_path, compute_units=ct.ComputeUnit.CPU_AND_GPU)
+    model_cpu.eval()
+    max_diffs = []
+    mean_diffs = []
+    agree_rates = []
+    ious_all = []
+
+    for ip in test_image_paths:
+        with Image.open(ip) as im:
             im_rgb = im.convert("RGB").resize((IMG_W, IMG_H), Image.Resampling.BILINEAR)
-            out_dict = mlmodel.predict({"image": im_rgb})
-            logits_np = out_dict["logits"][0]  # (2, H, W)
-            # Softmax photo prob
-            e0 = np.exp(logits_np[0] - np.maximum(logits_np[0], logits_np[1]))
-            e1 = np.exp(logits_np[1] - np.maximum(logits_np[0], logits_np[1]))
-            prob = e1 / (e0 + e1)
-            seg = (prob >= 0.5)
+        arr = np.asarray(im_rgb, dtype=np.float32) / 255.0
+        t_in = torch.from_numpy(arr.transpose(2, 0, 1)).unsqueeze(0)
+        with torch.no_grad():
+            pt_logits = model_cpu(t_in)[0].numpy()  # (3, H, W)
 
-            # 中央 x ∈ [40%, 60%] で最小列を探索
-            c0, c1 = int(IMG_W * 0.40), int(IMG_W * 0.60)
-            col_means = prob[:, c0:c1].mean(axis=0)
-            split_x = c0 + int(np.argmin(col_means))
+        cm_out = mlmodel.predict({"image": im_rgb})["logits"][0]
+        diff = np.abs(pt_logits - cm_logits_norm(cm_out))
+        max_diffs.append(float(diff.max()))
+        mean_diffs.append(float(diff.mean()))
 
-            l_ratio = seg[:, :split_x].mean()
-            r_ratio = seg[:, split_x:].mean()
-            card_ratio = 1.0 - seg.mean()
-            sep_min = float(col_means.min())
+        pt_pred = pt_logits.argmax(axis=0)
+        cm_pred = cm_out.argmax(axis=0)
+        agree_rates.append(float(np.mean(pt_pred == cm_pred)) * 100.0)
+        ious_all.append(compute_class_ious(cm_pred, pt_pred))
 
-            status = "OK" if (l_ratio > 0.30 and r_ratio > 0.30 and card_ratio > 0.05) else "WARN"
-            if status == "OK":
-                ok_cnt += 1
-            print(f"  [{status}] {os.path.basename(rp)}: L={l_ratio*100:.1f}%, R={r_ratio*100:.1f}%, Card={card_ratio*100:.1f}%, splitX={split_x} (minProb={sep_min:.2f})")
-    print(f"[Verify] 実カードテスト: {ok_cnt}/{len(real_paths)} 枚で左右写真領域を正常検出")
+    mean_iou = float(np.mean(ious_all)) if ious_all else 0.0
+    print(
+        f"[Verify PyTorch vs CoreML FP16] samples={len(test_image_paths)} | "
+        f"max_abs_diff={max(max_diffs):.5f} | mean_abs_diff={np.mean(mean_diffs):.5f} | "
+        f"argmax_agree={np.mean(agree_rates):.2f}% | mIoU(cm vs pt)={mean_iou*100:.2f}%"
+    )
+
+
+def cm_logits_norm(arr: np.ndarray) -> np.ndarray:
+    return arr
+
+
+def benchmark_compute_units(mlmodel_path: str, sample_image_path: str, warmup: int = 3, iters: int = 10):
+    with Image.open(sample_image_path) as im:
+        im_rgb = im.convert("RGB").resize((IMG_W, IMG_H), Image.Resampling.BILINEAR)
+
+    units = [
+        ("ALL", ct.ComputeUnit.ALL),
+        ("CPU_AND_GPU", ct.ComputeUnit.CPU_AND_GPU),
+        ("CPU_AND_NE", ct.ComputeUnit.CPU_AND_NE),
+        ("CPU_ONLY", ct.ComputeUnit.CPU_ONLY),
+    ]
+    print("[Benchmark] Core ML FP16 latency:")
+    for label, cu in units:
+        try:
+            m = ct.models.MLModel(mlmodel_path, compute_units=cu)
+            for _ in range(warmup):
+                _ = m.predict({"image": im_rgb})
+            times = []
+            for _ in range(iters):
+                t0 = time.perf_counter()
+                _ = m.predict({"image": im_rgb})
+                times.append((time.perf_counter() - t0) * 1000.0)
+            print(f"  - {label:12s}: mean={np.mean(times):6.2f} ms | median={np.median(times):6.2f} ms")
+        except Exception as e:
+            print(f"  - {label:12s}: FAILED ({type(e).__name__}: {e})")
+
+
+def run_smoke_test(dataset_root: str, out_path: str, backbone: str, pretrained: bool):
+    print("=== Phase 2-4 Smoke Test ===")
+    # 1. 水平反転 1 <-> 2 スワップ単体検証
+    dummy_img = np.arange(4 * 6 * 3, dtype=np.uint8).reshape(4, 6, 3)
+    dummy_mask = np.array([
+        [0, 1, 1, 0, 2, 2],
+        [0, 1, 1, 0, 2, 2],
+        [0, 1, 1, 0, 2, 2],
+        [0, 0, 0, 0, 0, 0],
+    ], dtype=np.uint8)
+    _, swapped = horizontal_flip_with_lr_swap(dummy_img, dummy_mask)
+    expected_row0 = np.array([1, 1, 0, 2, 2, 0], dtype=np.uint8)
+    assert np.array_equal(swapped[0], expected_row0), f"Flip swap failed: {swapped[0]}"
+    assert np.array_equal(np.unique(swapped), np.array([0, 1, 2])), "Flip classes corrupted!"
+    print("[Smoke 1/5] HorizontalFlip class 1 <-> 2 swap check: PASSED")
+
+    # 2. Group Split & データリーク検証
+    records = collect_dataset_records(dataset_root)
+    print(f"[Smoke 2/5] Loaded dataset records: {len(records)} (from {dataset_root})")
+    if len(records) >= 5:
+        manifest_tmp = os.path.join(os.path.dirname(os.path.abspath(out_path)), "split_manifest_smoke.json")
+        tr, va = build_leak_free_split(records, val_ratio=0.15, seed=42, manifest_out=manifest_tmp)
+        print(f"  Group Split: train={len(tr)}, val={len(va)} (0 group leaks) -> {manifest_tmp}")
+        sample_paths = [r["image_path"] for r in (va[:3] if va else tr[:3])]
+    else:
+        raise RuntimeError(f"データセットが見つかりません: {dataset_root}")
+
+    # 3. 赤スタンプ合成 & Boundary mIoU & DatasetLoader 検証
+    ds = StereoCard3ClassDataset(tr[:4], augment=True, seed=42)
+    b_img, b_msk = ds[0]
+    assert b_img.shape == (3, IMG_H, IMG_W) and b_msk.shape == (IMG_H, IMG_W)
+    b_iou_self = compute_boundary_iou(b_msk.numpy(), b_msk.numpy(), band_px=5)
+    assert abs(b_iou_self - 1.0) < 1e-6, f"Boundary IoU self-check failed: {b_iou_self}"
+    print(f"[Smoke 3/5] Augmented tensor shape: img={tuple(b_img.shape)} mask={tuple(b_msk.shape)} classes={torch.unique(b_msk).tolist()} | BoundaryIoU(self)={b_iou_self*100:.1f}%")
+
+    # 4. 未学習モデルでの FP16 Core ML 変換
+    t0 = time.time()
+    model = StereoCardUNetPP(backbone_name=backbone, pretrained=pretrained, num_classes=NUM_CLASSES).eval()
+    export_to_coreml_fp16(model, out_path)
+    print(f"[Smoke 4/5] Exported FP16 mlpackage ({backbone}, pretrained={pretrained}) in {time.time() - t0:.1f}s -> {out_path}")
+
+    # 5. PyTorch vs Core ML 一致確認 + 4 ComputeUnits レイテンシ計測
+    verify_pytorch_vs_coreml(model, out_path, sample_paths)
+    benchmark_compute_units(out_path, sample_paths[0])
+
+
+def train_and_export(args):
+    records = collect_dataset_records(args.dataset)
+    if not records:
+        raise RuntimeError(f"有効な 3クラスデータセットがありません: {args.dataset}")
+
+    out_dir = os.path.dirname(os.path.abspath(args.out))
+    manifest_path = os.path.join(out_dir, "split_manifest.json")
+    train_recs, val_recs = build_leak_free_split(records, val_ratio=args.val_ratio, seed=args.seed, manifest_out=manifest_path)
+    print(f"[Data] Total={len(records)} | Train={len(train_recs)} | Val={len(val_recs)} | Manifest={manifest_path}")
+
+    train_ds = StereoCard3ClassDataset(train_recs, augment=True, seed=args.seed)
+    val_ds = StereoCard3ClassDataset(val_recs, augment=False, seed=args.seed)
+
+    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, num_workers=0)
+    val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, num_workers=0)
+
+    device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+    print(f"[Train] Device={device} | Backbone={args.backbone} (pretrained={not args.no_pretrained}) | Epochs={args.epochs}")
+
+    model = StereoCardUNetPP(
+        backbone_name=args.backbone,
+        pretrained=not args.no_pretrained,
+        num_classes=NUM_CLASSES,
+    ).to(device)
+
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
+    ce_fn = nn.CrossEntropyLoss(reduction="none", label_smoothing=0.02)
+
+    best_score = -1.0
+    best_miou = -1.0
+    best_b_miou = -1.0
+    best_c_ious = np.zeros(3)
+    best_epoch = 0
+    best_pt_path = os.path.join(out_dir, "stereo_card_seg_v3_best.pt")
+    os.makedirs(out_dir, exist_ok=True)
+
+    for ep in range(1, args.epochs + 1):
+        model.train()
+        tr_loss = 0.0
+        for b_imgs, b_lbls in train_loader:
+            b_imgs = b_imgs.to(device)
+            b_lbls = b_lbls.to(device)
+
+            optimizer.zero_grad()
+            logits = model(b_imgs)
+            b_w = compute_boundary_weight_map(b_lbls)
+            loss_ce = (ce_fn(logits, b_lbls) * b_w).mean()
+            loss_dice = multiclass_soft_dice_loss(logits, b_lbls)
+            loss = loss_ce + 0.65 * loss_dice
+            loss.backward()
+            optimizer.step()
+            tr_loss += loss.item() * b_imgs.size(0)
+        scheduler.step()
+
+        # Validation
+        model.eval()
+        val_ious = []
+        val_b_ious = []
+        with torch.no_grad():
+            for b_imgs, b_lbls in val_loader:
+                logits = model(b_imgs.to(device))
+                preds = logits.argmax(dim=1).cpu().numpy()
+                tgts = b_lbls.numpy()
+                for p, t in zip(preds, tgts):
+                    val_ious.append(compute_class_ious(p, t))
+                    val_b_ious.append(compute_boundary_iou(p, t, band_px=5))
+
+        mean_c_ious = np.mean(val_ious, axis=0) if val_ious else np.zeros(3)
+        miou = float(np.mean(mean_c_ious))
+        b_miou = float(np.mean(val_b_ious)) if val_b_ious else 0.0
+        score = 0.5 * miou + 0.5 * b_miou
+        print(
+            f"  Epoch {ep:02d}/{args.epochs} | Loss={tr_loss / max(1, len(train_ds)):.4f} | "
+            f"Val mIoU={miou*100:.2f}% (Bg={mean_c_ious[0]*100:.1f}%, L={mean_c_ious[1]*100:.1f}%, R={mean_c_ious[2]*100:.1f}%) | "
+            f"Boundary mIoU={b_miou*100:.2f}% | Score={score*100:.2f}%"
+        )
+        if score > best_score:
+            best_score = score
+            best_miou = miou
+            best_b_miou = b_miou
+            best_c_ious = mean_c_ious.copy()
+            best_epoch = ep
+            torch.save(model.state_dict(), best_pt_path)
+
+    model.load_state_dict(torch.load(best_pt_path, map_location="cpu"))
+    model_cpu = model.to("cpu").eval()
+    export_to_coreml_fp16(model_cpu, args.out)
+    print(
+        f"[Export] Best Epoch={best_epoch} | Score={best_score*100:.2f}% | "
+        f"Val mIoU={best_miou*100:.2f}% (Bg={best_c_ious[0]*100:.2f}%, L={best_c_ious[1]*100:.2f}%, R={best_c_ious[2]*100:.2f}%) | "
+        f"Boundary mIoU={best_b_miou*100:.2f}% | Saved Core ML FP16 -> {args.out}"
+    )
+
+    if args.val_preview_dir and val_recs:
+        export_val_previews(model_cpu, val_recs, args.val_preview_dir, max_samples=8)
+
+    val_imgs = [r["image_path"] for r in val_recs[:min(8, len(val_recs))]]
+    if val_imgs:
+        verify_pytorch_vs_coreml(model_cpu, args.out, val_imgs)
+        benchmark_compute_units(args.out, val_imgs[0])
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data", default="StereoWindow/学習用データ")
-    parser.add_argument("--out", default="StereoWindow/tools/StereoCardSeg.mlpackage")
-    parser.add_argument("--epochs", type=int, default=25)
-    parser.add_argument("--samples", type=int, default=1600)
+    parser.add_argument("--dataset", default="/Users/okano/マイドライブ/DEV/ViewStereo/dataset_3class")
+    parser.add_argument("--out", default="/Users/okano/マイドライブ/DEV/ViewStereo/tools/StereoCardSeg_v3.mlpackage")
+    parser.add_argument("--val-preview-dir", default="/Users/okano/マイドライブ/DEV/ViewStereo/tools/val_preview_v3")
+    parser.add_argument("--backbone", default="efficientnet_b0")
+    parser.add_argument("--epochs", type=int, default=70)
+    parser.add_argument("--batch-size", type=int, default=8)
+    parser.add_argument("--lr", type=float, default=3e-4)
+    parser.add_argument("--val-ratio", type=float, default=0.15)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--no-pretrained", action="store_true")
+    parser.add_argument("--smoke-test", action="store_true")
     args = parser.parse_args()
-    train_and_export(args.data, args.out, epochs=args.epochs, samples=args.samples)
+
+    if args.smoke_test:
+        run_smoke_test(args.dataset, args.out, backbone=args.backbone, pretrained=not args.no_pretrained)
+    else:
+        train_and_export(args)

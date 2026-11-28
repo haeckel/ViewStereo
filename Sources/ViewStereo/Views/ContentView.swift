@@ -7,6 +7,7 @@ struct ContentView: View {
     @ObservedObject var vm: ViewStereoViewModel
     @ObservedObject var settings = ViewStereoSettings.shared
     @ObservedObject private var updateManager = StudioUpdateManager.shared
+    @Environment(\.openWindow) private var openWindow
     @State private var isDropTargeted = false
     @State private var isShowingUpdateSheet = false
     @State private var isHoveringWelcomeIcon = false
@@ -245,7 +246,13 @@ struct ContentView: View {
         }) {
             StudioUpdateNotificationSheet(manager: updateManager)
         }
+        .sheet(isPresented: $vm.isShowingMaskEditor) {
+            StereoCardMaskEditorSheet(vm: vm)
+        }
         .onAppear {
+            vm.onOpenWorkbenchRequested = {
+                openWindow(id: "workbench")
+            }
             if updateManager.updateAvailable {
                 isShowingUpdateSheet = true
             } else {
@@ -2013,7 +2020,7 @@ struct ContentView: View {
                         .id("2d3d-\(vm.currentSourceName)-\(vm.isAligned)")
                         .disabled(!vm.isAligned || vm.isProcessing)
                     }
-                    Slider(value: $vm.windowShiftX, in: -200.0...200.0, onEditingChanged: { editing in
+                    Slider(value: $vm.windowShiftX, in: -300.0...300.0, onEditingChanged: { editing in
                         if !editing {
                             vm.applyManualWindowShift()
                         }
@@ -2269,7 +2276,7 @@ struct ContentView: View {
                     .disabled(!vm.isAligned || vm.isProcessing)
                 }
 
-                Slider(value: $vm.windowShiftX, in: -200.0...200.0, onEditingChanged: { editing in
+                Slider(value: $vm.windowShiftX, in: -300.0...300.0, onEditingChanged: { editing in
                     if !editing {
                         vm.applyManualWindowShift()
                     }
@@ -2322,6 +2329,21 @@ struct ContentView: View {
                                 .appSystemFont(size: 10, weight: .semibold)
                                 .foregroundColor(.brightBlue)
                         }
+                    }
+                    if vm.hasOriginalCardMount {
+                        Button {
+                            openWindow(id: "workbench")
+                        } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: "wand.and.stars.inverse")
+                                Text("1-Click Mask Edit")
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .tint(.brightBlue)
+                        .disabled(vm.isProcessing)
                     }
                     Picker("Mount Style", selection: $vm.cardMountPreset) {
                         ForEach(StereoCardMountPreset.allCases) { preset in
@@ -2831,6 +2853,22 @@ struct ContentView: View {
                         .toggleStyle(.switch)
                         .tint(.brightPurple)
                         .disabled(vm.stereoCardMode == .off)
+
+                    if vm.hasOriginalCardMount && vm.stereoCardMode != .off {
+                        Button {
+                            openWindow(id: "workbench")
+                        } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: "wand.and.stars.inverse")
+                                Text("1-Click Mask Edit")
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .tint(.brightPurple)
+                        .disabled(vm.isProcessing)
+                    }
 
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Card Frame")

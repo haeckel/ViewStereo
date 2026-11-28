@@ -38,7 +38,10 @@ scratch/
 scratch_*.jpg
 scratch_*.png
 ViewStereo_Output/
+dataset_3class/
 学習用データ/
+学習用データ_重複除外/
+要補正_top40/
 再学習用データ/
 test/
 test2/
@@ -52,3 +55,12 @@ ViewStereo.app/
 Sources/ViewStereo/Resources/StereoColorizer.mlmodelc/
 tools/StereoColorizer.mlpackage/
 tools/colorizer_dataset/
+
+学習用データ2/
+tools/StereoCardSeg_v3.mlpackage/
+tools/stereo_card_seg_v3_best.pt
+tools/_archive/
+tools/val_preview_v3/
+tools/split_manifest.json
+tools/v3_regression_report.csv
+tools/v3_regression_report.json

@@ -750,13 +750,14 @@ public enum StereoCardMountAnalyzer {
             if e < bestCutErr { bestCutErr = e; bestCut = .rounded; bestCornerRatio = r; bestArchRatio = 0.0 }
         }
 
-        // 2変数アーチ粗探索 (archDropRatio ∈ [0.08...0.42], archExponent ∈ [1.7...2.8])
-        let expCandidates = [1.7, 1.9, 2.0, 2.2, 2.4, 2.6, 2.8]
+        // 2変数アーチ粗探索 (archDropRatio ∈ [0.10...0.38], archExponent ∈ [2.0...2.8])
+        // 指数 q < 2.0 は尖頭・放物線アーチ（とんがりすぎ）になるため 2.0 以上の円弧・超楕円に限定
+        let expCandidates = [2.0, 2.2, 2.4, 2.6, 2.8]
         var coarseBestErr = Double.greatestFiniteMagnitude
         var coarseBestHa = 0.16
         var coarseBestExp = 2.2
         for expVal in expCandidates {
-            for ha in stride(from: 0.08, through: 0.42, by: 0.02) {
+            for ha in stride(from: 0.10, through: 0.38, by: 0.02) {
                 let e = upperCutError(cut: .arch, ratio: ha, exp: expVal) + 0.020
                 if e < coarseBestErr {
                     coarseBestErr = e
@@ -766,8 +767,8 @@ public enum StereoCardMountAnalyzer {
             }
         }
         // 最良周辺の精密探索
-        let fineLo = max(0.06, coarseBestHa - 0.02)
-        let fineHi = min(0.45, coarseBestHa + 0.02)
+        let fineLo = max(0.08, coarseBestHa - 0.02)
+        let fineHi = min(0.40, coarseBestHa + 0.02)
         for ha in stride(from: fineLo, through: fineHi, by: 0.005) {
             let e = upperCutError(cut: .arch, ratio: ha, exp: coarseBestExp) + 0.020
             if e < coarseBestErr {
